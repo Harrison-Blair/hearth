@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from assistant.llm.base import LLMProvider
@@ -36,6 +37,18 @@ _DURATION_RE = re.compile(
 
 # Prefixes peeled off (longest first) to recover the bare reminder message.
 _MESSAGE_PREFIXES = ("remind me to", "remind me", "to")
+
+
+@dataclass
+class ManagementAction:
+    """A parsed request to change an existing reminder. ``action`` is "cancel",
+    "reschedule", "rename", or "none" (when the target/intent couldn't be read)."""
+
+    action: str
+    target_index: int | None = None
+    new_at_time: str | None = None
+    new_delay_seconds: float | None = None
+    new_message: str | None = None
 
 
 def parse_duration(text: str) -> float | None:
@@ -114,12 +127,19 @@ async def _extract_via_llm(
     if not message:
         return None
 
-    delay = data.get("delay_seconds")
-    if isinstance(delay, (int, float)) and delay > 0:
-        return now.timestamp() + float(delay), message
-
-    due = _next_occurrence(now, data.get("at_time"))
+    due = resolve_time(
+        now, delay_seconds=data.get("delay_seconds"), at_time=data.get("at_time")
+    )
     return (due, message) if due is not None else None
+
+
+def resolve_time(
+    now: datetime, *, delay_seconds: float | None, at_time: str | None
+) -> float | None:
+    """Epoch for a relative delay or an absolute clock time, or None for neither."""
+    if isinstance(delay_seconds, (int, float)) and delay_seconds > 0:
+        return now.timestamp() + float(delay_seconds)
+    return _next_occurrence(now, at_time)
 
 
 def _next_occurrence(now: datetime, at_time: str | None) -> float | None:
@@ -133,3 +153,54 @@ def _next_occurrence(now: datetime, at_time: str | None) -> float | None:
     if target <= now:
         target += timedelta(days=1)
     return target.timestamp()
+
+
+async def parse_management(
+    text: str, pending_descriptions: list[str], llm: LLMProvider, now: datetime
+) -> ManagementAction:
+    """Read a cancel/reschedule/rename request against the *current* pending list.
+
+    The list is passed in soonest-first (1-based), so the LLM can resolve both
+    positional ("the first one") and message ("the call-mom one") targets to an
+    index. Returns ``action="none"`` on any LLM/JSON failure (graceful)."""
+    numbered = "\n".join(f"{i}. {d}" for i, d in enumerate(pending_descriptions, 1))
+    prompt = (
+        f"The current local time is {now:%Y-%m-%d %H:%M (%A)}.\n"
+        "The user has these pending reminders (1-based, soonest first):\n"
+        f"{numbered}\n"
+        "Decide what to do with them based on the request.\n"
+        "Reply with ONLY a JSON object: "
+        '{"action": "<cancel|reschedule|rename|none>", '
+        '"target_index": <the number from the list, or null>, '
+        '"new_delay_seconds": <int or null>, "new_at_time": "<HH:MM 24-hour or null>", '
+        '"new_message": "<new reminder text, or null>"}.\n'
+        "Rules: target_index identifies which reminder, by position or by what it is "
+        'about. Use action "reschedule" with a new time (new_delay_seconds for a '
+        'relative duration, new_at_time for a clock time) to change when it fires; '
+        '"rename" with new_message to change what it says; "cancel" to delete it. Use '
+        '"none" if you cannot tell which reminder is meant.\n'
+        'Example: "cancel the first one" -> '
+        '{"action": "cancel", "target_index": 1, "new_delay_seconds": null, '
+        '"new_at_time": null, "new_message": null}\n'
+        'Example: "move my call-mom reminder to 6 pm" -> '
+        '{"action": "reschedule", "target_index": 2, "new_delay_seconds": null, '
+        '"new_at_time": "18:00", "new_message": null}\n'
+        f'Request: "{text}"'
+    )
+    try:
+        data = json.loads(await llm.complete(prompt, json=True))
+    except Exception as exc:  # noqa: BLE001 - any LLM/JSON failure -> graceful none
+        log.warning("LLM reminder management parse failed: %s", exc)
+        return ManagementAction(action="none")
+
+    action = data.get("action")
+    if action not in ("cancel", "reschedule", "rename"):
+        return ManagementAction(action="none")
+    index = data.get("target_index")
+    return ManagementAction(
+        action=action,
+        target_index=int(index) if isinstance(index, int) else None,
+        new_at_time=data.get("new_at_time"),
+        new_delay_seconds=data.get("new_delay_seconds"),
+        new_message=(data.get("new_message") or None),
+    )

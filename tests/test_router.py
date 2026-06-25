@@ -32,6 +32,22 @@ async def test_reminder_keyphrases_disambiguate():
     assert (await router.route("do I have any reminders")).type == "list_reminders"
 
 
+async def test_manage_reminders_disambiguate():
+    # Mirror app.py order: create, then manage, then list.
+    router = KeyphraseRouter()
+    router.add("reminder", "remind me", "set a reminder")
+    router.add("manage_reminders", "cancel", "clear", "delete", "forget", "remove",
+               "change my", "change the", "update my", "reschedule", "move my", "rename")
+    router.add("list_reminders", "my reminders", "any reminders", "have reminders")
+
+    # "cancel my reminders" contains "my reminders" too, but manage is registered first.
+    assert (await router.route("cancel my reminders")).type == "manage_reminders"
+    # "remind me ..." wins for creation even when it mentions cancelling.
+    assert (await router.route("remind me to cancel the call")).type == "reminder"
+    assert (await router.route("reschedule the dentist")).type == "manage_reminders"
+    assert (await router.route("what are my reminders")).type == "list_reminders"
+
+
 async def test_clock_keyphrases_route_to_clock_intents():
     router = KeyphraseRouter()
     router.add("time", "what time", "the time")

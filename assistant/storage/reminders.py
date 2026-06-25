@@ -70,5 +70,29 @@ class ReminderStore:
         self._conn.execute("UPDATE reminders SET fired = 1 WHERE id = ?", (reminder_id,))
         self._conn.commit()
 
+    def delete(self, reminder_id: int) -> None:
+        self._conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+        self._conn.commit()
+
+    def delete_pending(self, now: float) -> int:
+        """Delete every unfired future reminder; return how many were removed."""
+        cur = self._conn.execute(
+            "DELETE FROM reminders WHERE fired = 0 AND due_at > ?", (now,)
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    def update_due(self, reminder_id: int, due_at: float) -> None:
+        self._conn.execute(
+            "UPDATE reminders SET due_at = ? WHERE id = ?", (due_at, reminder_id)
+        )
+        self._conn.commit()
+
+    def update_speech(self, reminder_id: int, speech: str) -> None:
+        self._conn.execute(
+            "UPDATE reminders SET speech = ? WHERE id = ?", (speech, reminder_id)
+        )
+        self._conn.commit()
+
     def close(self) -> None:
         self._conn.close()

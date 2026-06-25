@@ -7,12 +7,19 @@ it when due), and confirms. A timer is just an anonymous reminder that announces
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Callable
 
 from assistant.core.events import Command, Intent, SkillResult
 from assistant.llm.base import LLMProvider
-from assistant.nlu.timespec import extract_reminder, humanize, parse_duration
+from assistant.nlu.timespec import (
+    extract_reminder,
+    humanize,
+    parse_duration,
+    parse_management,
+    resolve_time,
+)
 from assistant.skills.base import Skill
 from assistant.storage.reminders import Reminder, ReminderStore
 
@@ -23,7 +30,7 @@ def _local_now() -> datetime:
 
 class ReminderSkill(Skill):
     name = "reminder"
-    intents = {"reminder", "timer", "list_reminders"}
+    intents = {"reminder", "timer", "list_reminders", "manage_reminders"}
 
     def __init__(
         self,
@@ -40,6 +47,8 @@ class ReminderSkill(Skill):
             return self._handle_timer(cmd.text)
         if intent.type == "list_reminders":
             return self._handle_list()
+        if intent.type == "manage_reminders":
+            return await self._handle_manage(cmd.text)
         return await self._handle_reminder(cmd.text)
 
     def _handle_list(self) -> SkillResult:
@@ -56,12 +65,17 @@ class ReminderSkill(Skill):
         return SkillResult(f"You have {len(items)} {noun}: {listing}.")
 
     @staticmethod
-    def _describe(reminder: Reminder, now_ts: float) -> str:
-        when = humanize(reminder.due_at - now_ts)
+    def _message_of(reminder: Reminder) -> str | None:
+        """The bare reminder text, or None for a timer (speech not prefixed)."""
         if reminder.speech.startswith("Reminder: "):
-            message = reminder.speech[len("Reminder: ") :].rstrip(".")
-            return f"{message} {when}"
-        return f"a timer {when}"  # speech is "Your timer is done."
+            return reminder.speech[len("Reminder: ") :].rstrip(".")
+        return None  # speech is "Your timer is done."
+
+    @classmethod
+    def _describe(cls, reminder: Reminder, now_ts: float) -> str:
+        when = humanize(reminder.due_at - now_ts)
+        message = cls._message_of(reminder)
+        return f"{message} {when}" if message is not None else f"a timer {when}"
 
     def _handle_timer(self, text: str) -> SkillResult:
         seconds = parse_duration(text)
@@ -87,3 +101,66 @@ class ReminderSkill(Skill):
         return SkillResult(
             f"Okay, I'll remind you to {message} {humanize(due_at - now.timestamp())}."
         )
+
+    _CANCEL_WORDS = ("cancel", "clear", "delete", "forget", "remove")
+    # Whole-word match so "all" doesn't fire inside "call mom".
+    _BULK_RE = re.compile(r"\b(all|everything|every|them all)\b")
+
+    @classmethod
+    def _is_bulk_cancel(cls, text: str) -> bool:
+        lowered = text.lower()
+        return any(c in lowered for c in cls._CANCEL_WORDS) and bool(
+            cls._BULK_RE.search(lowered)
+        )
+
+    async def _handle_manage(self, text: str) -> SkillResult:
+        now = self._now()
+        now_ts = now.timestamp()
+        pending = self._store.pending(now_ts)
+        if not pending:
+            return SkillResult("You don't have any reminders to cancel or change.")
+
+        if self._is_bulk_cancel(text):
+            n = self._store.delete_pending(now_ts)
+            noun = "reminder" if n == 1 else "reminders"
+            return SkillResult(f"Okay, I've cancelled all {n} of your {noun}.")
+
+        action = await parse_management(
+            text, [self._describe(r, now_ts) for r in pending], self._llm, now
+        )
+        if action.target_index is None or not (1 <= action.target_index <= len(pending)):
+            return SkillResult(
+                "I couldn't tell which reminder you meant.", success=False
+            )
+        target = pending[action.target_index - 1]
+        message = self._message_of(target)
+
+        if action.action == "cancel":
+            self._store.delete(target.id)
+            if message is None:
+                return SkillResult("Okay, I've cancelled the timer.")
+            return SkillResult(f"Okay, I've cancelled your reminder to {message}.")
+
+        if action.action == "reschedule":
+            due = resolve_time(
+                now,
+                delay_seconds=action.new_delay_seconds,
+                at_time=action.new_at_time,
+            )
+            if due is None:
+                return SkillResult(
+                    "Sorry, I didn't catch the new time.", success=False
+                )
+            self._store.update_due(target.id, due)
+            label = message if message is not None else "the timer"
+            return SkillResult(
+                f"Okay, I'll remind you to {label} {humanize(due - now_ts)} instead."
+            )
+
+        # rename
+        if not action.new_message:
+            return SkillResult(
+                "I couldn't tell which reminder you meant.", success=False
+            )
+        self._store.update_speech(target.id, f"Reminder: {action.new_message}.")
+        return SkillResult(f"Okay, that reminder now says {action.new_message}.")

@@ -1,7 +1,13 @@
 import json
 from datetime import datetime
 
-from assistant.nlu.timespec import extract_reminder, humanize, parse_duration
+from assistant.nlu.timespec import (
+    extract_reminder,
+    humanize,
+    parse_duration,
+    parse_management,
+    resolve_time,
+)
 
 NOW = datetime(2026, 6, 25, 15, 0, 0).astimezone()
 
@@ -66,3 +72,46 @@ async def test_none_on_bad_json():
 async def test_none_when_no_time_found():
     llm = FakeLLM(json.dumps({"delay_seconds": None, "at_time": None, "message": "x"}))
     assert await extract_reminder("remind me to do a thing", llm, NOW) is None
+
+
+def test_resolve_time_delay_and_clock():
+    assert resolve_time(NOW, delay_seconds=300, at_time=None) == NOW.timestamp() + 300
+    clock = resolve_time(NOW, delay_seconds=None, at_time="17:00")
+    assert clock == NOW.replace(hour=17, minute=0, second=0, microsecond=0).timestamp()
+    assert resolve_time(NOW, delay_seconds=None, at_time=None) is None
+    assert resolve_time(NOW, delay_seconds=0, at_time=None) is None
+
+
+async def test_parse_management_maps_canned_json():
+    llm = FakeLLM(
+        json.dumps(
+            {
+                "action": "reschedule",
+                "target_index": 2,
+                "new_delay_seconds": None,
+                "new_at_time": "18:00",
+                "new_message": None,
+            }
+        )
+    )
+    action = await parse_management(
+        "move my call-mom reminder to 6 pm", ["a timer in 1 minute", "call mom in 5 minutes"], llm, NOW
+    )
+    assert action.action == "reschedule"
+    assert action.target_index == 2
+    assert action.new_at_time == "18:00"
+    # The pending list is embedded in the prompt so the LLM can resolve the target.
+    assert "1. a timer in 1 minute" in llm.calls[0]
+    assert "2. call mom in 5 minutes" in llm.calls[0]
+
+
+async def test_parse_management_bad_json_is_none_action():
+    action = await parse_management("cancel something", ["call mom in 5 minutes"], FakeLLM("not json"), NOW)
+    assert action.action == "none"
+    assert action.target_index is None
+
+
+async def test_parse_management_unknown_action_is_none():
+    llm = FakeLLM(json.dumps({"action": "frobnicate", "target_index": 1}))
+    action = await parse_management("do something weird", ["call mom in 5 minutes"], llm, NOW)
+    assert action.action == "none"
