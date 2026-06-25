@@ -14,6 +14,13 @@ import sounddevice as sd
 
 log = logging.getLogger(__name__)
 
+# Virtual devices that follow the system default sink/source AND resample to
+# arbitrary rates. Preferred for auto-detection so playback/capture "just works"
+# regardless of what raw hardware rate a device exposes (desktop + Pi alike).
+# pulse/pipewire (the PortAudio<->PipeWire bridges) reliably track the system
+# default source; the bare ALSA "default" PCM can route elsewhere, so it's last.
+PREFERRED_DEFAULTS = ("pulse", "pipewire", "default")
+
 
 @dataclass
 class DeviceInfo:
@@ -27,22 +34,29 @@ class DeviceInfo:
 def _resolve(spec: str | int | None, kind: str) -> DeviceInfo:
     """Resolve a config spec (None | index | name substring) to a device."""
     channel_key = f"max_{kind}_channels"
+    devices = sd.query_devices()
 
     if spec is None:
-        idx = sd.default.device[0 if kind == "input" else 1]
-        if idx is None or idx < 0:
-            # No default registered; fall back to the first capable device.
-            for i, dev in enumerate(sd.query_devices()):
-                if dev[channel_key] > 0:
+        # Prefer a resampling virtual default (pulse/pipewire/default).
+        for name in PREFERRED_DEFAULTS:
+            for i, dev in enumerate(devices):
+                if dev["name"].lower() == name and dev[channel_key] > 0:
                     return DeviceInfo(i, dev["name"])
-            raise RuntimeError(f"no {kind} device available")
-        return DeviceInfo(idx, sd.query_devices(idx)["name"])
+        # Otherwise PortAudio's registered default for this direction.
+        idx = sd.default.device[0 if kind == "input" else 1]
+        if idx is not None and idx >= 0:
+            return DeviceInfo(idx, sd.query_devices(idx)["name"])
+        # Last resort: first capable device.
+        for i, dev in enumerate(devices):
+            if dev[channel_key] > 0:
+                return DeviceInfo(i, dev["name"])
+        raise RuntimeError(f"no {kind} device available")
 
     if isinstance(spec, int):
         return DeviceInfo(spec, sd.query_devices(spec)["name"])
 
     needle = spec.lower()
-    for i, dev in enumerate(sd.query_devices()):
+    for i, dev in enumerate(devices):
         if needle in dev["name"].lower() and dev[channel_key] > 0:
             return DeviceInfo(i, dev["name"])
     raise ValueError(f"no {kind} device matching {spec!r}")

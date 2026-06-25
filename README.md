@@ -31,7 +31,20 @@ pytest                          # run tests
 ```
 
 Per-phase heavy/native dependencies are installed as each phase lands, e.g.
-`pip install -e ".[tts]"` (Piper), `.[wake]`, `.[stt]`, `.[scheduling]`.
+`pip install -e ".[tts]"` (Piper), `.[wake]`, `.[stt]`, `.[vad]`, `.[scheduling]`.
+
+**Wake word (openWakeWord):** it hard-pins `tflite-runtime`, which has no
+Python 3.12 wheel. We run the ONNX backend instead, so install it without deps
+and download the stock models:
+
+```bash
+pip install -e ".[wake]"                       # onnxruntime + requests
+pip install "openwakeword==0.6.0" --no-deps    # ONNX backend, skip tflite pin
+python -c "import openwakeword.utils as u; u.download_models(['hey_jarvis'])"
+```
+
+The stock `hey_jarvis` model bootstraps voice-in until the custom
+`hey assistant` model is trained (Phase 2a).
 
 ### System prerequisites
 

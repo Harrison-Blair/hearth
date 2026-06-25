@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
 
 from assistant.core.events import WakeEvent
 
 
 class WakeDetector(ABC):
     @abstractmethod
-    def stream(self, frames: AsyncIterator[bytes]) -> AsyncIterator[WakeEvent]:
-        """Consume audio frames and yield a WakeEvent on each activation."""
+    def process(self, frame: bytes) -> WakeEvent | None:
+        """Feed one audio frame; return a WakeEvent if the wake word fired."""
+
+    @abstractmethod
+    def reset(self) -> None:
+        """Clear internal state after a detection (avoids immediate re-trigger)."""

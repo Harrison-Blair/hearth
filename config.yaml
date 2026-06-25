@@ -11,12 +11,13 @@ audio:
   sample_rate: 16000
   channels: 1
   block_size: 1280        # 80ms frames at 16kHz (openWakeWord window)
+  output_volume: 0.5      # 0.5 = half volume; 1.0 = full
 
 wake:
   phrase: "hey assistant"
   model_path: null        # path to trained hey_assistant.onnx (Phase 2a)
   model_name: "hey_jarvis"  # stock bootstrap model until trained one exists
-  threshold: 0.5
+  threshold: 0.6
 
 stt:
   model: "base.en"

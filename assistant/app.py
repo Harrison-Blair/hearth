@@ -1,8 +1,8 @@
 """Daemon entrypoint.
 
-Boots, loads config, sets up logging, resolves audio devices, and (Phase 1)
-speaks a greeting through the configured speaker. Later phases wire the full
-wake -> STT -> route -> LLM -> TTS pipeline here.
+Boots, loads config, resolves audio devices, speaks a greeting, then runs the
+voice-in pipeline: wake word -> record -> transcribe -> log. Later phases add
+routing, skills, and spoken responses.
 """
 
 from __future__ import annotations
@@ -11,14 +11,18 @@ import asyncio
 import logging
 
 from assistant.audio.devices import DeviceSelection, select_devices
-from assistant.audio.sounddevice_io import SoundDeviceOut
+from assistant.audio.recorder import VadRecorder
+from assistant.audio.sounddevice_io import SoundDeviceIn, SoundDeviceOut
 from assistant.core.config import Config
 from assistant.core.logging import setup_logging
+from assistant.core.pipeline import VoicePipeline
+from assistant.stt.faster_whisper_stt import FasterWhisperSTT
 from assistant.tts.piper_tts import PiperTTS
+from assistant.wake.openwakeword_detector import OpenWakeWordDetector
 
 log = logging.getLogger("assistant")
 
-GREETING = "Hello, I'm your personal assistant. Phase one is working."
+GREETING = "Hello, I'm your personal assistant. I'm listening."
 
 
 def main() -> None:
@@ -42,19 +46,41 @@ def main() -> None:
         log.error("Audio device selection failed: %s", exc)
         return
 
-    asyncio.run(_greet(config, devices))
-    log.info("Boot complete. Exiting.")
+    try:
+        asyncio.run(_run(config, devices))
+    except KeyboardInterrupt:
+        log.info("Shutting down.")
 
 
-async def _greet(config: Config, devices: DeviceSelection) -> None:
-    if not config.tts.model_path:
+async def _run(config: Config, devices: DeviceSelection) -> None:
+    # Voice out + greeting.
+    if config.tts.model_path:
+        tts = PiperTTS(config.tts.model_path)
+        out = SoundDeviceOut(
+            devices.output.index, tts.sample_rate, volume=config.audio.output_volume
+        )
+        log.info("Speaking greeting: %r", GREETING)
+        await out.play(await tts.synthesize(GREETING))
+    else:
         log.warning("No TTS model configured (tts.model_path); skipping greeting")
-        return
-    tts = PiperTTS(config.tts.model_path)
-    out = SoundDeviceOut(devices.output.index, tts.sample_rate)
-    log.info("Speaking greeting: %r", GREETING)
-    audio = await tts.synthesize(GREETING)
-    await out.play(audio)
+
+    # Voice in: wake -> record -> transcribe.
+    detector = OpenWakeWordDetector(
+        config.wake.model_path, config.wake.model_name, config.wake.threshold
+    )
+    stt = FasterWhisperSTT(
+        config.stt.model, config.stt.compute_type, config.stt.language
+    )
+    audio_in = SoundDeviceIn(
+        devices.input.index,
+        sample_rate=config.audio.sample_rate,
+        block_size=config.audio.block_size,
+        channels=config.audio.channels,
+    )
+    recorder = VadRecorder(sample_rate=config.audio.sample_rate)
+
+    pipeline = VoicePipeline(audio_in, detector, recorder, stt)
+    await pipeline.run()
 
 
 if __name__ == "__main__":

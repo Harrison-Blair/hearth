@@ -18,6 +18,7 @@ class AudioConfig(BaseModel):
     sample_rate: int = 16000
     channels: int = 1
     block_size: int = 1280
+    output_volume: float = 1.0  # linear gain applied to playback (0.0-1.0+)
 
 
 class WakeConfig(BaseModel):
