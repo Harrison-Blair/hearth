@@ -18,6 +18,7 @@ from assistant.core.pipeline import VoicePipeline
 from assistant.llm.ollama_provider import OllamaProvider
 from assistant.nlu.keyphrase_router import KeyphraseRouter
 from assistant.skills.base import SkillRegistry
+from assistant.skills.clock import ClockSkill
 from assistant.skills.general import GeneralSkill
 from assistant.stt.faster_whisper_stt import FasterWhisperSTT
 from assistant.tts.piper_tts import PiperTTS
@@ -77,7 +78,10 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
             config.llm.model,
         )
     router = KeyphraseRouter(default_intent="general")
+    router.add("time", "what time", "the time")
+    router.add("date", "what day", "what's the date", "the date", "today's date")
     registry = SkillRegistry()
+    registry.register(ClockSkill())
     registry.register(GeneralSkill(llm, config.llm.system_prompt), default=True)
 
     # Greeting.

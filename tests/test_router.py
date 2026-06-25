@@ -18,3 +18,16 @@ async def test_first_registered_match_wins():
     router.add("a", "foo")
     router.add("b", "bar")
     assert (await router.route("foo and bar")).type == "a"
+
+
+async def test_clock_keyphrases_route_to_clock_intents():
+    router = KeyphraseRouter()
+    router.add("time", "what time", "the time")
+    router.add("date", "what day", "what's the date", "the date", "today's date")
+
+    assert (await router.route("hey what time is it")).type == "time"
+    assert (await router.route("do you have the time")).type == "time"
+    assert (await router.route("what's the date today")).type == "date"
+    assert (await router.route("what day is it")).type == "date"
+    # An unrelated question still falls through to the LLM.
+    assert (await router.route("what is the capital of France")).type == "general"

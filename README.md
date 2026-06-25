@@ -17,9 +17,10 @@ transcribe (faster-whisper) → route (keyphrase) → answer (local LLM via Olla
 speak (Piper). Everything runs locally. Earlier phases delivered the scaffolding,
 contracts, typed config, audio device auto-detection, and local TTS voice-out.
 
-The router is currently keyphrase-only (everything falls back to a `general`
-LLM-answer skill); the LLM-classifier tier and `AudioArbiter` land once a second
-skill / audio producer makes them necessary.
+Skills so far: `ClockSkill` (time/date, via keyphrase routing) and a `general`
+LLM-answer fallback. The router is keyphrase-only; the LLM-classifier tier and
+`AudioArbiter` land once skill ambiguity / proactive audio makes them necessary
+(timers and reminders need that machinery, so they ride with the scheduling phase).
 
 ## Setup
 
