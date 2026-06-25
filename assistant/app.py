@@ -92,6 +92,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     router.add("date", "what day", "what's the date", "the date", "today's date")
     router.add("timer", "set a timer", "set timer", "timer for")
     router.add("reminder", "remind me", "set a reminder")
+    router.add("list_reminders", "my reminders", "any reminders", "have reminders")
     registry = SkillRegistry()
     registry.register(ClockSkill())
     registry.register(ReminderSkill(store, llm))

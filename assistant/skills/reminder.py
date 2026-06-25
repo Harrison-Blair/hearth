@@ -14,7 +14,7 @@ from assistant.core.events import Command, Intent, SkillResult
 from assistant.llm.base import LLMProvider
 from assistant.nlu.timespec import extract_reminder, humanize, parse_duration
 from assistant.skills.base import Skill
-from assistant.storage.reminders import ReminderStore
+from assistant.storage.reminders import Reminder, ReminderStore
 
 
 def _local_now() -> datetime:
@@ -23,7 +23,7 @@ def _local_now() -> datetime:
 
 class ReminderSkill(Skill):
     name = "reminder"
-    intents = {"reminder", "timer"}
+    intents = {"reminder", "timer", "list_reminders"}
 
     def __init__(
         self,
@@ -38,7 +38,30 @@ class ReminderSkill(Skill):
     async def handle(self, cmd: Command, intent: Intent) -> SkillResult:
         if intent.type == "timer":
             return self._handle_timer(cmd.text)
+        if intent.type == "list_reminders":
+            return self._handle_list()
         return await self._handle_reminder(cmd.text)
+
+    def _handle_list(self) -> SkillResult:
+        now_ts = self._now().timestamp()
+        pending = self._store.pending(now_ts)
+        if not pending:
+            return SkillResult("You don't have any reminders set.")
+        items = [self._describe(r, now_ts) for r in pending]
+        if len(items) == 1:
+            listing = items[0]
+        else:
+            listing = ", ".join(items[:-1]) + ", and " + items[-1]
+        noun = "reminder" if len(items) == 1 else "reminders"
+        return SkillResult(f"You have {len(items)} {noun}: {listing}.")
+
+    @staticmethod
+    def _describe(reminder: Reminder, now_ts: float) -> str:
+        when = humanize(reminder.due_at - now_ts)
+        if reminder.speech.startswith("Reminder: "):
+            message = reminder.speech[len("Reminder: ") :].rstrip(".")
+            return f"{message} {when}"
+        return f"a timer {when}"  # speech is "Your timer is done."
 
     def _handle_timer(self, text: str) -> SkillResult:
         seconds = parse_duration(text)

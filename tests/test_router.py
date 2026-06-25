@@ -20,6 +20,18 @@ async def test_first_registered_match_wins():
     assert (await router.route("foo and bar")).type == "a"
 
 
+async def test_reminder_keyphrases_disambiguate():
+    router = KeyphraseRouter()
+    router.add("timer", "set a timer", "set timer", "timer for")
+    router.add("reminder", "remind me", "set a reminder")
+    router.add("list_reminders", "my reminders", "any reminders", "have reminders")
+
+    assert (await router.route("remind me in 5 minutes to stretch")).type == "reminder"
+    assert (await router.route("set a timer for 5 minutes")).type == "timer"
+    assert (await router.route("what are my reminders")).type == "list_reminders"
+    assert (await router.route("do I have any reminders")).type == "list_reminders"
+
+
 async def test_clock_keyphrases_route_to_clock_intents():
     router = KeyphraseRouter()
     router.add("time", "what time", "the time")

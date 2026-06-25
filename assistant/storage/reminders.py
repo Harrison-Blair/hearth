@@ -57,6 +57,15 @@ class ReminderStore:
         ).fetchall()
         return [Reminder(r["id"], r["due_at"], r["speech"]) for r in rows]
 
+    def pending(self, now: float) -> list[Reminder]:
+        """Unfired reminders still in the future, soonest first (for listing)."""
+        rows = self._conn.execute(
+            "SELECT id, due_at, speech FROM reminders "
+            "WHERE fired = 0 AND due_at > ? ORDER BY due_at",
+            (now,),
+        ).fetchall()
+        return [Reminder(r["id"], r["due_at"], r["speech"]) for r in rows]
+
     def mark_fired(self, reminder_id: int) -> None:
         self._conn.execute("UPDATE reminders SET fired = 1 WHERE id = ?", (reminder_id,))
         self._conn.commit()

@@ -3,6 +3,7 @@ from datetime import datetime
 
 from assistant.core.events import Command, Intent
 from assistant.skills.reminder import ReminderSkill
+from assistant.storage.reminders import ReminderStore
 
 NOW = datetime(2026, 6, 25, 15, 0, 0).astimezone()
 
@@ -67,3 +68,37 @@ async def test_reminder_failure_when_no_time():
     )
     assert not res.success
     assert store.added == []
+
+
+def _list_skill(store):
+    return ReminderSkill(store, FakeLLM(), now=lambda: NOW)
+
+
+async def test_list_when_empty():
+    res = await _list_skill(ReminderStore(":memory:")).handle(
+        Command("what are my reminders"), Intent("list_reminders")
+    )
+    assert res.speech == "You don't have any reminders set."
+
+
+async def test_list_single_reminder():
+    store = ReminderStore(":memory:")
+    store.add(NOW.timestamp() + 600, "Reminder: stretch.", created_at=NOW.timestamp())
+    res = await _list_skill(store).handle(
+        Command("my reminders"), Intent("list_reminders")
+    )
+    assert res.speech == "You have 1 reminder: stretch in 10 minutes."
+    store.close()
+
+
+async def test_list_reminder_and_timer_ordered():
+    store = ReminderStore(":memory:")
+    store.add(NOW.timestamp() + 300, "Reminder: call mom.", created_at=NOW.timestamp())
+    store.add(NOW.timestamp() + 30, "Your timer is done.", created_at=NOW.timestamp())
+    res = await _list_skill(store).handle(
+        Command("do I have any reminders"), Intent("list_reminders")
+    )
+    assert res.speech == (
+        "You have 2 reminders: a timer in 30 seconds, and call mom in 5 minutes."
+    )
+    store.close()
