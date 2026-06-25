@@ -1,0 +1,40 @@
+# Personal assistant configuration.
+# Every device id, model path, and threshold lives here so the Raspberry Pi
+# port is config-only. Values may also be overridden by ASSISTANT_* env vars
+# (nested with a double underscore, e.g. ASSISTANT_LLM__MODEL).
+
+audio:
+  # input/output may be: null (system default), an integer device index,
+  # or a substring of the device name to match.
+  input: null
+  output: null
+  sample_rate: 16000
+  channels: 1
+  block_size: 1280        # 80ms frames at 16kHz (openWakeWord window)
+
+wake:
+  phrase: "hey assistant"
+  model_path: null        # path to trained hey_assistant.onnx (Phase 2a)
+  model_name: "hey_jarvis"  # stock bootstrap model until trained one exists
+  threshold: 0.5
+
+stt:
+  model: "base.en"
+  compute_type: "int8"
+  language: "en"
+
+llm:
+  provider: "ollama"
+  model: "qwen2.5:3b-instruct"
+  host: "http://localhost:11434"
+  timeout: 60.0
+
+tts:
+  voice: "en_US-lessac-medium"
+  model_path: "models/piper/en_US-lessac-medium.onnx"
+
+storage:
+  db_path: "assistant.db"
+
+logging:
+  level: "INFO"

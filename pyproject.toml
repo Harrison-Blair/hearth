@@ -1,0 +1,38 @@
+[project]
+name = "personal-assistant"
+version = "0.1.0"
+description = "Offline-first voice personal assistant"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "pyyaml>=6",
+    "sounddevice>=0.4",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# Per-phase heavy/native deps, installed as each phase lands.
+tts = ["piper-tts"]
+wake = ["openwakeword", "onnxruntime"]
+stt = ["faster-whisper"]
+vad = ["webrtcvad"]
+nlu = ["dateparser"]
+scheduling = ["apscheduler"]
+dev = ["pytest", "pytest-asyncio", "ruff"]
+
+[project.scripts]
+assistant = "assistant.app:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["assistant*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
