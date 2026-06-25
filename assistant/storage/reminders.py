@@ -1,0 +1,65 @@
+"""SQLite-backed store of pending reminders (and timers).
+
+The store is the single source of truth: a reminder lives here until it is fired,
+so it survives a restart. Timestamps are UTC epoch seconds (time.time()), which
+makes ``due`` comparisons timezone-free; only the skill converts a wall-clock
+"5 pm" into an epoch.
+
+All methods are synchronous: each is a single sub-millisecond statement run on the
+event-loop thread, so wrapping them in a thread (which would trip sqlite3's
+check_same_thread) buys nothing.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS reminders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    due_at     REAL    NOT NULL,
+    speech     TEXT    NOT NULL,
+    fired      INTEGER NOT NULL DEFAULT 0,
+    created_at REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_reminders_pending ON reminders (fired, due_at);
+"""
+
+
+@dataclass
+class Reminder:
+    id: int
+    due_at: float
+    speech: str
+
+
+class ReminderStore:
+    def __init__(self, db_path: str) -> None:
+        self._conn = sqlite3.connect(db_path)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.executescript(_SCHEMA)
+        self._conn.commit()
+
+    def add(self, due_at: float, speech: str, *, created_at: float) -> int:
+        cur = self._conn.execute(
+            "INSERT INTO reminders (due_at, speech, created_at) VALUES (?, ?, ?)",
+            (due_at, speech, created_at),
+        )
+        self._conn.commit()
+        return int(cur.lastrowid)
+
+    def due(self, now: float) -> list[Reminder]:
+        rows = self._conn.execute(
+            "SELECT id, due_at, speech FROM reminders "
+            "WHERE fired = 0 AND due_at <= ? ORDER BY due_at",
+            (now,),
+        ).fetchall()
+        return [Reminder(r["id"], r["due_at"], r["speech"]) for r in rows]
+
+    def mark_fired(self, reminder_id: int) -> None:
+        self._conn.execute("UPDATE reminders SET fired = 1 WHERE id = ?", (reminder_id,))
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()

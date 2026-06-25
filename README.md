@@ -17,10 +17,15 @@ transcribe (faster-whisper) → route (keyphrase) → answer (local LLM via Olla
 speak (Piper). Everything runs locally. Earlier phases delivered the scaffolding,
 contracts, typed config, audio device auto-detection, and local TTS voice-out.
 
-Skills so far: `ClockSkill` (time/date, via keyphrase routing) and a `general`
-LLM-answer fallback. The router is keyphrase-only; the LLM-classifier tier and
-`AudioArbiter` land once skill ambiguity / proactive audio makes them necessary
-(timers and reminders need that machinery, so they ride with the scheduling phase).
+Skills so far: `ClockSkill` (time/date), `ReminderSkill` (reminders + timers), and
+a `general` LLM-answer fallback, all via keyphrase routing. Reminders/timers persist
+to SQLite and are spoken **proactively** when due — a background `ReminderScheduler`
+polls the store and announces through the `AudioArbiter`, which serializes the
+announcement against wake-word capture so it can't collide or self-trigger. Reminder
+times are parsed offline by regex for durations ("in 30 seconds") and by the local
+LLM for clock times ("at 5 pm"). Missed reminders (app was off when due) are spoken
+on the next start. The router is still keyphrase-only; the LLM-classifier tier lands
+when skill ambiguity makes it necessary.
 
 ## Setup
 

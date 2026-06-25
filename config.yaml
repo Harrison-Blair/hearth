@@ -13,6 +13,13 @@ audio:
   block_size: 1280        # 80ms frames at 16kHz (openWakeWord window)
   output_volume: 0.5      # 0.5 = half volume; 1.0 = full
 
+recorder:
+  aggressiveness: 2         # WebRTC VAD sensitivity, 0 (lax) - 3 (strict)
+  silence_ms: 800           # trailing silence that ends an utterance
+  max_ms: 10000             # hard cap on utterance length
+  start_timeout_ms: 3000    # give up if no speech starts after wake
+  preroll_frames: 6         # ~0.5s kept before wake to recover a clipped command
+
 wake:
   phrase: "hey assistant"
   model_path: null        # path to trained hey_assistant.onnx (Phase 2a)
@@ -23,12 +30,14 @@ stt:
   model: "base.en"
   compute_type: "int8"
   language: "en"
+  beam_size: 1            # 1 = greedy decode; higher = slower but more accurate
 
 llm:
   provider: "ollama"
   model: "qwen2.5:3b-instruct"
   host: "http://localhost:11434"
   timeout: 60.0
+  health_timeout: 5.0     # shorter timeout for the startup health check
 
 tts:
   voice: "en_US-lessac-medium"
@@ -36,6 +45,9 @@ tts:
 
 storage:
   db_path: "assistant.db"
+
+scheduling:
+  poll_seconds: 1.0       # how often the scheduler checks for due reminders
 
 logging:
   level: "INFO"

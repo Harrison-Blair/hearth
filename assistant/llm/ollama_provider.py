@@ -13,10 +13,17 @@ log = logging.getLogger(__name__)
 
 
 class OllamaProvider(LLMProvider):
-    def __init__(self, model: str, host: str = "http://localhost:11434", timeout: float = 60.0) -> None:
+    def __init__(
+        self,
+        model: str,
+        host: str = "http://localhost:11434",
+        timeout: float = 60.0,
+        health_timeout: float = 5.0,
+    ) -> None:
         self._model = model
         self._host = host.rstrip("/")
         self._timeout = timeout
+        self._health_timeout = health_timeout
 
     async def complete(self, prompt: str, *, system: str | None = None, json: bool = False) -> str:
         payload: dict = {"model": self._model, "prompt": prompt, "stream": False}
@@ -33,7 +40,7 @@ class OllamaProvider(LLMProvider):
 
     async def health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=self._health_timeout) as client:
                 resp = await client.get(f"{self._host}/api/tags")
                 resp.raise_for_status()
                 models = [m["name"] for m in resp.json().get("models", [])]

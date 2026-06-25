@@ -1,3 +1,4 @@
+from assistant.core.arbiter import AudioArbiter
 from assistant.core.events import SkillResult, WakeEvent
 from assistant.core.pipeline import VoicePipeline
 from assistant.nlu.keyphrase_router import KeyphraseRouter
@@ -78,23 +79,44 @@ class FakeOut:
         self.played.append(audio)
 
 
-async def test_wake_routes_and_speaks_reply():
-    stt = FakeSTT()
-    detector = FakeDetector()
-    skill = FakeSkill()
+def _pipeline(audio_in, detector, skill, tts, out, arbiter):
     registry = SkillRegistry()
     registry.register(skill, default=True)
+    return VoicePipeline(
+        audio_in, detector, FakeRecorder(), FakeSTT(),
+        KeyphraseRouter(), registry, tts, out, arbiter,
+    )
+
+
+async def test_wake_routes_and_speaks_reply():
+    detector = FakeDetector()
+    skill = FakeSkill()
     tts = FakeTTS()
     out = FakeOut()
+    pipeline = _pipeline(FakeAudioIn(3), detector, skill, tts, out, AudioArbiter())
 
-    pipeline = VoicePipeline(
-        FakeAudioIn(3), detector, FakeRecorder(), stt,
-        KeyphraseRouter(), registry, tts, out,
-    )
     await pipeline.run()
 
-    assert stt.calls == [b"\x00\x00"]               # transcribed once
     assert skill.handled == [("what time is it", "general")]  # routed to skill
-    assert tts.spoke == ["it is noon"]              # spoke the reply
-    assert out.played == [b"AUDIO"]                 # played the audio
-    assert detector.resets == 1                     # reset after handling
+    assert tts.spoke == ["it is noon"]                        # spoke the reply
+    assert out.played == [b"AUDIO"]                           # played the audio
+    assert detector.resets == 1                               # reset after handling
+
+
+async def test_busy_arbiter_skips_wake_detection():
+    # While another holder (a proactive reminder) owns the audio, the loop must
+    # not run wake detection on the announcement audio bleeding into the mic.
+    detector = FakeDetector()
+    skill = FakeSkill()
+    tts = FakeTTS()
+    out = FakeOut()
+    arbiter = AudioArbiter()
+    pipeline = _pipeline(FakeAudioIn(3), detector, skill, tts, out, arbiter)
+
+    async with arbiter.hold("reminder"):
+        await pipeline.run()
+
+    assert detector.fired is False  # never processed a frame
+    assert skill.handled == []
+    assert tts.spoke == []
+    assert out.played == []

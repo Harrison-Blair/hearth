@@ -13,6 +13,7 @@ import numpy as np
 
 from assistant.audio.base import AudioIn, AudioOut
 from assistant.audio.recorder import VadRecorder
+from assistant.core.arbiter import AudioArbiter
 from assistant.core.events import Command
 from assistant.nlu.router import IntentRouter
 from assistant.skills.base import SkillRegistry
@@ -21,10 +22,6 @@ from assistant.tts.base import TextToSpeech
 from assistant.wake.base import WakeDetector
 
 log = logging.getLogger(__name__)
-
-# ~0.5s of 80ms frames kept before the wake event, so a command spoken
-# immediately after the wake word (clipped by detection latency) is recovered.
-_PREROLL_FRAMES = 6
 
 
 class VoicePipeline:
@@ -38,6 +35,9 @@ class VoicePipeline:
         registry: SkillRegistry,
         tts: TextToSpeech,
         audio_out: AudioOut,
+        arbiter: AudioArbiter,
+        preroll_frames: int = 6,
+        sample_rate: int = 16000,
     ) -> None:
         self._audio_in = audio_in
         self._detector = detector
@@ -47,28 +47,43 @@ class VoicePipeline:
         self._registry = registry
         self._tts = tts
         self._audio_out = audio_out
+        self._arbiter = arbiter
+        # ~0.5s of frames kept before the wake event, so a command spoken
+        # immediately after the wake word (clipped by detection latency) is recovered.
+        self._preroll_frames = preroll_frames
+        self._sample_rate = sample_rate
 
     async def run(self) -> None:
         frames = self._audio_in.stream()
-        preroll: deque[bytes] = deque(maxlen=_PREROLL_FRAMES)
+        preroll: deque[bytes] = deque(maxlen=self._preroll_frames)
         log.info("Listening for wake word...")
         async for frame in frames:
+            # A proactive announcement (a reminder) is playing: don't feed its
+            # audio to the wake detector or it could self-trigger. Keep draining
+            # the mic queue so it doesn't back up.
+            if self._arbiter.busy:
+                preroll.clear()
+                continue
+
             preroll.append(frame)
             event = self._detector.process(frame)
             if event is None:
                 continue
 
             log.info("Wake word detected: %s (%.2f)", event.name, event.score)
-            pcm = await self._recorder.record(frames, prefix=b"".join(preroll))
-            preroll.clear()
-            self._log_capture(pcm)
+            # Own the audio device for the whole turn so a reminder can't play
+            # over the capture or our reply; it waits until we release.
+            async with self._arbiter.hold("pipeline"):
+                pcm = await self._recorder.record(frames, prefix=b"".join(preroll))
+                preroll.clear()
+                self._log_capture(pcm)
 
-            transcript = await self._stt.transcribe(pcm)
-            if transcript:
-                log.info("Heard: %r", transcript)
-                await self._handle(transcript)
-            else:
-                log.info("No speech captured.")
+                transcript = await self._stt.transcribe(pcm)
+                if transcript:
+                    log.info("Heard: %r", transcript)
+                    await self._handle(transcript)
+                else:
+                    log.info("No speech captured.")
 
             self._detector.reset()
             log.info("Listening for wake word...")
@@ -90,8 +105,7 @@ class VoicePipeline:
         audio = await self._tts.synthesize(text)
         await self._audio_out.play(audio)
 
-    @staticmethod
-    def _log_capture(pcm: bytes) -> None:
+    def _log_capture(self, pcm: bytes) -> None:
         samples = np.frombuffer(pcm, dtype=np.int16)
         if not len(samples):
             log.info("Captured 0.0s (silence)")
@@ -99,7 +113,7 @@ class VoicePipeline:
         rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
         log.info(
             "Captured %.1fs (rms=%.0f, peak=%d)",
-            len(samples) / 16000,
+            len(samples) / self._sample_rate,
             rms,
             int(np.abs(samples).max()),
         )
