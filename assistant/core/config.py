@@ -39,6 +39,11 @@ class LlmConfig(BaseModel):
     model: str = "qwen2.5:3b-instruct"
     host: str = "http://localhost:11434"
     timeout: float = 60.0
+    # Answers are spoken aloud, so steer the model toward short, plain replies.
+    system_prompt: str = (
+        "You are a helpful voice assistant. Answers are read aloud, so reply in "
+        "one or two short, plain sentences. No markdown, lists, or emoji."
+    )
 
 
 class TtsConfig(BaseModel):

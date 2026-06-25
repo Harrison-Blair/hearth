@@ -1,8 +1,7 @@
 """Daemon entrypoint.
 
 Boots, loads config, resolves audio devices, speaks a greeting, then runs the
-voice-in pipeline: wake word -> record -> transcribe -> log. Later phases add
-routing, skills, and spoken responses.
+full voice pipeline: wake word -> record -> transcribe -> route -> LLM -> speak.
 """
 
 from __future__ import annotations
@@ -16,6 +15,10 @@ from assistant.audio.sounddevice_io import SoundDeviceIn, SoundDeviceOut
 from assistant.core.config import Config
 from assistant.core.logging import setup_logging
 from assistant.core.pipeline import VoicePipeline
+from assistant.llm.ollama_provider import OllamaProvider
+from assistant.nlu.keyphrase_router import KeyphraseRouter
+from assistant.skills.base import SkillRegistry
+from assistant.skills.general import GeneralSkill
 from assistant.stt.faster_whisper_stt import FasterWhisperSTT
 from assistant.tts.piper_tts import PiperTTS
 from assistant.wake.openwakeword_detector import OpenWakeWordDetector
@@ -53,16 +56,33 @@ def main() -> None:
 
 
 async def _run(config: Config, devices: DeviceSelection) -> None:
-    # Voice out + greeting.
-    if config.tts.model_path:
-        tts = PiperTTS(config.tts.model_path)
-        out = SoundDeviceOut(
-            devices.output.index, tts.sample_rate, volume=config.audio.output_volume
+    if not config.tts.model_path:
+        log.error("No TTS model configured (tts.model_path); cannot speak. Aborting.")
+        return
+
+    # Voice out.
+    tts = PiperTTS(config.tts.model_path)
+    out = SoundDeviceOut(
+        devices.output.index, tts.sample_rate, volume=config.audio.output_volume
+    )
+
+    # LLM + routing + skills.
+    llm = OllamaProvider(config.llm.model, config.llm.host, config.llm.timeout)
+    if not await llm.health():
+        log.warning(
+            "Ollama not ready (host=%s, model=%s); answers will fail until it's up. "
+            "Run `ollama serve` and `ollama pull %s`.",
+            config.llm.host,
+            config.llm.model,
+            config.llm.model,
         )
-        log.info("Speaking greeting: %r", GREETING)
-        await out.play(await tts.synthesize(GREETING))
-    else:
-        log.warning("No TTS model configured (tts.model_path); skipping greeting")
+    router = KeyphraseRouter(default_intent="general")
+    registry = SkillRegistry()
+    registry.register(GeneralSkill(llm, config.llm.system_prompt), default=True)
+
+    # Greeting.
+    log.info("Speaking greeting: %r", GREETING)
+    await out.play(await tts.synthesize(GREETING))
 
     # Voice in: wake -> record -> transcribe.
     detector = OpenWakeWordDetector(
@@ -79,7 +99,9 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     )
     recorder = VadRecorder(sample_rate=config.audio.sample_rate)
 
-    pipeline = VoicePipeline(audio_in, detector, recorder, stt)
+    pipeline = VoicePipeline(
+        audio_in, detector, recorder, stt, router, registry, tts, out
+    )
     await pipeline.run()
 
 

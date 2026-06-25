@@ -11,9 +11,15 @@ lives in `config.yaml`, so the Pi port is config-only.
 
 ## Status
 
-Phase 0 (scaffolding & contracts) complete: typed config, logging, audio device
-auto-detection, and all capability interfaces as stubs. `python -m assistant.app`
-boots, loads config, logs the chosen audio devices, and exits.
+Phase 3 (first full slice) complete: `python -m assistant.app` speaks a greeting,
+then runs the end-to-end loop — wake word (openWakeWord) → record (WebRTC VAD) →
+transcribe (faster-whisper) → route (keyphrase) → answer (local LLM via Ollama) →
+speak (Piper). Everything runs locally. Earlier phases delivered the scaffolding,
+contracts, typed config, audio device auto-detection, and local TTS voice-out.
+
+The router is currently keyphrase-only (everything falls back to a `general`
+LLM-answer skill); the LLM-classifier tier and `AudioArbiter` land once a second
+skill / audio producer makes them necessary.
 
 ## Setup
 
@@ -31,7 +37,7 @@ pytest                          # run tests
 ```
 
 Per-phase heavy/native dependencies are installed as each phase lands, e.g.
-`pip install -e ".[tts]"` (Piper), `.[wake]`, `.[stt]`, `.[vad]`, `.[scheduling]`.
+`pip install -e ".[tts]"` (Piper), `.[wake]`, `.[stt]`, `.[vad]`, `.[llm]`, `.[scheduling]`.
 
 **Wake word (openWakeWord):** it hard-pins `tflite-runtime`, which has no
 Python 3.12 wheel. We run the ONNX backend instead, so install it without deps
@@ -49,12 +55,15 @@ The stock `hey_jarvis` model bootstraps voice-in until the custom
 ### System prerequisites
 
 - **PortAudio** (`sounddevice` backend) — e.g. `pacman -S portaudio` / `apt install libportaudio2`.
-- **Ollama** (local LLM, from Phase 3) — install separately, then:
+- **Ollama** (local LLM, from Phase 3) — install the binary, then pull the model:
   ```bash
-  ollama serve
-  ollama pull qwen2.5:3b-instruct
+  # Arch: sudo pacman -S ollama   |   else: curl -fsSL https://ollama.com/install.sh | sh
+  ollama serve                     # start the daemon (or enable the systemd unit)
+  ollama pull qwen2.5:3b-instruct  # ~2 GB; the model config.yaml expects
+  pip install -e ".[llm]"          # httpx (the async client OllamaProvider uses)
   ```
-  `OllamaProvider` health-checks the daemon and degrades clearly if it is absent.
+  `OllamaProvider` health-checks the daemon at boot and degrades clearly (warns,
+  keeps listening) if it or the model is absent.
 
 ## Configuration
 

@@ -20,6 +20,7 @@ tts = ["piper-tts"]
 wake = ["onnxruntime", "requests"]
 stt = ["faster-whisper"]
 vad = ["webrtcvad", "setuptools<81"]  # webrtcvad imports pkg_resources (removed in setuptools 81)
+llm = ["httpx"]  # async HTTP client for the Ollama provider
 nlu = ["dateparser"]
 scheduling = ["apscheduler"]
 dev = ["pytest", "pytest-asyncio", "ruff"]
