@@ -72,6 +72,10 @@ def split_evenly(total: int, parts: int) -> list[int]:
 # Worker: synthesize one set's share of clips in a thread-pinned subprocess.
 # --------------------------------------------------------------------------- #
 def run_worker(cfg: dict, set_name: str, count: int, threads: int, with_custom: bool) -> None:
+    import logging
+    import warnings
+
+    warnings.filterwarnings("ignore")  # torchaudio "kaiser_window" deprecation et al.
     os.environ["OMP_NUM_THREADS"] = str(threads)  # parent set this too; reassert
     import torch  # imported here, after OMP_NUM_THREADS, so the pool binds to `threads`
 
@@ -79,6 +83,11 @@ def run_worker(cfg: dict, set_name: str, count: int, threads: int, with_custom: 
 
     sys.path.insert(0, cfg["piper_sample_generator_path"])
     from generate_samples import generate_samples  # noqa: E402  (lazy, needs sys.path)
+
+    # generate_samples logs a per-batch DEBUG line per worker; with --stream that's
+    # a flood. The orchestrator's aggregate Stage-1 line covers progress, so keep
+    # workers at WARNING (real failures still surface).
+    logging.getLogger("generate_samples").setLevel(logging.WARNING)
 
     spec = SETS[set_name]
     phrases = cfg["target_phrase"]
@@ -171,15 +180,21 @@ class StageOneProgress:
 
     def _loop(self) -> None:
         start = time.monotonic()
+        start_count = self._count()  # clips already on disk (prior run) — exclude from the rate
+        last_done = -1  # plain (non-tty) path prints a fresh line per poll; only when the count moves
         while not self._stop.wait(self._interval):
             done = self._count()
             if self._progress is not None:
                 self._progress.update(self._task, completed=min(done, self._total))
                 continue
+            if done == last_done:  # nothing new on disk (e.g. workers still loading) — don't reprint
+                continue
+            last_done = done
             elapsed = time.monotonic() - start
+            made = done - start_count  # clips produced this session (the basis for rate/ETA)
             pct = 100.0 * done / self._total if self._total else 0.0
-            if done > 0 and elapsed > 8.0:
-                rate = done / elapsed
+            if made > 0 and elapsed > 8.0:
+                rate = made / elapsed
                 eta = (self._total - done) / rate if rate > 0 else 0
                 console.print(
                     f"    Stage 1: {done}/{self._total} clips ({pct:.0f}%) · "
