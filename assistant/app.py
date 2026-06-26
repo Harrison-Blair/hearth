@@ -59,9 +59,9 @@ def main() -> None:
 
     log.info("Personal assistant booting (v%s)", __import__("assistant").__version__)
     log.info(
-        "Config: wake=%r model=%s | stt=%s | llm=%s@%s | tts=%s",
+        "Config: wake=%r models=%s | stt=%s | llm=%s@%s | tts=%s",
         config.wake.phrase,
-        config.wake.model_path or config.wake.model_name,
+        config.wake.model_refs(),
         config.stt.model,
         config.llm.model,
         config.llm.host,
@@ -151,7 +151,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
 
     # Voice in: wake -> record -> transcribe.
     detector = OpenWakeWordDetector(
-        config.wake.model_path, config.wake.model_name, config.wake.threshold
+        config.wake.model_refs(), config.wake.threshold
     )
     stt = FasterWhisperSTT(
         config.stt.model,

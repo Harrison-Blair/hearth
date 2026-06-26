@@ -1,0 +1,27 @@
+# Wake phrases to train, ONE PER LINE.
+#   - Blank lines and lines starting with '#' are ignored.
+#   - Each phrase trains its own models/wake/<slug>.onnx, is gated, and (on pass)
+#     committed. Re-listing an already-trained phrase just retrains it.
+#
+# Pick distinctive 2+ syllable phrases or names. The model keys on acoustic
+# patterns, so it needs enough unique phonetic content. Multi-word phrases are
+# fine — write them as one line, e.g.  hey assistant
+#
+# AVOID (these false-trigger constantly in normal speech):
+#   - short common words:        go, now, hey, yes, no, ok, up, stop, wait
+#   - one-syllable names:        Sam, Max, Jo, Bo   (too little to key on)
+#   - everyday verbs/nouns:      play, open, light, music, phone, time
+#   - command words you'll say:  start, cancel, next, done, help
+#   - filler / greetings:        um, uh, hi, hello, hey there
+#   - words that sound like a real one: "Mary" vs "marry", "Aria" vs "area"
+# If you want a one-word trigger, prefer a rare/distinctive 2+ syllable name
+# (Jarvis, Athena, Seraphina) and see the one-word tuning note in README.md.
+# Check odd spellings with:  espeak-ng "your word"
+#
+# Edit the list below (delete these examples, add your own), then run:
+#   bash training/train_batch.sh
+#
+# --- your phrases (uncomment / replace) ---
+# jarvis
+# athena
+Penguin

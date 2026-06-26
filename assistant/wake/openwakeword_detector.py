@@ -1,8 +1,9 @@
 """Local wake-word detection via openWakeWord (ONNX runtime).
 
-Loads a custom trained model when ``model_path`` is set, otherwise a stock
-bootstrap model by name (e.g. ``hey_jarvis``) so voice-in works before the
-``hey assistant`` model is trained.
+Loads one or more models (``WakeConfig.model_refs()``): a series of trained
+``.onnx`` paths so several phrases all wake the assistant, a single custom model,
+or a stock bootstrap model by name (e.g. ``hey_jarvis``) before any are trained.
+Any loaded model firing above threshold triggers a wake.
 """
 
 from __future__ import annotations
@@ -19,15 +20,12 @@ log = logging.getLogger(__name__)
 
 
 class OpenWakeWordDetector(WakeDetector):
-    def __init__(
-        self, model_path: str | None, model_name: str, threshold: float
-    ) -> None:
-        model_ref = model_path or model_name
-        self._model = Model(wakeword_models=[model_ref], inference_framework="onnx")
+    def __init__(self, model_refs: list[str], threshold: float) -> None:
+        self._model = Model(wakeword_models=model_refs, inference_framework="onnx")
         self._threshold = threshold
         self._keys = list(self._model.models.keys())
         log.info(
-            "Wake detector ready: model=%s threshold=%.2f", self._keys, threshold
+            "Wake detector ready: models=%s threshold=%.2f", self._keys, threshold
         )
 
     def process(self, frame: bytes) -> WakeEvent | None:

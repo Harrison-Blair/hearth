@@ -33,8 +33,16 @@ class RecorderConfig(BaseModel):
 class WakeConfig(BaseModel):
     phrase: str = "hey assistant"
     model_path: str | None = None
+    model_paths: list[str] | None = None  # load a series of models (any wakes)
     model_name: str = "hey_jarvis"
     threshold: float = 0.5
+
+    def model_refs(self) -> list[str]:
+        """Models to load, most specific first: a series, else a single path,
+        else the stock bootstrap name."""
+        if self.model_paths:
+            return self.model_paths
+        return [self.model_path] if self.model_path else [self.model_name]
 
 
 class SttConfig(BaseModel):

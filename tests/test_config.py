@@ -9,6 +9,21 @@ def test_model_defaults():
     assert WebSearchConfig().result_count == 3
 
 
+def test_wake_model_refs_precedence():
+    # Stock fallback when nothing is configured.
+    assert WakeConfig().model_refs() == ["hey_jarvis"]
+    # A single custom path wins over the stock name.
+    assert WakeConfig(model_path="a.onnx").model_refs() == ["a.onnx"]
+    # A series wins over everything (the multi-phrase case).
+    cfg = WakeConfig(model_path="a.onnx", model_paths=["a.onnx", "b.onnx"])
+    assert cfg.model_refs() == ["a.onnx", "b.onnx"]
+
+
+def test_wake_model_paths_env_override(monkeypatch):
+    monkeypatch.setenv("ASSISTANT_WAKE__MODEL_PATHS", '["x.onnx", "y.onnx"]')
+    assert Config().wake.model_refs() == ["x.onnx", "y.onnx"]
+
+
 def test_web_search_config_loads():
     cfg = Config()
     assert cfg.web_search.provider == "ddgs"

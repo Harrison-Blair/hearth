@@ -76,6 +76,62 @@ lines. Each phrase gets its own clips/model, so runs never clobber each other.
 - espeak handles most names; verify pronunciation for unusual spellings with
   `espeak-ng "your word"`.
 
+## Training a series of phrases
+
+To train several wake words in one go — train, test, and commit each — list the
+phrases in `training/phrases.txt` (one per line; blank lines and `#` comments
+ignored) and run:
+
+```bash
+bash training/train_batch.sh                       # phrases from training/phrases.txt
+bash training/train_batch.sh "jarvis" "athena"     # or phrases as args
+bash training/train_batch.sh --smoke               # fast end-to-end dry run (tiny models)
+bash training/train_batch.sh --no-commit           # train + test only, no commits
+```
+
+For each phrase it runs `train.sh`, then **gates** the model with `evaluate.py`:
+
+- true-positive rate ≥ **90%**, false-positive rate ≤ **1%**, separation > **0**
+  (positives' 10th percentile above backgrounds' 90th).
+- **Pass** → record metrics in `models/wake/models.json` and make **one commit**
+  for that model (`models/wake/<slug>.onnx` + the manifest).
+- **Fail** → print why, **skip the commit**, and continue to the next phrase. The
+  run exits non-zero if any phrase failed, and prints a summary table.
+
+`models/wake/models.json` is the manifest of your trained series. Inspect it with:
+
+```bash
+python training/manifest.py list
+```
+
+The gate thresholds are flags on `evaluate.py` (`--min-tp`, `--max-fp`,
+`--min-separation`) if you need to tune them; `train_batch.sh` evaluates at the
+`config.yaml` wake threshold (0.6).
+
+## Loading several phrases at once
+
+The runtime can load a **series** of models so any of them wakes the assistant —
+`wake.model_paths` in `config.yaml` (a list). Set it from the manifest:
+
+```bash
+python training/manifest.py select "hey assistant" jarvis   # by phrase or slug
+```
+
+This writes `wake.model_paths` into `config.yaml` (preserving comments) and
+verifies the runtime reads exactly those. Restart the assistant; the boot log
+lists every loaded model key, and speaking any of the phrases triggers a wake.
+
+Equivalent without editing the file (e.g. for a one-off run):
+
+```bash
+ASSISTANT_WAKE__MODEL_PATHS='["models/wake/hey_assistant.onnx","models/wake/jarvis.onnx"]' \
+  python -m assistant.app
+```
+
+Precedence: `model_paths` (the series) > `model_path` (single) > `model_name`
+(stock `hey_jarvis` fallback). Each extra model adds a little CPU per audio
+frame, so load the series you actually use.
+
 ## Costs / notes
 
 - **Downloads (~18 GB):** 16 GB negative features, 255 MB Piper voice, ~170 MB

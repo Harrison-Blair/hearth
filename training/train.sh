@@ -9,6 +9,13 @@
 #   bash training/train.sh --phrase "athena" --smoke  # new phrase, fast validation
 #   bash training/train.sh --phrase "friday" --name fri   # override the model name
 #   bash training/train.sh training/my.yml            # run an explicit config file
+#
+# Multi-word phrases: ALWAYS quote the whole phrase so it stays one argument.
+#   bash training/train.sh --phrase "ok computer"     # trains ONE model
+#   bash training/train.sh --phrase "hey assistant"   # fires on the full phrase
+# A quoted multi-word phrase trains a single model that wakes only on the whole
+# phrase ("hey assistant"), not on "hey" or "assistant" alone. Without quotes the
+# words become separate arguments and only the first is used as the phrase.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -20,7 +27,7 @@ while [ $# -gt 0 ]; do
     --phrase) PHRASE="${2:?--phrase needs a value}"; shift 2;;
     --name)   NAME="${2:?--name needs a value}"; shift 2;;
     --smoke)  SMOKE=1; shift;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0;;
     *.yml|*.yaml) CFG="$1"; shift;;
     *) echo "unknown argument: $1" >&2; exit 1;;
   esac

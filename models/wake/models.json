@@ -1,0 +1,10 @@
+{
+  "hey_assistant": {
+    "fp_rate": 0.0,
+    "model_path": "models/wake/hey_assistant.onnx",
+    "phrase": "hey assistant",
+    "separation": 0.8745084583759307,
+    "tp_rate": 0.9466666666666667,
+    "trained_at": "2026-06-25T23:09:25"
+  }
+}
