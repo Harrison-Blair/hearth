@@ -13,7 +13,7 @@ lives in `config.yaml`, so the Pi port is config-only.
 
 Phase 3 (first full slice) complete: `python -m assistant.app` speaks a greeting,
 then runs the end-to-end loop — wake word (openWakeWord) → record (WebRTC VAD) →
-transcribe (faster-whisper) → route (keyphrase) → answer (local LLM via Ollama) →
+transcribe (faster-whisper) → route (LLM classifier, keyphrase fallback) → answer (local LLM via Ollama) →
 speak (Piper). Everything runs locally. Earlier phases delivered the scaffolding,
 contracts, typed config, audio device auto-detection, and local TTS voice-out.
 
@@ -24,8 +24,9 @@ polls the store and announces through the `AudioArbiter`, which serializes the
 announcement against wake-word capture so it can't collide or self-trigger. Reminder
 times are parsed offline by regex for durations ("in 30 seconds") and by the local
 LLM for clock times ("at 5 pm"). Missed reminders (app was off when due) are spoken
-on the next start. The router is still keyphrase-only; the LLM-classifier tier lands
-when skill ambiguity makes it necessary.
+on the next start. Routing is two-tier: the local LLM classifies each utterance
+against the known intents (primary), degrading to cheap keyphrase matching when
+the LLM is unreachable so routing keeps working fully offline.
 
 ## Setup
 

@@ -1,7 +1,9 @@
 """Intent router interface.
 
-The concrete two-tier router (keyphrase matcher then LLM classifier) lands in
-Phase 3. ``Intent`` itself lives in core.events so skills can import it freely.
+The concrete two-tier router is implemented: ``KeyphraseRouter`` (cheap substring
+match) and ``ClassifierRouter`` (LLM picks one label, degrading to the keyphrase
+tier offline) both subclass this ABC. ``Intent`` itself lives in core.events so
+skills can import it freely.
 """
 
 from __future__ import annotations

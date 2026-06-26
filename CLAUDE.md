@@ -50,9 +50,11 @@ rather than crashing (see `OllamaProvider.health()` and the boot check in `app.p
 **Skills are plug-ins.** A capability = one `Skill` subclass (`skills/base.py`)
 declaring `name` + `intents`, registered via `SkillRegistry.register(...)`. The
 router emits an `Intent.type` string; the registry maps it to a skill (or the
-`default=True` skill). Routing never hard-codes skill names. `KeyphraseRouter` is
-tier one (cheap substring match → default intent); an LLM-classifier tier is
-planned for when keyphrases become ambiguous.
+`default=True` skill). Routing never hard-codes skill names. Routing is two-tier:
+`ClassifierRouter` (tier two) is primary — it asks the LLM to pick one intent label
+from the candidate set — and degrades to `KeyphraseRouter` (tier one, cheap
+substring match → default intent) on any LLM/JSON failure, so routing keeps
+working offline.
 
 **`core/events.py` holds the shared dataclasses** (`WakeEvent`, `Command`,
 `Intent`, `SkillResult`) that flow down the pipeline. They live in `core/` so the
