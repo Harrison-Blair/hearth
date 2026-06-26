@@ -6,6 +6,7 @@ can see what you've trained and select which series the runtime loads.
 Subcommands (run from the repo root):
   upsert <slug> --phrase "X" --eval <eval.json>   # record one model (used by train_batch.sh)
   list                                            # show the trained series
+  regen                                           # rebuild manifest from models/wake/*.onnx on disk
   select <slug-or-phrase> [...]                   # load this series: writes config.yaml wake.model_paths
 
 `select` also accepts a bare slug whose .onnx exists on disk but isn't in the
@@ -64,10 +65,30 @@ def cmd_list(_a: argparse.Namespace) -> None:
     print(f"{'slug':<20} {'phrase':<22} {'tp':>6} {'fp':>6} {'sep':>7}")
     for k in sorted(m):
         e = m[k]
-        print(
-            f"{k:<20} {e['phrase']:<22} {e['tp_rate']:>6.1%} "
-            f"{e['fp_rate']:>6.1%} {e['separation']:>+7.3f}"
-        )
+        # regen'd (untrained) entries carry no eval metrics yet.
+        tp = f"{e['tp_rate']:>6.1%}" if "tp_rate" in e else f"{'—':>6}"
+        fp = f"{e['fp_rate']:>6.1%}" if "fp_rate" in e else f"{'—':>6}"
+        sep = f"{e['separation']:>+7.3f}" if "separation" in e else f"{'—':>7}"
+        print(f"{k:<20} {e['phrase']:<22} {tp} {fp} {sep}")
+
+
+def cmd_regen(_a: argparse.Namespace) -> None:
+    """Backfill a manifest entry for every models/wake/*.onnx that isn't recorded
+    yet, deriving its phrase from the filename. Existing entries (with eval metrics)
+    are left untouched, so the manifest is reproducible if models.json is lost."""
+    sys.path.insert(0, ".")
+    from assistant.wake.registry import prettify
+
+    m = load()
+    added = []
+    for path in sorted(Path("models/wake").glob("*.onnx")):
+        stem = path.stem
+        if stem in m:
+            continue
+        m[stem] = {"phrase": prettify(stem), "model_path": f"models/wake/{stem}.onnx"}
+        added.append(stem)
+    save(m)
+    print(f"manifest: added {len(added)} model(s)" + (f": {', '.join(added)}" if added else ""))
 
 
 def _resolve(ref: str, m: dict) -> str:
@@ -136,6 +157,7 @@ if __name__ == "__main__":
     up.set_defaults(func=cmd_upsert)
 
     sub.add_parser("list").set_defaults(func=cmd_list)
+    sub.add_parser("regen").set_defaults(func=cmd_regen)
 
     sel = sub.add_parser("select")
     sel.add_argument("refs", nargs="+", help="slugs and/or phrases to load")
