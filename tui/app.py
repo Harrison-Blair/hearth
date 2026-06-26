@@ -772,7 +772,9 @@ class AssistantTUI(App):
     async def _check_ollama_health(self) -> None:
         self._ollama_up = await discovery.ollama_health(self._config.llm.host)
         try:
-            badge = "ollama: up" if self._ollama_up else "ollama: DOWN"
+            badge = (
+                "[green]ollama: up[/green]" if self._ollama_up else "[red]ollama: DOWN[/red]"
+            )
             self.query_one("#ollama-status", Static).update(badge)
         except Exception:  # noqa: BLE001 - widget not mounted yet
             pass
