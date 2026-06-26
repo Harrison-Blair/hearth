@@ -1,0 +1,66 @@
+# Personal assistant configuration.
+# Every device id, model path, and threshold lives here so the Raspberry Pi
+# port is config-only. Values may also be overridden by ASSISTANT_* env vars
+# (nested with a double underscore, e.g. ASSISTANT_LLM__MODEL).
+
+audio:
+  # input/output may be: null (system default), an integer device index,
+  # or a substring of the device name to match.
+  input: null
+  output: null
+  sample_rate: 16000
+  channels: 1
+  block_size: 1280        # 80ms frames at 16kHz (openWakeWord window)
+  output_volume: 0.5      # 0.5 = half volume; 1.0 = full
+
+recorder:
+  aggressiveness: 2         # WebRTC VAD sensitivity, 0 (lax) - 3 (strict)
+  silence_ms: 800           # trailing silence that ends an utterance
+  max_ms: 10000             # hard cap on utterance length
+  start_timeout_ms: 3000    # give up if no speech starts after wake
+  preroll_frames: 6         # ~0.5s kept before wake to recover a clipped command
+
+wake:
+  phrase: "hey assistant"
+  model_path: "models/wake/hey_assistant.onnx"   # trained "hey assistant" model (Phase 2a)
+  model_name: "hey_jarvis"  # stock fallback if model_path is unset
+  threshold: 0.6
+
+stt:
+  model: "base.en"
+  compute_type: "int8"
+  language: "en"
+  beam_size: 1            # 1 = greedy decode; higher = slower but more accurate
+
+llm:
+  provider: "ollama"
+  model: "qwen2.5:3b-instruct"
+  host: "http://localhost:11434"
+  timeout: 60.0
+  health_timeout: 5.0     # shorter timeout for the startup health check
+  serve_cmd: ["ollama", "serve"]   # command the TUI runs to (re)start the LLM server
+
+tts:
+  voice: "en_US-lessac-medium"
+  model_path: "models/piper/en_US-lessac-medium.onnx"
+
+storage:
+  db_path: "assistant.db"
+
+scheduling:
+  poll_seconds: 1.0       # how often the scheduler checks for due reminders
+
+web_search:
+  provider: "ddgs"        # keyless DuckDuckGo scraper
+  result_count: 3
+  timeout: 10.0
+  region: "wt-wt"         # wt-wt = no region
+  timelimit: "d"          # recency window: d/w/m/y; bias toward fresh results
+  max_snippet_chars: 500  # truncate each result body
+  # Optional keyed accelerator (live answer box). Set the key via
+  # ASSISTANT_WEB_SEARCH__API_KEY; leave blank to stay keyless (ddgs only).
+  api_key: ""
+  tavily_endpoint: "https://api.tavily.com/search"
+
+logging:
+  level: "INFO"

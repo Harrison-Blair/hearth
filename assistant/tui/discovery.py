@@ -343,6 +343,14 @@ def current_config() -> Config:
     return Config()
 
 
+def config_from_dict(data: dict) -> Config:
+    """Build a Config from a raw mapping (e.g. default-config.yaml).
+
+    Passed sections win over env/yaml (init args have top precedence); any section
+    missing from the dict falls back to the usual sources."""
+    return Config(**data)
+
+
 def current_value(config: Config, key: tuple[str, ...]) -> str:
     """Walk a dotted key on a Config instance, as a string for the widgets."""
     obj: object = config

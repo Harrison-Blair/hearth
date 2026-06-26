@@ -30,6 +30,16 @@ class Field:
         return env_name(self.key)
 
 
+def coerce(field: Field, raw: str) -> object:
+    """Parse a widget's string value into the scalar type config.yaml expects."""
+    if field.kind == "number":
+        try:
+            return int(raw)
+        except ValueError:
+            return float(raw)
+    return raw
+
+
 def env_name(key: tuple[str, ...]) -> str:
     """Dotted config key -> ASSISTANT_* env var: ("llm","model") -> ASSISTANT_LLM__MODEL."""
     return "ASSISTANT_" + "__".join(part.upper() for part in key)

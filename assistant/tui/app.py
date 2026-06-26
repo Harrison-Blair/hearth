@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from typing import TYPE_CHECKING
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -32,11 +33,14 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from assistant.tui import discovery, envfile
-from assistant.tui.config_schema import FIELDS, Field, changed_fields, overrides_for
+from assistant.tui import configfile, discovery, envfile
+from assistant.tui.config_schema import FIELDS, Field, changed_fields, coerce, overrides_for
 from assistant.tui.logcolor import colorize_line, colorize_message
 from assistant.tui.logparse import parse
 from assistant.tui.supervisor import ENV_FILE, DaemonSupervisor, free_ollama_port
+
+if TYPE_CHECKING:
+    from assistant.core.config import Config
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +105,8 @@ class AssistantTUI(App):
     #pull-progress { height: 1; }
     .env-buttons { dock: top; height: 3; align: center middle; }
     .env-buttons Button { margin: 0 1; min-width: 8; }
+    .config-buttons { height: 3; align: center middle; }
+    .config-buttons Button { margin: 0 1; min-width: 8; }
     #envedit { height: 1fr; }
     #chat { dock: bottom; }
     """
@@ -168,6 +174,9 @@ class AssistantTUI(App):
 
     def _compose_config(self) -> ComposeResult:
         with VerticalScroll():
+            with Horizontal(classes="config-buttons"):
+                yield Button("Save", id="config-save", variant="primary")
+                yield Button("Reset to default", id="config-reset", variant="warning")
             with Horizontal(classes="volume-row"):
                 yield Button("Unmute" if self._muted else "Mute", id="vol-mute", variant="warning")
                 for label, _ in VOLUME_PRESETS:
@@ -229,8 +238,9 @@ class AssistantTUI(App):
     async def _startup(self) -> None:
         await self._start_daemon()
 
-    async def _populate_selects(self) -> None:
-        host = self._config.llm.host
+    async def _populate_selects(self, config: Config | None = None) -> None:
+        cfg = config or self._config
+        host = cfg.llm.host
         for field in FIELDS:
             if field.kind != "select" or field.options is None:
                 continue
@@ -241,7 +251,7 @@ class AssistantTUI(App):
             except Exception as exc:  # noqa: BLE001 - discovery is best-effort
                 log.warning("option discovery for %s failed: %s", field.key, exc)
                 result = []
-            current = discovery.current_value(self._config, field.key)
+            current = discovery.current_value(cfg, field.key)
             pairs = [_as_option(item) for item in result]
             if current and current not in [value for _, value in pairs]:
                 pairs.insert(0, (current, current))
@@ -490,6 +500,35 @@ class AssistantTUI(App):
         except Exception:  # noqa: BLE001 - widget not mounted yet
             pass
         self._refresh_status()
+
+    # ---- config persistence --------------------------------------------------
+
+    @on(Button.Pressed, "#config-save")
+    async def _on_config_save(self) -> None:
+        values: dict[tuple[str, ...], object] = {}
+        for field in FIELDS:
+            value = self.query_one(f"#{_field_id(field)}").value
+            if value in (None, Select.BLANK):
+                continue
+            values[field.key] = coerce(field, str(value))
+        configfile.write_fields(configfile.CONFIG_FILE, values)
+        self._applog.write(f"Saved {configfile.CONFIG_FILE} — restarting…")
+        await self._restart()
+
+    @on(Button.Pressed, "#config-reset")
+    async def _on_config_reset(self) -> None:
+        data = configfile.read(configfile.DEFAULT_CONFIG_FILE)
+        if not data:
+            self._applog.write(f"No {configfile.DEFAULT_CONFIG_FILE} found.")
+            return
+        defaults = discovery.config_from_dict(data)
+        for field in FIELDS:
+            if field.kind != "select":
+                self.query_one(f"#{_field_id(field)}", Input).value = discovery.current_value(
+                    defaults, field.key
+                )
+        await self._populate_selects(defaults)
+        self._applog.write(f"Reset fields to {configfile.DEFAULT_CONFIG_FILE} — Save to persist.")
 
     # ---- .env editor ---------------------------------------------------------
 
