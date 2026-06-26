@@ -29,7 +29,10 @@ stt:
   model: "base.en"
   compute_type: "int8"
   language: "en"
-  beam_size: 1            # 1 = greedy decode; higher = slower but more accurate
+  beam_size: 5                       # 1 = greedy decode; higher = slower but more accurate
+  vad_filter: true                   # strip non-speech/silence before decode
+  condition_on_previous_text: false  # commands are independent one-shots
+  # initial_prompt: ""               # optional vocabulary/spelling bias
 
 llm:
   provider: "ollama"

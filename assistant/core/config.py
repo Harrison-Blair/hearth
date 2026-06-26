@@ -54,7 +54,10 @@ class SttConfig(BaseModel):
     model: str = "base.en"
     compute_type: str = "int8"
     language: str = "en"
-    beam_size: int = 1  # 1 = greedy; higher trades latency for accuracy
+    beam_size: int = 5  # 1 = greedy; higher trades latency for accuracy
+    vad_filter: bool = True  # strip non-speech/silence before decode
+    condition_on_previous_text: bool = False  # commands are independent one-shots
+    initial_prompt: str | None = None  # optional vocabulary/spelling bias
 
 
 class LlmConfig(BaseModel):

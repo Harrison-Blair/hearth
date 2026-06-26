@@ -19,12 +19,18 @@ class FasterWhisperSTT(SpeechToText):
         model: str = "base.en",
         compute_type: str = "int8",
         language: str = "en",
-        beam_size: int = 1,
+        beam_size: int = 5,
+        vad_filter: bool = True,
+        condition_on_previous_text: bool = False,
+        initial_prompt: str | None = None,
     ) -> None:
         # First load downloads the model from HF and caches it.
         self._model = WhisperModel(model, device="cpu", compute_type=compute_type)
         self._language = language
         self._beam_size = beam_size
+        self._vad_filter = vad_filter
+        self._condition_on_previous_text = condition_on_previous_text
+        self._initial_prompt = initial_prompt
         log.info("STT ready: faster-whisper %s (%s)", model, compute_type)
 
     async def transcribe(self, audio: bytes) -> str:
@@ -33,6 +39,11 @@ class FasterWhisperSTT(SpeechToText):
     def _transcribe(self, audio: bytes) -> str:
         samples = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
         segments, _ = self._model.transcribe(
-            samples, language=self._language, beam_size=self._beam_size
+            samples,
+            language=self._language,
+            beam_size=self._beam_size,
+            vad_filter=self._vad_filter,
+            condition_on_previous_text=self._condition_on_previous_text,
+            initial_prompt=self._initial_prompt or None,
         )
         return " ".join(seg.text.strip() for seg in segments).strip()

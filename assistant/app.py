@@ -157,6 +157,9 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         config.stt.compute_type,
         config.stt.language,
         config.stt.beam_size,
+        vad_filter=config.stt.vad_filter,
+        condition_on_previous_text=config.stt.condition_on_previous_text,
+        initial_prompt=config.stt.initial_prompt,
     )
     audio_in = SoundDeviceIn(
         devices.input.index,

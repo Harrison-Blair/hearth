@@ -45,7 +45,9 @@ def test_loads_yaml_and_overrides_defaults():
     assert cfg.audio.sample_rate == 16000
     assert cfg.wake.threshold == 0.6  # config.yaml overrides the 0.5 default
     assert cfg.recorder.silence_ms == 800
-    assert cfg.stt.beam_size == 1
+    assert cfg.stt.beam_size == 5
+    assert cfg.stt.vad_filter is True
+    assert cfg.stt.condition_on_previous_text is False
     assert cfg.llm.health_timeout == 5.0
 
 
