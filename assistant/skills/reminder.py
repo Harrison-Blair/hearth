@@ -103,8 +103,10 @@ class ReminderSkill(Skill):
         )
 
     _CANCEL_WORDS = ("cancel", "clear", "delete", "forget", "remove")
-    # Whole-word match so "all" doesn't fire inside "call mom".
-    _BULK_RE = re.compile(r"\b(all|everything|every|them all)\b")
+    # Standalone match so "all" fires for "cancel all" but not inside "call mom"
+    # or a hyphenated name like "all-hands" (a bare \b treats the hyphen as a
+    # word boundary, which would wrongly trigger a delete-everything).
+    _BULK_RE = re.compile(r"(?<![\w-])(all|everything|every|them all)(?![\w-])")
 
     @classmethod
     def _is_bulk_cancel(cls, text: str) -> bool:

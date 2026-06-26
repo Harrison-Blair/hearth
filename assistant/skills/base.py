@@ -33,3 +33,9 @@ class SkillRegistry:
 
     def get(self, intent_type: str) -> Skill | None:
         return self._by_intent.get(intent_type, self._default)
+
+    @property
+    def intents(self) -> set[str]:
+        """The intents explicitly registered by a skill (excludes the default
+        fallback's catch-all reach)."""
+        return set(self._by_intent)

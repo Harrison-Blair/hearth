@@ -60,13 +60,16 @@ class ReminderScheduler:
             await asyncio.sleep(self._poll_seconds)
 
     async def _fire(self, reminder) -> None:
+        # Delete in `finally` so a failed announcement still clears the row: a due
+        # reminder left in the store is returned by every poll, an unkillable loop.
         try:
             log.info("Reminder due: %r", reminder.speech)
             async with self._arbiter.hold("reminder"):
                 await self._audio_out.play(await self._tts.synthesize(reminder.speech))
-            self._store.delete(reminder.id)
         except Exception as exc:  # noqa: BLE001 - one failure must not kill the loop
             log.error("Failed to fire reminder %s: %s", reminder.id, exc)
+        finally:
+            self._store.delete(reminder.id)
 
     async def _fire_summary(self, due) -> None:
         try:
@@ -74,7 +77,8 @@ class ReminderScheduler:
             text = _AWAY_PREAMBLE.format(n=len(due)) + " " + " ".join(r.speech for r in due)
             async with self._arbiter.hold("reminder"):
                 await self._audio_out.play(await self._tts.synthesize(text))
-            for reminder in due:
-                self._store.delete(reminder.id)
         except Exception as exc:  # noqa: BLE001 - one failure must not kill the loop
             log.error("Failed to announce catch-up summary: %s", exc)
+        finally:
+            for reminder in due:
+                self._store.delete(reminder.id)

@@ -35,6 +35,14 @@ _DURATION_RE = re.compile(
     rf"(?:\b(?:in|for|after)\s+)?({_NUM})\s+({_UNIT})s?\b", re.IGNORECASE
 )
 
+# A clock time anywhere in the request ("at 6 pm", "9:30", "8 o'clock", "noon").
+# When present, the duration regex must not win: "a 10 minute workout at 6 pm" is
+# a 6 pm reminder, not a 10-minute one — defer to the LLM, which disambiguates.
+_CLOCK_RE = re.compile(
+    r"\b\d{1,2}\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\bo'?clock\b|\bnoon\b|\bmidnight\b",
+    re.IGNORECASE,
+)
+
 # Prefixes peeled off (longest first) to recover the bare reminder message.
 _MESSAGE_PREFIXES = ("remind me to", "remind me", "to")
 
@@ -64,7 +72,7 @@ async def extract_reminder(
     time couldn't be determined."""
     lowered = text.lower()
     match = _DURATION_RE.search(lowered)
-    if match:
+    if match and not _CLOCK_RE.search(lowered):
         message = _strip_message(lowered[: match.start()] + " " + lowered[match.end() :])
         if not message:
             return None
@@ -82,6 +90,20 @@ def humanize(seconds: float) -> str:
     else:
         n, unit = seconds // 3600, "hour"
     return f"in {n} {unit}{'' if n == 1 else 's'}"
+
+
+def _coerce_index(value) -> int | None:
+    """A 1-based list index from the model, tolerating the JSON quirks of a
+    numeric string ("2") or a whole float (2.0); None for anything else."""
+    if isinstance(value, bool):  # bool is an int subclass; not a real index
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def _match_seconds(match: re.Match) -> float:
@@ -199,7 +221,7 @@ async def parse_management(
     index = data.get("target_index")
     return ManagementAction(
         action=action,
-        target_index=int(index) if isinstance(index, int) else None,
+        target_index=_coerce_index(index),
         new_at_time=data.get("new_at_time"),
         new_delay_seconds=data.get("new_delay_seconds"),
         new_message=(data.get("new_message") or None),

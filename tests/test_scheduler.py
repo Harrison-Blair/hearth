@@ -52,6 +52,33 @@ async def test_fires_due_deletes_and_skips_future():
     store.close()
 
 
+async def test_failed_announcement_still_deletes_no_refire():
+    # If play raises, the reminder must still be removed: a row left in the store
+    # is returned by every poll, an unkillable re-fire loop.
+    store = ReminderStore(":memory:")
+    store.add(50.0, "boom", created_at=0.0)
+    tts = FakeTTS()
+
+    class BoomOut:
+        async def play(self, audio):
+            raise RuntimeError("audio device gone")
+
+    sched = ReminderScheduler(
+        store, tts, BoomOut(), AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0
+    )
+
+    task = asyncio.create_task(sched.run())
+    await _run_until(lambda: store.due(now=100.0) == [])
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert store.due(now=100.0) == []  # deleted despite the playback failure
+    store.close()
+
+
 async def test_boot_catch_up_coalesces_into_one_summary():
     store = ReminderStore(":memory:")
     store.add(10.0, "Reminder: call mom.", created_at=0.0)

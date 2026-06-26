@@ -65,6 +65,18 @@ async def test_absolute_time_via_llm():
     assert due == NOW.replace(hour=17, minute=0, second=0, microsecond=0).timestamp()
 
 
+async def test_embedded_duration_with_clock_time_defers_to_llm():
+    # "10 minute" is part of the task, not the schedule: a clock time is present,
+    # so the regex must not hijack it — the LLM resolves the 6 pm time instead.
+    llm = FakeLLM(json.dumps({"delay_seconds": None, "at_time": "18:00", "message": "workout"}))
+    due, message = await extract_reminder(
+        "remind me to do a 10 minute workout at 6 pm", llm, NOW
+    )
+    assert message == "workout"
+    assert due == NOW.replace(hour=18, minute=0, second=0, microsecond=0).timestamp()
+    assert llm.calls != []  # the clock time forced the LLM path
+
+
 async def test_none_on_bad_json():
     assert await extract_reminder("remind me to do a thing", FakeLLM("not json"), NOW) is None
 
@@ -103,6 +115,14 @@ async def test_parse_management_maps_canned_json():
     # The pending list is embedded in the prompt so the LLM can resolve the target.
     assert "1. a timer in 1 minute" in llm.calls[0]
     assert "2. call mom in 5 minutes" in llm.calls[0]
+
+
+async def test_parse_management_coerces_numeric_target_index():
+    # The model may return target_index as a string or float; both must resolve.
+    for raw in ("2", 2.0):
+        llm = FakeLLM(json.dumps({"action": "cancel", "target_index": raw}))
+        action = await parse_management("cancel the second one", ["a", "b"], llm, NOW)
+        assert action.target_index == 2
 
 
 async def test_parse_management_bad_json_is_none_action():

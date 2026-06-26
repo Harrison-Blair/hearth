@@ -1,4 +1,11 @@
-from assistant.core.config import Config, LlmConfig, WakeConfig, WebSearchConfig
+from assistant.core.config import (
+    AudioConfig,
+    Config,
+    LlmConfig,
+    SttConfig,
+    WakeConfig,
+    WebSearchConfig,
+)
 
 
 def test_model_defaults():
@@ -7,6 +14,14 @@ def test_model_defaults():
     assert LlmConfig().provider == "ollama"
     assert WebSearchConfig().provider == "ddgs"
     assert WebSearchConfig().result_count == 3
+    assert SttConfig().device == "cpu"  # GPU boxes override via stt.device
+    assert SttConfig().cpu_threads == 0  # 0 = ctranslate2 auto; the Pi pins this
+    assert AudioConfig().normalize is False  # opt-in pre-STT peak normalization
+
+
+def test_stt_device_env_override(monkeypatch):
+    monkeypatch.setenv("ASSISTANT_STT__DEVICE", "cuda")
+    assert Config().stt.device == "cuda"
 
 
 def test_wake_model_refs_precedence():
@@ -40,9 +55,10 @@ def test_web_search_env_override(monkeypatch):
 def test_loads_yaml_and_overrides_defaults():
     # Config() reads config.yaml from the repo root (pytest cwd).
     cfg = Config()
-    assert cfg.wake.phrases() == ["hey assistant"]  # derived from the loaded model
-    assert cfg.stt.model == "base.en"
+    assert cfg.stt.model == "distil-small.en"
+    assert cfg.stt.cpu_threads == 4  # pinned to the Pi 5's core count
     assert cfg.audio.sample_rate == 16000
+    assert cfg.audio.normalize is True
     assert cfg.wake.threshold == 0.5  # tuned for fewer missed wakes
     assert cfg.recorder.silence_ms == 800
     assert cfg.stt.beam_size == 5
@@ -59,3 +75,13 @@ def test_env_override(monkeypatch):
 def test_recorder_env_override(monkeypatch):
     monkeypatch.setenv("ASSISTANT_RECORDER__SILENCE_MS", "400")
     assert Config().recorder.silence_ms == 400
+
+
+def test_stt_cpu_threads_env_override(monkeypatch):
+    monkeypatch.setenv("ASSISTANT_STT__CPU_THREADS", "2")
+    assert Config().stt.cpu_threads == 2
+
+
+def test_audio_normalize_env_override(monkeypatch):
+    monkeypatch.setenv("ASSISTANT_AUDIO__NORMALIZE", "false")
+    assert Config().audio.normalize is False

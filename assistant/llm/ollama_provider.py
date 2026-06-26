@@ -28,6 +28,12 @@ class OllamaProvider(LLMProvider):
         self._host = host.rstrip("/")
         self._timeout = timeout
         self._health_timeout = health_timeout
+        # One pooled client reused across every call (a voice turn makes 2+):
+        # constructing a fresh client per request loses keep-alive entirely.
+        self._client = httpx.AsyncClient(timeout=timeout)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
     async def complete(
         self, prompt: str, *, system: str | None = None, json: bool = False, label: str = ""
@@ -38,10 +44,9 @@ class OllamaProvider(LLMProvider):
         if json:
             payload["format"] = "json"
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(f"{self._host}/api/generate", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await self._client.post(f"{self._host}/api/generate", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
         response = data.get("response", "").strip()
         tag = label or "llm"
         log.info("[%s] prompt: %s", tag, _clip(prompt, 200))
@@ -52,10 +57,11 @@ class OllamaProvider(LLMProvider):
 
     async def health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=self._health_timeout) as client:
-                resp = await client.get(f"{self._host}/api/tags")
-                resp.raise_for_status()
-                models = [m["name"] for m in resp.json().get("models", [])]
+            resp = await self._client.get(
+                f"{self._host}/api/tags", timeout=self._health_timeout
+            )
+            resp.raise_for_status()
+            models = [m["name"] for m in resp.json().get("models", [])]
         except (httpx.HTTPError, _json.JSONDecodeError, KeyError) as exc:
             log.warning("Ollama health check failed: %s", exc)
             return False

@@ -37,3 +37,6 @@ class SearchProvider(ABC):
     @abstractmethod
     async def health(self) -> bool:
         """Return True if the backend is reachable."""
+
+    async def aclose(self) -> None:
+        """Release any held resources (e.g. an HTTP client). No-op by default."""

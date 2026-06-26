@@ -17,3 +17,6 @@ class LLMProvider(ABC):
     @abstractmethod
     async def health(self) -> bool:
         """Return True if the provider is reachable and ready."""
+
+    async def aclose(self) -> None:
+        """Release any held resources (e.g. an HTTP client). No-op by default."""

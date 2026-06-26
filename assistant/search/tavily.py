@@ -34,6 +34,12 @@ class TavilySearch(SearchProvider):
         self._timeout = timeout
         self._max_snippet_chars = max_snippet_chars
         self._fallback = fallback  # local provider used when Tavily errors
+        self._client = httpx.AsyncClient(timeout=timeout)  # pooled across calls
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+        if self._fallback is not None:
+            await self._fallback.aclose()
 
     def _to_results(self, data: dict, count: int) -> list[SearchResult]:
         results: list[SearchResult] = []
@@ -68,10 +74,9 @@ class TavilySearch(SearchProvider):
             "search_depth": "basic",
         }
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(self._endpoint, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
+            resp = await self._client.post(self._endpoint, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
             return self._to_results(data, count)
         except Exception as exc:  # noqa: BLE001 - degrade to the local provider on any error
             if self._fallback is not None:

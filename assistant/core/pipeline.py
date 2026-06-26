@@ -12,6 +12,7 @@ from collections import deque
 import numpy as np
 
 from assistant.audio.base import AudioIn, AudioOut
+from assistant.audio.processing import normalize_peak
 from assistant.audio.recorder import VadRecorder
 from assistant.core.arbiter import AudioArbiter
 from assistant.core.events import Command
@@ -39,6 +40,10 @@ class VoicePipeline:
         preroll_frames: int = 6,
         sample_rate: int = 16000,
         no_speech_earcon: bytes = b"",
+        wake_earcon: bytes = b"",
+        normalize: bool = False,
+        normalize_target_peak: float = 0.97,
+        normalize_rms_floor: float = 200.0,
     ) -> None:
         self._audio_in = audio_in
         self._detector = detector
@@ -56,6 +61,14 @@ class VoicePipeline:
         # Short blip played when we wake but hear nothing, so the user gets
         # feedback instead of silence. Empty -> no earcon (e.g. in tests).
         self._no_speech_earcon = no_speech_earcon
+        # Ding played the moment the wake word is detected, so the user knows
+        # the device is listening. Empty -> no earcon (e.g. in tests).
+        self._wake_earcon = wake_earcon
+        # Optional peak normalization of the utterance before STT, to compensate
+        # for a quiet or hot mic. Gated by RMS so silence isn't amplified.
+        self._normalize = normalize
+        self._normalize_target_peak = normalize_target_peak
+        self._normalize_rms_floor = normalize_rms_floor
 
     async def run(self) -> None:
         frames = self._audio_in.stream()
@@ -78,9 +91,15 @@ class VoicePipeline:
             # Own the audio device for the whole turn so a reminder can't play
             # over the capture or our reply; it waits until we release.
             async with self._arbiter.hold("pipeline"):
+                if self._wake_earcon:
+                    await self._play(self._wake_earcon)
                 pcm = await self._recorder.record(frames, prefix=b"".join(preroll))
                 preroll.clear()
                 self._log_capture(pcm)
+                if self._normalize:
+                    pcm = normalize_peak(
+                        pcm, self._normalize_target_peak, self._normalize_rms_floor
+                    )
 
                 transcript = await self._stt.transcribe(pcm)
                 if transcript:
@@ -89,7 +108,7 @@ class VoicePipeline:
                 else:
                     log.info("No speech captured.")
                     if self._no_speech_earcon:
-                        await self._audio_out.play(self._no_speech_earcon)
+                        await self._play(self._no_speech_earcon)
 
             self._detector.reset()
             log.info("Listening for wake word...")
@@ -127,8 +146,18 @@ class VoicePipeline:
         await self._speak(result.speech)
 
     async def _speak(self, text: str) -> None:
-        audio = await self._tts.synthesize(text)
-        await self._audio_out.play(audio)
+        try:
+            await self._play(await self._tts.synthesize(text))
+        except Exception as exc:  # noqa: BLE001 - a synth/playback error must not kill the loop
+            log.error("Speak failed: %s", exc)
+
+    async def _play(self, audio: bytes) -> None:
+        # Output failures (device unplugged, PortAudio error) must not escape the
+        # wake loop; a raised exception there would leave the assistant deaf.
+        try:
+            await self._audio_out.play(audio)
+        except Exception as exc:  # noqa: BLE001 - playback error must not kill the loop
+            log.error("Playback failed: %s", exc)
 
     def _log_capture(self, pcm: bytes) -> None:
         samples = np.frombuffer(pcm, dtype=np.int16)

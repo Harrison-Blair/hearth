@@ -21,6 +21,9 @@ class AudioConfig(BaseModel):
     channels: int = 1
     block_size: int = 1280
     output_volume: float = 1.0  # linear gain applied to playback (0.0-1.0+)
+    normalize: bool = False  # peak-normalize the utterance before STT
+    normalize_target_peak: float = 0.97  # target peak as fraction of full scale
+    normalize_rms_floor: float = 200.0  # skip normalize below this int16 RMS (noise gate)
 
 
 class RecorderConfig(BaseModel):
@@ -28,7 +31,7 @@ class RecorderConfig(BaseModel):
     aggressiveness: int = 2  # VAD speech/silence sensitivity (0-3)
     silence_ms: int = 800  # trailing silence that ends an utterance
     max_ms: int = 10000  # hard cap on utterance length
-    start_timeout_ms: int = 3000  # give up if no speech starts after wake
+    start_timeout_ms: int = 5000  # give up if no speech starts after wake
     preroll_frames: int = 6  # frames kept before wake, recovering a clipped command
 
 
@@ -52,7 +55,9 @@ class WakeConfig(BaseModel):
 
 class SttConfig(BaseModel):
     model: str = "base.en"
+    device: str = "cpu"  # ctranslate2 device: "cpu" or "cuda" (GPU deployments)
     compute_type: str = "int8"
+    cpu_threads: int = 0  # 0 = ctranslate2 auto; pin to core count on the Pi
     language: str = "en"
     beam_size: int = 5  # 1 = greedy; higher trades latency for accuracy
     vad_filter: bool = True  # strip non-speech/silence before decode

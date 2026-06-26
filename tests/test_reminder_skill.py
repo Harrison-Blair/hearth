@@ -140,6 +140,19 @@ async def test_bulk_cancel_is_deterministic_no_llm():
     store.close()
 
 
+async def test_hyphenated_all_is_not_a_bulk_cancel():
+    # "all-hands" must not match the bulk-cancel "all": this is a targeted cancel,
+    # so it goes to the LLM and leaves the other reminders intact.
+    store = _managed_store()
+    skill, llm = _manage(store, json.dumps({"action": "cancel", "target_index": 1}))
+    await skill.handle(
+        Command("cancel the all-hands reminder"), Intent("manage_reminders")
+    )
+    assert llm.calls != []  # not bulk: the LLM resolved the target
+    assert len(store.pending(NOW.timestamp())) == 1  # only one removed, not all
+    store.close()
+
+
 async def test_specific_cancel_by_index():
     store = _managed_store()
     skill, _ = _manage(store, json.dumps({"action": "cancel", "target_index": 2}))

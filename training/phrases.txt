@@ -25,3 +25,8 @@
 # jarvis
 # athena
 Penguin
+Yo Penguin
+Hey Penguin
+Hello Penguin
+Help Me Penguin
+Penguin I need Help

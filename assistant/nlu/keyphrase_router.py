@@ -20,6 +20,11 @@ class KeyphraseRouter(IntentRouter):
         for phrase in phrases:
             self._keyphrases.append((phrase.lower(), intent))
 
+    @property
+    def intents(self) -> set[str]:
+        """The intents that have at least one registered keyphrase."""
+        return {intent for _, intent in self._keyphrases}
+
     async def route(self, text: str) -> Intent:
         lowered = text.lower()
         for phrase, intent in self._keyphrases:

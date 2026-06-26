@@ -52,6 +52,27 @@ INTENTS = {
 }
 
 
+def _validate_routing(
+    intents: dict[str, str],
+    keyphrases: KeyphraseRouter,
+    registry: SkillRegistry,
+    *,
+    default: str = "general",
+) -> None:
+    """Warn if the three hand-synced routing registries disagree. Not fatal: a
+    gap degrades one intent (e.g. unreachable offline), it doesn't break boot."""
+    for label in intents:
+        if label not in registry.intents:
+            log.warning("Intent %r is in the classifier catalogue but no skill handles it", label)
+        if label != default and label not in keyphrases.intents:
+            log.warning(
+                "Intent %r has no keyphrase; it is unreachable when the LLM is offline", label
+            )
+    for label in registry.intents:
+        if label not in intents:
+            log.warning("Skill intent %r is missing from the classifier catalogue", label)
+
+
 def main() -> None:
     config = Config()
     setup_logging(config.logging.level)
@@ -143,6 +164,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     registry.register(ReminderSkill(store, llm))
     registry.register(WebSearchSkill(search, llm, count=config.web_search.result_count))
     registry.register(GeneralSkill(llm, config.llm.system_prompt), default=True)
+    _validate_routing(INTENTS, keyphrases, registry)
 
     # Startup chime.
     log.info("Playing startup chime")
@@ -160,6 +182,8 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         vad_filter=config.stt.vad_filter,
         condition_on_previous_text=config.stt.condition_on_previous_text,
         initial_prompt=config.stt.initial_prompt,
+        device=config.stt.device,
+        cpu_threads=config.stt.cpu_threads,
     )
     audio_in = SoundDeviceIn(
         devices.input.index,
@@ -189,6 +213,10 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         preroll_frames=config.recorder.preroll_frames,
         sample_rate=config.audio.sample_rate,
         no_speech_earcon=tone(tts.sample_rate),
+        wake_earcon=chime(tts.sample_rate),
+        normalize=config.audio.normalize,
+        normalize_target_peak=config.audio.normalize_target_peak,
+        normalize_rms_floor=config.audio.normalize_rms_floor,
     )
     scheduler = ReminderScheduler(
         store, tts, out, arbiter, poll_seconds=config.scheduling.poll_seconds
@@ -204,6 +232,8 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         await asyncio.gather(pipeline.run(), scheduler.run(), control.run())
     finally:
         store.close()
+        await llm.aclose()
+        await search.aclose()
 
 
 if __name__ == "__main__":

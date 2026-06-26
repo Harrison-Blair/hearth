@@ -1,4 +1,49 @@
+import logging
+
+from assistant.app import _validate_routing
 from assistant.nlu.keyphrase_router import KeyphraseRouter
+from assistant.skills.base import Skill, SkillRegistry
+
+
+def test_keyphrase_router_exposes_registered_intents():
+    router = KeyphraseRouter()
+    router.add("time", "what time")
+    router.add("timer", "set a timer", "timer for")
+    assert router.intents == {"time", "timer"}
+
+
+class _Stub(Skill):
+    def __init__(self, name, intents):
+        self.name = name
+        self.intents = intents
+
+    async def handle(self, cmd, intent):  # pragma: no cover - not exercised here
+        ...
+
+
+def test_validate_routing_warns_on_missing_keyphrase(caplog):
+    intents = {"time": "clock", "general": "fallback"}
+    keyphrases = KeyphraseRouter(default_intent="general")  # no keyphrase for "time"
+    registry = SkillRegistry()
+    registry.register(_Stub("clock", {"time"}))
+    registry.register(_Stub("general", {"general"}), default=True)
+
+    with caplog.at_level(logging.WARNING, logger="assistant"):
+        _validate_routing(intents, keyphrases, registry)
+    assert any("time" in r.getMessage() and "keyphrase" in r.getMessage() for r in caplog.records)
+
+
+def test_validate_routing_silent_when_consistent(caplog):
+    intents = {"time": "clock", "general": "fallback"}
+    keyphrases = KeyphraseRouter(default_intent="general")
+    keyphrases.add("time", "what time")
+    registry = SkillRegistry()
+    registry.register(_Stub("clock", {"time"}))
+    registry.register(_Stub("general", {"general"}), default=True)
+
+    with caplog.at_level(logging.WARNING, logger="assistant"):
+        _validate_routing(intents, keyphrases, registry)
+    assert caplog.records == []  # default "general" needs no keyphrase
 
 
 async def test_falls_back_to_default_intent():

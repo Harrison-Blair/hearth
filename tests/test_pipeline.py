@@ -88,13 +88,15 @@ class FakeOut:
         self.played.append(audio)
 
 
-def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None, no_speech_earcon=b""):
+def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
+              no_speech_earcon=b"", wake_earcon=b""):
     registry = SkillRegistry()
     registry.register(skill, default=True)
     return VoicePipeline(
         audio_in, detector, FakeRecorder(), stt or FakeSTT(),
         KeyphraseRouter(), registry, tts, out, arbiter,
         no_speech_earcon=no_speech_earcon,
+        wake_earcon=wake_earcon,
     )
 
 
@@ -130,6 +132,34 @@ async def test_busy_arbiter_skips_wake_detection():
     assert skill.handled == []
     assert tts.spoke == []
     assert out.played == []
+
+
+async def test_wake_plays_ding_before_reply():
+    # The ding plays the instant the wake word fires, before the captured reply.
+    skill = FakeSkill()
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, tts, out, AudioArbiter(),
+        wake_earcon=b"DING",
+    )
+
+    await pipeline.run()
+
+    assert out.played == [b"DING", b"AUDIO"]  # ding first, then the spoken reply
+
+
+async def test_wake_without_earcon_plays_no_ding():
+    skill = FakeSkill()
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, tts, out, AudioArbiter(),
+    )  # default wake_earcon is empty
+
+    await pipeline.run()
+
+    assert out.played == [b"AUDIO"]  # only the reply, no ding
 
 
 async def test_no_speech_plays_earcon():
@@ -199,6 +229,26 @@ async def test_submit_text_ignores_blank():
     pipeline = _pipeline(FakeAudioIn(0), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter())
     await pipeline.submit_text("   ")
     assert skill.handled == []
+
+
+class BoomOut:
+    """An output device whose playback fails (e.g. unplugged mid-turn)."""
+
+    async def play(self, audio):
+        raise RuntimeError("audio device gone")
+
+
+async def test_playback_failure_does_not_kill_the_loop():
+    # A play() error must not escape _handle -> the wake loop; otherwise the
+    # daemon stops listening and goes deaf until restarted.
+    detector = FakeDetector()
+    skill = FakeSkill()
+    pipeline = _pipeline(FakeAudioIn(3), detector, skill, FakeTTS(), BoomOut(), AudioArbiter())
+
+    await pipeline.run()  # completes instead of raising
+
+    assert skill.handled == [("what time is it", "general")]
+    assert detector.resets == 1  # turn completed; loop kept going
 
 
 async def test_skill_exception_is_spoken_and_loop_survives():

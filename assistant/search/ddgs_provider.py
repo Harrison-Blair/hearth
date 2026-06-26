@@ -50,6 +50,9 @@ class DdgsSearch(SearchProvider):
         self._client_factory = client_factory  # injectable so tests need no network
 
     def _query(self, kind: str, query: str, count: int) -> list[dict]:
+        # A client per query (not pooled): search() runs the two _query calls in
+        # separate worker threads concurrently, and ddgs.DDGS is not guaranteed
+        # thread-safe, so each thread gets its own isolated client.
         client = self._client_factory(self._timeout)
         fn = client.news if kind == "news" else client.text
         return fn(query, region=self._region, timelimit=self._timelimit, max_results=count)
@@ -68,10 +71,12 @@ class DdgsSearch(SearchProvider):
         seen: set[str] = set()
         out: list[dict] = []
         for row in [*(news or []), *(text or [])]:  # news first: it is the freshest
-            url = row.get("url") or row.get("href", "")
-            if url and url in seen:
+            # Dedupe on url, falling back to title so urlless rows (scrape variance)
+            # don't all slip through and crowd out distinct results.
+            key = (row.get("url") or row.get("href") or row.get("title") or "").strip().lower()
+            if key and key in seen:
                 continue
-            seen.add(url)
+            seen.add(key)
             out.append(row)
             if len(out) >= count:
                 break

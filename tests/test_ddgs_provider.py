@@ -89,6 +89,19 @@ async def test_dedupes_same_url_across_backends():
     assert results[0].title == "N"  # news copy wins
 
 
+async def test_urlless_rows_dedupe_by_title():
+    # Scrape variance can drop urls; without a fallback key, duplicate urlless
+    # rows would all slip through and crowd out distinct results.
+    news = [{"title": "Same", "url": "", "body": "n", "source": "X"}]
+    text = [
+        {"title": "Same", "href": "", "body": "t"},
+        {"title": "Other", "href": "", "body": "o"},
+    ]
+    provider = DdgsSearch(client_factory=_factory(text_rows=text, news_rows=news))
+    results = await provider.search("q", count=3)
+    assert [r.title for r in results] == ["Same", "Other"]  # the dup collapsed
+
+
 async def test_timelimit_is_passed_to_backends():
     captured = {}
 

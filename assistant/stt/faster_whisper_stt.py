@@ -23,9 +23,13 @@ class FasterWhisperSTT(SpeechToText):
         vad_filter: bool = True,
         condition_on_previous_text: bool = False,
         initial_prompt: str | None = None,
+        device: str = "cpu",
+        cpu_threads: int = 0,
     ) -> None:
         # First load downloads the model from HF and caches it.
-        self._model = WhisperModel(model, device="cpu", compute_type=compute_type)
+        self._model = WhisperModel(
+            model, device=device, compute_type=compute_type, cpu_threads=cpu_threads
+        )
         self._language = language
         self._beam_size = beam_size
         self._vad_filter = vad_filter

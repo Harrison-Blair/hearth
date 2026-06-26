@@ -12,6 +12,9 @@ audio:
   channels: 1
   block_size: 1280        # 80ms frames at 16kHz (openWakeWord window)
   output_volume: 0.5      # 0.5 = half volume; 1.0 = full
+  normalize: true              # peak-normalize the utterance before STT
+  normalize_target_peak: 0.97  # target peak as fraction of full scale
+  normalize_rms_floor: 200.0   # skip normalize below this int16 RMS (noise gate)
 
 recorder:
   aggressiveness: 2         # WebRTC VAD sensitivity, 0 (lax) - 3 (strict)
@@ -25,10 +28,13 @@ wake:
   threshold: 0.6
 
 stt:
-  model: "base.en"
+  model: "distil-small.en"   # Pi-tuned: distil-whisper, big accuracy win over base.en at int8
   compute_type: "int8"
+  cpu_threads: 4             # 0 = ctranslate2 auto; pin to the Pi 5's core count
   language: "en"
   beam_size: 1            # 1 = greedy decode; higher = slower but more accurate
+  # Optional vocabulary/spelling bias toward the wake word and command terms.
+  initial_prompt: "Penguin. Set a reminder, what time is it, search the web."
 
 llm:
   provider: "ollama"
