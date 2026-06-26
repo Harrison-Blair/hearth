@@ -31,7 +31,7 @@ done
 # file) or are the args themselves.
 PHRASES=()
 read_file() {  # strip #-comments and surrounding whitespace; keep non-empty lines
-  while IFS= read -r line; do
+  while IFS= read -r line || [ -n "$line" ]; do  # || ...: keep a final line with no trailing newline
     line="$(printf '%s' "${line%%#*}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     [ -n "$line" ] && PHRASES+=("$line")
   done < "$1"
