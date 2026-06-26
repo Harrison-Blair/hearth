@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from textual import on
@@ -65,12 +66,22 @@ def _as_option(item: object) -> tuple[str, str]:
     return str(item), str(item)
 
 
-def _result_option(m: "discovery.RegistryModel") -> Option:
+def _default_query(model: str) -> str:
+    """Seed the registry search with the family of the configured model.
+
+    e.g. "qwen2.5:3b-instruct" -> "qwen"."""
+    m = re.match(r"[A-Za-z]+", model or "")
+    return m.group(0) if m else "qwen"
+
+
+def _result_option(m: "discovery.RegistryModel", installed: bool = False) -> Option:
     """A two-line OptionList row for a registry search hit."""
     meta = "   ".join(
         filter(None, [" · ".join(m.sizes), " ".join(m.capabilities), f"↧{m.pulls}" if m.pulls else ""])
     )
     text = Text()
+    if installed:
+        text.append("✓ ", style="green")
     text.append(m.name, style="bold")
     if meta:
         text.append(f"   {meta}", style="dim")
@@ -134,7 +145,8 @@ class AssistantTUI(App):
         self._installed: list[discovery.OllamaModel] = []
         self._pull_queue: list[str] = []
         self._pulling = False
-        self._last_query = ""
+        self._last_query = _default_query(self._config.llm.model)
+        self._selected_ref: str | None = None
 
     # ---- layout --------------------------------------------------------------
 
@@ -208,10 +220,13 @@ class AssistantTUI(App):
     def _compose_models(self) -> ComposeResult:
         with VerticalScroll():
             with Horizontal(classes="models-search"):
-                yield Input(id="model-search", placeholder="Search ollama.com…")
+                yield Input(
+                    value=self._last_query, id="model-search", placeholder="Search ollama.com…"
+                )
                 yield Button("Refresh", id="models-refresh")
             yield OptionList(id="search-results")
             yield OptionList(id="model-tags")
+            yield Button("Install selected", id="model-install", variant="success")
             yield Static("", id="pull-status")
             yield ProgressBar(id="pull-progress", total=100, show_eta=False)
             yield Static("", id="pull-queue")
@@ -232,8 +247,15 @@ class AssistantTUI(App):
         self.query_one("#envedit", TextArea).text = envfile.read(ENV_FILE)
         self.run_worker(self._populate_selects(), group="selects")
         self.run_worker(self._refresh_installed(), group="installed")
+        if self._last_query:
+            self.run_worker(self._do_search(self._last_query), group="search", exclusive=True)
         self.run_worker(self._startup(), group="startup")
         self.run_worker(self._health_loop(), group="health")
+
+    @on(TabbedContent.TabActivated, "#tab-models")
+    def _on_models_tab(self) -> None:
+        # Pick up models pulled out-of-band (e.g. `ollama pull` in a terminal).
+        self.run_worker(self._refresh_installed(), group="installed")
 
     async def _startup(self) -> None:
         await self._start_daemon()
@@ -313,13 +335,39 @@ class AssistantTUI(App):
     async def _do_search(self, query: str, *, refresh: bool = False) -> None:
         results = await discovery.search_registry(query, refresh=refresh)
         self._search_results = results
-        opts = self.query_one("#search-results", OptionList)
-        opts.clear_options()
+        self._tags = []
         self.query_one("#model-tags", OptionList).clear_options()
         if not results:
+            opts = self.query_one("#search-results", OptionList)
+            opts.clear_options()
             opts.add_option(Option("(no results — is ollama.com reachable?)", disabled=True))
             return
-        opts.add_options(_result_option(m) for m in results)
+        self._render_search_results()
+
+    def _installed_names(self) -> set[str]:
+        return {m.name for m in self._installed}
+
+    @staticmethod
+    def _is_installed(slug: str, installed: set[str]) -> bool:
+        # registry slug "qwen2.5" matches pulled "qwen2.5:3b-instruct"
+        return any(n == slug or n.startswith(f"{slug}:") for n in installed)
+
+    def _render_search_results(self) -> None:
+        opts = self.query_one("#search-results", OptionList)
+        opts.clear_options()
+        installed = self._installed_names()
+        opts.add_options(
+            _result_option(m, self._is_installed(m.name, installed)) for m in self._search_results
+        )
+
+    def _render_tags(self) -> None:
+        opts = self.query_one("#model-tags", OptionList)
+        opts.clear_options()
+        installed = self._installed_names()
+        opts.add_options(
+            Option(f"{'✓ ' if t.ref in installed else ''}{t.ref}   {t.size}".rstrip())
+            for t in self._tags
+        )
 
     @on(OptionList.OptionSelected, "#search-results")
     def _on_result_selected(self, event: OptionList.OptionSelected) -> None:
@@ -331,18 +379,26 @@ class AssistantTUI(App):
     async def _load_tags(self, name: str) -> None:
         tags = await discovery.registry_tags(name)
         self._tags = tags
-        opts = self.query_one("#model-tags", OptionList)
-        opts.clear_options()
         if not tags:
+            opts = self.query_one("#model-tags", OptionList)
+            opts.clear_options()
             opts.add_option(Option(f"(no tags found for {name})", disabled=True))
             return
-        opts.add_options(Option(f"{t.ref}   {t.size}".rstrip()) for t in tags)
+        self._render_tags()
 
     @on(OptionList.OptionSelected, "#model-tags")
     def _on_tag_selected(self, event: OptionList.OptionSelected) -> None:
         if not self._tags:
             return
-        self._enqueue_pull(self._tags[event.option_index].ref)
+        self._selected_ref = self._tags[event.option_index].ref
+        self.query_one("#pull-status", Static).update(
+            f"selected {self._selected_ref} — press Install"
+        )
+
+    @on(Button.Pressed, "#model-install")
+    def _on_model_install(self) -> None:
+        if self._selected_ref:
+            self._enqueue_pull(self._selected_ref)
 
     def _enqueue_pull(self, ref: str) -> None:
         if ref in self._pull_queue:
@@ -401,6 +457,11 @@ class AssistantTUI(App):
         for m in self._installed:
             meta = " · ".join(p for p in (m.human_size if m.size else "", m.parameter_size) if p)
             opts.add_option(Option(f"{m.name}   {meta}".rstrip()))
+        # Keep the browser's ✓ markers in sync with what's now installed.
+        if self._search_results:
+            self._render_search_results()
+        if self._tags:
+            self._render_tags()
 
     # ---- daemon control ------------------------------------------------------
 
