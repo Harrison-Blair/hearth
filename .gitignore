@@ -8,3 +8,9 @@ dist/
 *.db-journal
 models/
 wakeword/*.onnx
+
+# Wake-word training artifacts (data, generated clips, cloned generator, isolated venv) — see training/README.md
+training/data/
+training/work/
+training/piper-sample-generator/
+training/.venv-train/

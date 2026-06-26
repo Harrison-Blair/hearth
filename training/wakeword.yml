@@ -1,0 +1,62 @@
+# Canonical openWakeWord training config. `train.sh` runs this directly for the
+# default phrase; `train.sh --phrase "..."` derives a variant from it (overriding
+# only target_phrase + model_name) via make_config.py. All shared tuning lives
+# here, so a change here applies to every phrase you train.
+#
+# Produces training/work/<model_name>.onnx — train.sh copies it to models/wake/
+# and prints the config.yaml lines to set.
+
+model_name: "hey_assistant"
+
+# Detected phrase. Multiple entries still train ONE binary model that fires on any.
+# A distinctive 2+ syllable phrase or name works best; short/common single words
+# (e.g. "go", "hey") false-trigger a lot — see README "Changing the wake phrase".
+target_phrase:
+  - "hey assistant"
+
+# Extra phrases to push down as negatives (beyond the auto phoneme-overlap ones).
+# Leave empty for the first pass; add real-world false triggers here later.
+custom_negative_phrases: []
+
+# Synthetic clip counts. 20k positives is a solid first pass; the upstream docs
+# recommend 20k+ and note 100k+ is best. Raise for a more robust model (slower).
+# `--smoke` overrides these to tiny values for a fast end-to-end validation run.
+n_samples: 20000
+n_samples_val: 2000
+tts_batch_size: 50
+augmentation_batch_size: 16
+augmentation_rounds: 1
+
+# dscripka fork of piper-sample-generator (espeak-based, works on Python 3.12).
+piper_sample_generator_path: "training/piper-sample-generator"
+
+# Where generated clips, computed features, and the final model land.
+output_dir: "training/work"
+
+# Reverb augmentation: MIT environmental impulse responses (built by setup_data.py).
+rir_paths:
+  - "training/data/mit_rirs"
+
+# Background audio mixed into clips during augmentation (built by setup_data.py).
+background_paths:
+  - "training/data/audioset_16k"
+background_paths_duplication_rate:
+  - 1
+
+# Pre-computed openWakeWord features (downloaded by bootstrap.sh).
+false_positive_validation_data_path: "training/data/validation_set_features.npy"
+feature_data_files:
+  ACAV100M_sample: "training/data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+
+# Examples per class per batch (sum = total batch size).
+batch_n_per_class:
+  ACAV100M_sample: 1024
+  adversarial_negative: 50
+  positive: 50
+
+# Model + training hyperparameters (upstream-recommended defaults).
+model_type: "dnn"
+layer_size: 32
+steps: 50000
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2

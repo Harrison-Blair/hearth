@@ -17,12 +17,15 @@ tts = ["piper-tts"]
 # openWakeWord 0.6.0 hard-pins tflite-runtime, which has no Python 3.12 wheel.
 # We use the ONNX backend instead, so install it with --no-deps (see README):
 #   pip install "openwakeword==0.6.0" --no-deps
-wake = ["onnxruntime", "requests"]
+# Because of --no-deps, this extra carries openWakeWord's own ONNX-path runtime
+# deps (everything it needs minus the tflite-runtime pin).
+wake = ["onnxruntime", "requests", "scipy", "scikit-learn", "tqdm"]
 stt = ["faster-whisper"]
 vad = ["webrtcvad", "setuptools<81"]  # webrtcvad imports pkg_resources (removed in setuptools 81)
 llm = ["httpx"]  # async HTTP client for the Ollama provider
 nlu = ["dateparser"]
 scheduling = ["apscheduler"]
+search = ["ddgs"]  # keyless DuckDuckGo scraper for the web search skill
 dev = ["pytest", "pytest-asyncio", "ruff"]
 
 [project.scripts]

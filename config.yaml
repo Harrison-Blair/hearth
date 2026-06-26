@@ -22,8 +22,8 @@ recorder:
 
 wake:
   phrase: "hey assistant"
-  model_path: null        # path to trained hey_assistant.onnx (Phase 2a)
-  model_name: "hey_jarvis"  # stock bootstrap model until trained one exists
+  model_path: "models/wake/hey_assistant.onnx"   # trained "hey assistant" model (Phase 2a)
+  model_name: "hey_jarvis"  # stock fallback if model_path is unset
   threshold: 0.6
 
 stt:
