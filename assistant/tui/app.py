@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 import re
 from typing import TYPE_CHECKING
 
 from textual import on
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from rich.text import Text
 from textual.widgets import (
     Button,
@@ -27,13 +28,16 @@ from textual.widgets import (
     ProgressBar,
     RichLog,
     Select,
+    SelectionList,
     Static,
     TabbedContent,
     TabPane,
     TextArea,
 )
 from textual.widgets.option_list import Option
+from textual.widgets.selection_list import Selection
 
+from assistant.wake import registry
 from assistant.tui import configfile, discovery, envfile
 from assistant.tui.config_schema import FIELDS, Field, changed_fields, coerce, overrides_for
 from assistant.tui.logcolor import colorize_line, colorize_message
@@ -74,11 +78,15 @@ def _default_query(model: str) -> str:
     return m.group(0) if m else "qwen"
 
 
-def _result_option(m: "discovery.RegistryModel", installed: bool = False) -> Option:
-    """A two-line OptionList row for a registry search hit."""
-    meta = "   ".join(
+def _result_meta(m: "discovery.RegistryModel") -> str:
+    return "   ".join(
         filter(None, [" · ".join(m.sizes), " ".join(m.capabilities), f"↧{m.pulls}" if m.pulls else ""])
     )
+
+
+def _result_option(m: "discovery.RegistryModel", installed: bool = False) -> Option:
+    """A two-line OptionList row for a registry search hit."""
+    meta = _result_meta(m)
     text = Text()
     if installed:
         text.append("✓ ", style="green")
@@ -86,8 +94,40 @@ def _result_option(m: "discovery.RegistryModel", installed: bool = False) -> Opt
     if meta:
         text.append(f"   {meta}", style="dim")
     if m.description:
-        text.append("\n" + m.description[:90], style="dim italic")
+        desc = m.description if len(m.description) <= 90 else m.description[:90].rstrip() + "…"
+        text.append("\n" + desc, style="dim italic")
     return Option(text)
+
+
+def _registry_detail_text(m: "discovery.RegistryModel") -> Text:
+    """Full, untruncated detail for the selected registry model."""
+    text = Text()
+    text.append(m.name, style="bold")
+    meta = _result_meta(m)
+    if meta:
+        text.append(f"\n{meta}", style="dim")
+    if m.description:
+        text.append(f"\n\n{m.description}")
+    return text
+
+
+class ScreenWidthRichLog(RichLog):
+    """A RichLog that wraps to its on-screen width.
+
+    Textual's ``RichLog.write`` measures content against ``app.console``, whose
+    width is the ``COLUMNS`` env var (default 80) — not the widget's actual size
+    — so text wraps at ~80 cols regardless of terminal width. Defaulting
+    ``width`` to the live content region makes wrapping track the screen.
+    """
+
+    def write(
+        self, content, width=None, expand=False, shrink=True, scroll_end=None, animate=False
+    ):
+        if width is None:
+            region = self.scrollable_content_region.width
+            if region:
+                width = region
+        return super().write(content, width, expand, shrink, scroll_end, animate)
 
 
 class AssistantTUI(App):
@@ -105,6 +145,9 @@ class AssistantTUI(App):
     .field-row { height: 3; }
     .field-row Label { width: 22; content-align: left middle; height: 3; }
     #model-detail { height: auto; padding: 0 1; color: $text-muted; }
+    /* Expand to fit the options; cap at ~10 rows and scroll the rest. */
+    #field-wake_model_paths { height: auto; max-height: 12; border: round $panel; margin-bottom: 1; }
+    #wake-phrases { height: auto; padding: 0 1; color: $text-muted; }
     .models-search { height: 3; }
     .models-search Input { width: 1fr; }
     .models-search Button { margin: 0 1; }
@@ -114,6 +157,9 @@ class AssistantTUI(App):
     #pull-status { padding: 0 1; color: $text-muted; }
     #pull-queue { padding: 0 1; color: $text-muted; }
     #pull-progress { height: 1; }
+    .install-row { height: auto; }
+    .install-col { width: 1fr; height: auto; }
+    #registry-detail { width: 1fr; height: auto; border: round $panel; padding: 0 1; color: $text-muted; }
     .env-buttons { dock: top; height: 3; align: center middle; }
     .env-buttons Button { margin: 0 1; min-width: 8; }
     .config-buttons { height: 3; align: center middle; }
@@ -154,11 +200,11 @@ class AssistantTUI(App):
         yield Static(id="status")
         with TabbedContent():
             with TabPane("Logs", id="tab-logs"):
-                yield RichLog(
+                yield ScreenWidthRichLog(
                     id="applog", highlight=False, markup=False, wrap=True, max_lines=MAX_LOG_LINES
                 )
             with TabPane("Ollama", id="tab-ollama"):
-                yield RichLog(
+                yield ScreenWidthRichLog(
                     id="ollamalog",
                     highlight=False,
                     markup=False,
@@ -166,7 +212,7 @@ class AssistantTUI(App):
                     max_lines=MAX_LOG_LINES,
                 )
             with TabPane("LLM", id="tab-llm"):
-                yield RichLog(
+                yield ScreenWidthRichLog(
                     id="llmlog", highlight=False, markup=False, wrap=True, max_lines=MAX_LOG_LINES
                 )
                 yield Input(id="chat", placeholder="Type a command (sent as speech)…")
@@ -196,6 +242,13 @@ class AssistantTUI(App):
             with Horizontal(classes="llm-row"):
                 yield Static("ollama: …", id="ollama-status")
             for field in FIELDS:
+                if field.kind == "multiselect":
+                    # Full-width so the checkbox list can show many options and scroll,
+                    # rather than being clipped into a one-line field row.
+                    yield Label(field.label)
+                    yield self._field_widget(field)
+                    yield Static(id="wake-phrases")
+                    continue
                 with Horizontal(classes="field-row"):
                     yield Label(field.label)
                     yield self._field_widget(field)
@@ -203,6 +256,9 @@ class AssistantTUI(App):
 
     def _field_widget(self, field: Field):
         wid = _field_id(field)
+        if field.kind == "multiselect":
+            # Options and selection are filled in on mount (discovered live).
+            return SelectionList(id=wid)
         current = discovery.current_value(self._config, field.key)
         if field.kind == "select":
             # Options are filled in on mount (some are discovered live).
@@ -226,10 +282,13 @@ class AssistantTUI(App):
                 yield Button("Refresh", id="models-refresh")
             yield OptionList(id="search-results")
             yield OptionList(id="model-tags")
-            yield Button("Install selected", id="model-install", variant="success")
-            yield Static("", id="pull-status")
-            yield ProgressBar(id="pull-progress", total=100, show_eta=False)
-            yield Static("", id="pull-queue")
+            with Horizontal(classes="install-row"):
+                with Vertical(classes="install-col"):
+                    yield Button("Install selected", id="model-install", variant="success")
+                    yield Static("", id="pull-status")
+                    yield ProgressBar(id="pull-progress", total=100, show_eta=False)
+                    yield Static("", id="pull-queue")
+                yield Static("", id="registry-detail")
             yield Label("Installed")
             yield OptionList(id="installed-list")
             yield Button("Delete selected", id="model-delete", variant="error")
@@ -240,10 +299,6 @@ class AssistantTUI(App):
         self._applog = self.query_one("#applog", RichLog)
         self._llmlog = self.query_one("#llmlog", RichLog)
         self._ollamalog = self.query_one("#ollamalog", RichLog)
-        self._ollamalog.write(
-            '(Ollama runs externally — press "Restart LLM" to manage it here '
-            "and stream its diagnostics.)"
-        )
         self.query_one("#envedit", TextArea).text = envfile.read(ENV_FILE)
         self.run_worker(self._populate_selects(), group="selects")
         self.run_worker(self._refresh_installed(), group="installed")
@@ -252,19 +307,26 @@ class AssistantTUI(App):
         self.run_worker(self._startup(), group="startup")
         self.run_worker(self._health_loop(), group="health")
 
-    @on(TabbedContent.TabActivated, "#tab-models")
+    @on(TabbedContent.TabActivated, pane="#tab-models")
     def _on_models_tab(self) -> None:
         # Pick up models pulled out-of-band (e.g. `ollama pull` in a terminal).
         self.run_worker(self._refresh_installed(), group="installed")
 
+    @on(TabbedContent.TabActivated, pane="#tab-config")
+    def _on_config_tab(self) -> None:
+        # Pick up models installed since mount (via the Models tab or `ollama pull`)
+        # so the LLM model dropdown always reflects what's currently installed.
+        self.run_worker(self._populate_selects(), group="selects")
+
     async def _startup(self) -> None:
         await self._start_daemon()
+        await self._ensure_ollama()
 
     async def _populate_selects(self, config: Config | None = None) -> None:
         cfg = config or self._config
         host = cfg.llm.host
         for field in FIELDS:
-            if field.kind != "select" or field.options is None:
+            if field.kind not in ("select", "multiselect") or field.options is None:
                 continue
             try:
                 result = field.options(host=host)
@@ -273,6 +335,9 @@ class AssistantTUI(App):
             except Exception as exc:  # noqa: BLE001 - discovery is best-effort
                 log.warning("option discovery for %s failed: %s", field.key, exc)
                 result = []
+            if field.kind == "multiselect":
+                self._populate_multiselect(field, cfg, result)
+                continue
             current = discovery.current_value(cfg, field.key)
             pairs = [_as_option(item) for item in result]
             if current and current not in [value for _, value in pairs]:
@@ -281,6 +346,32 @@ class AssistantTUI(App):
             select.set_options(pairs)
             if current:
                 select.value = current
+        self._refresh_wake_phrases()
+
+    def _populate_multiselect(self, field: Field, cfg: Config, result: list) -> None:
+        # Pre-check whatever the effective config actually loads (model_refs honours
+        # the model_paths > model_path > model_name precedence).
+        current = set(cfg.wake.model_refs())
+        sel = self.query_one(f"#{_field_id(field)}", SelectionList)
+        sel.clear_options()
+        sel.add_options(
+            Selection(label, value, value in current)
+            for label, value in (_as_option(item) for item in result)
+        )
+
+    def _refresh_wake_phrases(self) -> None:
+        """Update the read-only line listing the phrases the checked models wake on."""
+        try:
+            sel = self.query_one("#field-wake_model_paths", SelectionList)
+        except Exception:  # noqa: BLE001 - not mounted yet
+            return
+        phrases = registry.phrases_for(list(sel.selected))
+        text = ", ".join(phrases) if phrases else "(no wake models selected)"
+        self.query_one("#wake-phrases", Static).update(f"Wake phrases: {text}")
+
+    @on(SelectionList.SelectedChanged, "#field-wake_model_paths")
+    def _on_wake_models_changed(self) -> None:
+        self._refresh_wake_phrases()
 
     # ---- model detail --------------------------------------------------------
 
@@ -373,8 +464,9 @@ class AssistantTUI(App):
     def _on_result_selected(self, event: OptionList.OptionSelected) -> None:
         if not self._search_results:
             return
-        name = self._search_results[event.option_index].name
-        self.run_worker(self._load_tags(name), group="tags", exclusive=True)
+        m = self._search_results[event.option_index]
+        self.query_one("#registry-detail", Static).update(_registry_detail_text(m))
+        self.run_worker(self._load_tags(m.name), group="tags", exclusive=True)
 
     async def _load_tags(self, name: str) -> None:
         tags = await discovery.registry_tags(name)
@@ -517,6 +609,9 @@ class AssistantTUI(App):
         form: dict[tuple[str, ...], str] = {}
         current: dict[tuple[str, ...], str] = {}
         for field in FIELDS:
+            if field.kind == "multiselect":
+                self._collect_multiselect_override(field)
+                continue
             current[field.key] = discovery.current_value(self._config, field.key)
             widget = self.query_one(f"#{_field_id(field)}")
             value = widget.value
@@ -525,7 +620,33 @@ class AssistantTUI(App):
             form[field.key] = str(value)
         self._overrides.update(overrides_for(changed_fields(form, current)))
 
+    def _collect_multiselect_override(self, field: Field) -> None:
+        # wake.model_paths rides an env var as a JSON list (Config parses it back).
+        sel = self.query_one(f"#{_field_id(field)}", SelectionList)
+        selected = list(sel.selected)
+        if set(selected) == set(self._config.wake.model_refs()):
+            return  # unchanged from the effective config
+        self._overrides[field.env] = json.dumps(selected)
+
     # ---- LLM server (Ollama) -------------------------------------------------
+
+    async def _ensure_ollama(self) -> None:
+        """Bring the LLM server up on launch and stream its output — no button press.
+
+        Non-destructive: if a server is already responding we leave it alone (we
+        can't capture an external process's output, and killing a healthy server
+        would be surprising). Only start one when nothing answers."""
+        if await discovery.ollama_health(self._config.llm.host):
+            self._ollamalog.write("LLM server already running.")
+            return
+        self._ollamalog.write("Starting LLM server…")
+        # Clear a stale/non-responding holder of the port so the child can bind.
+        pid = await free_ollama_port(self._config.llm.host)
+        if pid:
+            self._ollamalog.write(f"Stopped stale ollama serve (pid {pid}).")
+        await self.ollama.start()
+        self.run_worker(self._pump_ollama(), exclusive=True, group="ollama-pump")
+        self.run_worker(self._check_ollama_health(), group="health-now")
 
     @on(Button.Pressed, "#btn-ollama-restart")
     async def _on_ollama_restart(self) -> None:
@@ -568,10 +689,14 @@ class AssistantTUI(App):
     async def _on_config_save(self) -> None:
         values: dict[tuple[str, ...], object] = {}
         for field in FIELDS:
-            value = self.query_one(f"#{_field_id(field)}").value
+            widget = self.query_one(f"#{_field_id(field)}")
+            if field.kind == "multiselect":
+                values[field.key] = coerce(field, list(widget.selected))
+                continue
+            value = widget.value
             if value in (None, Select.BLANK):
                 continue
-            values[field.key] = coerce(field, str(value))
+            values[field.key] = coerce(field, value)
         configfile.write_fields(configfile.CONFIG_FILE, values)
         self._applog.write(f"Saved {configfile.CONFIG_FILE} — restarting…")
         await self._restart()
@@ -584,7 +709,7 @@ class AssistantTUI(App):
             return
         defaults = discovery.config_from_dict(data)
         for field in FIELDS:
-            if field.kind != "select":
+            if field.kind not in ("select", "multiselect"):
                 self.query_one(f"#{_field_id(field)}", Input).value = discovery.current_value(
                     defaults, field.key
                 )
@@ -663,14 +788,16 @@ class AssistantTUI(App):
 
     def _refresh_status(self) -> None:
         model = self._overrides.get("ASSISTANT_LLM__MODEL") or self._config.llm.model
-        phrase = self._overrides.get("ASSISTANT_WAKE__PHRASE") or self._config.wake.phrase
+        refs_override = self._overrides.get("ASSISTANT_WAKE__MODEL_PATHS")
+        refs = json.loads(refs_override) if refs_override else None
+        phrases = ", ".join(registry.phrases_for(refs or self._config.wake.model_refs())) or "(none)"
         vol = "MUTED" if self._muted else f"vol {self._volume:.2f}"
         ollama = "ollama up" if self._ollama_up else "ollama DOWN"
         # No square brackets: the status Static renders Rich markup, which would
         # swallow "[RUNNING]" as a tag.
         text = (
             f"{self._state.upper()}  |  model: {model}  |  {ollama}  "
-            f"|  wake: {phrase!r}  |  {vol}"
+            f"|  wake: {phrases}  |  {vol}"
         )
         try:
             self.query_one("#status", Static).update(text)

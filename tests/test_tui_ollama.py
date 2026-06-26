@@ -48,6 +48,10 @@ def _fake_health(value):
     return _health
 
 
+async def _fake_free_none(host, timeout=5.0):
+    return None
+
+
 async def test_restart_llm_restarts_server_and_streams_output(monkeypatch):
     monkeypatch.setattr(discovery, "ollama_health", _fake_health(True))
     ollama = FakeSupervisor(lines=["server starting", "listening on 11434"])
@@ -104,11 +108,11 @@ async def test_ollama_tab_sits_after_logs(monkeypatch):
         # Tab order: Logs then Ollama, immediately after.
         ids = [pane.id for pane in app.query_one(TabbedContent).query(TabPane)]
         assert ids.index("tab-ollama") == ids.index("tab-logs") + 1
-        # Dedicated Ollama log shows the external-server hint on mount (once sized).
+        # Health stubbed up, so the launch auto-start notes the running server.
         app.query_one(TabbedContent).active = "tab-ollama"
         await pilot.pause()
         ollama_log = app.query_one("#ollamalog", RichLog)
-        assert "Restart LLM" in "\n".join(str(line) for line in ollama_log.lines)
+        assert "LLM server already running" in "\n".join(str(line) for line in ollama_log.lines)
 
 
 async def test_health_badge_reflects_up(monkeypatch):
@@ -122,8 +126,26 @@ async def test_health_badge_reflects_up(monkeypatch):
 
 async def test_health_badge_reflects_down(monkeypatch):
     monkeypatch.setattr(discovery, "ollama_health", _fake_health(False))
+    monkeypatch.setattr("assistant.tui.app.free_ollama_port", _fake_free_none)
     app = AssistantTUI(supervisor=FakeSupervisor(), ollama=FakeSupervisor())
     async with app.run_test() as pilot:
         await pilot.pause()
         assert "ollama: DOWN" in str(app.query_one("#ollama-status", Static).render())
         assert "ollama DOWN" in str(app.query_one("#status", Static).render())
+
+
+async def test_ollama_autostarts_when_down(monkeypatch):
+    # No server answering on launch => the TUI starts one and streams its output,
+    # with no button press.
+    monkeypatch.setattr(discovery, "ollama_health", _fake_health(False))
+    monkeypatch.setattr("assistant.tui.app.free_ollama_port", _fake_free_none)
+    ollama = FakeSupervisor(lines=["server starting", "listening on 11434"])
+    app = AssistantTUI(supervisor=FakeSupervisor(), ollama=ollama)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert ollama.running
+        app.query_one(TabbedContent).active = "tab-ollama"
+        await pilot.pause()
+        ollama_text = "\n".join(str(line) for line in app.query_one("#ollamalog", RichLog).lines)
+        assert "Starting LLM server…" in ollama_text
+        assert "server starting" in ollama_text and "listening on 11434" in ollama_text

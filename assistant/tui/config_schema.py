@@ -20,7 +20,7 @@ from assistant.tui import discovery
 class Field:
     key: tuple[str, ...]
     label: str
-    kind: str  # "select" | "text" | "number"
+    kind: str  # "select" | "multiselect" | "text" | "number"
     # None for free text/number; for selects, a provider with signature
     # (host=..., **_) -> list[str] | Awaitable[list[str]] (see discovery).
     options: Callable | None = None
@@ -30,13 +30,15 @@ class Field:
         return env_name(self.key)
 
 
-def coerce(field: Field, raw: str) -> object:
-    """Parse a widget's string value into the scalar type config.yaml expects."""
+def coerce(field: Field, raw: object) -> object:
+    """Parse a widget's value into the type config.yaml expects."""
+    if field.kind == "multiselect":
+        return list(raw)  # a SelectionList's selected paths, stored as a YAML list
     if field.kind == "number":
         try:
-            return int(raw)
+            return int(str(raw))
         except ValueError:
-            return float(raw)
+            return float(str(raw))
     return raw
 
 
@@ -62,8 +64,7 @@ def changed_fields(
 
 
 FIELDS: list[Field] = [
-    Field(("wake", "model_path"), "Wake model", "select", discovery.wake_models),
-    Field(("wake", "phrase"), "Wake phrase", "text"),
+    Field(("wake", "model_paths"), "Wake models", "multiselect", discovery.wake_model_choices),
     Field(("wake", "threshold"), "Wake threshold", "number"),
     Field(("llm", "model"), "LLM model", "select", discovery.ollama_model_options),
     Field(("logging", "level"), "Log level", "select", discovery.log_levels),

@@ -138,6 +138,17 @@ def test_wake_models_globs_onnx(tmp_path):
     assert [p.rsplit("/", 1)[-1] for p in found] == ["a.onnx", "b.onnx"]  # sorted, .onnx only
 
 
+def test_wake_model_choices_pairs_phrase_and_path(tmp_path):
+    (tmp_path / "penguin.onnx").touch()
+    (tmp_path / "hey_there.onnx").touch()
+    choices = discovery.wake_model_choices(str(tmp_path))
+    # (phrase, path) pairs, sorted by path; phrase derived from the filename stem.
+    assert choices == [
+        ("hey there", str(tmp_path / "hey_there.onnx")),
+        ("penguin", str(tmp_path / "penguin.onnx")),
+    ]
+
+
 def test_log_levels_static():
     assert discovery.log_levels() == ["DEBUG", "INFO", "WARNING", "ERROR"]
 

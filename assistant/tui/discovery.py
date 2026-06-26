@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field
 import httpx
 
 from assistant.core.config import Config
+from assistant.wake import registry
 
 log = logging.getLogger(__name__)
 
@@ -332,6 +333,12 @@ async def pull_model(host: str, ref: str) -> AsyncIterator[PullProgress]:
 def wake_models(root: str = WAKE_MODEL_DIR, **_: object) -> list[str]:
     """Glob trained wake-word models, e.g. models/wake/*.onnx."""
     return sorted(glob.glob(os.path.join(root, "*.onnx")))
+
+
+def wake_model_choices(root: str = WAKE_MODEL_DIR, **_: object) -> list[tuple[str, str]]:
+    """(phrase, path) for each trained wake model — the phrase labels the checkbox,
+    the path is the stored value (wake.model_paths)."""
+    return [(registry.phrase_for(path), path) for path in wake_models(root)]
 
 
 def log_levels(**_: object) -> list[str]:

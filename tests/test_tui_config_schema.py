@@ -9,7 +9,7 @@ from assistant.tui.config_schema import (
 
 def test_env_name_builds_nested_assistant_var():
     assert env_name(("llm", "model")) == "ASSISTANT_LLM__MODEL"
-    assert env_name(("wake", "model_path")) == "ASSISTANT_WAKE__MODEL_PATH"
+    assert env_name(("wake", "model_paths")) == "ASSISTANT_WAKE__MODEL_PATHS"
     assert env_name(("logging", "level")) == "ASSISTANT_LOGGING__LEVEL"
 
 
@@ -39,6 +39,6 @@ def test_changed_fields_compares_as_strings():
 
 def test_schema_ships_expected_fields():
     keys = {f.key for f in FIELDS}
-    assert ("wake", "model_path") in keys
+    assert ("wake", "model_paths") in keys
     assert ("llm", "model") in keys
     assert ("audio", "output_volume") in keys
