@@ -88,3 +88,47 @@ The stock `hey_jarvis` model bootstraps voice-in until the custom
 `ASSISTANT_*` environment variable (nested keys use a double underscore, e.g.
 `ASSISTANT_LLM__MODEL=llama3.2:3b`). Audio `input`/`output` accept `null`
 (system default), an integer device index, or a substring of the device name.
+
+## Monitor TUI
+
+A Textual terminal UI supervises the daemon as a child process — handy on the
+Raspberry Pi's 3.5" (480×320) touchscreen, where every control is a tappable
+button.
+
+```bash
+pip install -e ".[tui]"
+python -m assistant.tui
+```
+
+It does **not** import the native audio/model deps — only the daemon child does.
+Tabs plus an `.env` editor, a top status bar (daemon state, model, wake
+phrase, volume), and a bottom button row:
+
+- **Logs** — the daemon's full stdout.
+- **Ollama** — the LLM server's own diagnostics (model loads, HTTP request logs,
+  errors), streamed live whenever the TUI manages the server via **Restart LLM**.
+  An externally/systemd-managed Ollama exposes no stdout to capture, so the tab
+  shows a hint until you start the server from here.
+- **LLM** — a full **labeled call trace** of every model round-trip: the prompt,
+  system message, and response for each call, tagged by purpose
+  (`classify` / `timespec` / `answer` / `search`) so you see the model's actual
+  reasoning, not just the bare intent-classification JSON. Plus a **chat box**:
+  type a command and it's injected into the running pipeline *as if it were
+  transcribed speech* (bypasses the wake word), so it routes through the real
+  skills, reminders fire, and the reply is spoken.
+- **Config** — change the LLM/wake model (discovered live), log level,
+  thresholds, etc., then **Apply & Restart** to relaunch the child with the new
+  `ASSISTANT_*` env. A volume row gives **instant mute / 25–100%** with no
+  restart (sent live over the child's stdin control channel). The status bar
+  shows a live **Ollama health** badge; a **Restart LLM** button (re)starts the
+  LLM server on demand when health is failing and streams its output into Logs.
+  The command is `llm.serve_cmd` (default `["ollama", "serve"]`, managed as a
+  child — no sudo); systemd users can set it to e.g.
+  `["systemctl", "--user", "restart", "ollama"]`.
+- **Env** — edit a `.env` file in place (merged into the daemon's environment at
+  start, under config.yaml's precedence rules), with one-tap **Add missing from
+  `env.example`** / **Remove values not in `env.example`**. Copy `env.example` to
+  `.env` to get started; `.env` is gitignored.
+
+Config changes are applied as `ASSISTANT_*` env overrides on restart — the TUI
+never rewrites `config.yaml`.

@@ -69,6 +69,11 @@ class SoundDeviceOut(AudioOut):
         self._channels = channels
         self._volume = volume
 
+    def set_volume(self, volume: float) -> None:
+        """Adjust playback gain live (used by the control channel for mute/volume)."""
+        self._volume = max(0.0, volume)
+        log.info("Output volume set to %.2f", self._volume)
+
     async def play(self, audio: bytes) -> None:
         await asyncio.to_thread(self._play, audio)
 

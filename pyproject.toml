@@ -26,6 +26,9 @@ llm = ["httpx"]  # async HTTP client for the Ollama provider
 nlu = ["dateparser"]
 scheduling = ["apscheduler"]
 search = ["ddgs", "httpx"]  # keyless ddgs scraper + httpx for the keyed Tavily backend
+# Monitor TUI: supervises the daemon as a child process. Deliberately NOT in
+# `all` — the Pi may run the TUI separately, and it imports no native deps.
+tui = ["textual", "httpx"]  # httpx for live Ollama model discovery
 dev = ["pytest", "pytest-asyncio", "ruff"]
 # Every runtime capability in one shot. Excludes openWakeWord, which must be
 # installed with --no-deps (see the `wake` note above).

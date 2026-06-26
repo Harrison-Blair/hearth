@@ -38,6 +38,7 @@ llm:
   host: "http://localhost:11434"
   timeout: 60.0
   health_timeout: 5.0     # shorter timeout for the startup health check
+  serve_cmd: ["ollama", "serve"]   # command the TUI runs to (re)start the LLM server
 
 tts:
   voice: "en_US-lessac-medium"

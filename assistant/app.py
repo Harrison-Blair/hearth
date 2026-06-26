@@ -1,6 +1,6 @@
 """Daemon entrypoint.
 
-Boots, loads config, resolves audio devices, speaks a greeting, then runs the
+Boots, loads config, resolves audio devices, plays a startup chime, then runs the
 full voice pipeline: wake word -> record -> transcribe -> route -> LLM -> speak.
 """
 
@@ -10,11 +10,12 @@ import asyncio
 import logging
 
 from assistant.audio.devices import DeviceSelection, select_devices
-from assistant.audio.earcon import tone
+from assistant.audio.earcon import chime, tone
 from assistant.audio.recorder import VadRecorder
 from assistant.audio.sounddevice_io import SoundDeviceIn, SoundDeviceOut
 from assistant.core.arbiter import AudioArbiter
 from assistant.core.config import Config
+from assistant.core.control import ControlChannel
 from assistant.core.logging import setup_logging
 from assistant.core.pipeline import VoicePipeline
 from assistant.llm.ollama_provider import OllamaProvider
@@ -35,8 +36,6 @@ from assistant.tts.piper_tts import PiperTTS
 from assistant.wake.openwakeword_detector import OpenWakeWordDetector
 
 log = logging.getLogger("assistant")
-
-GREETING = "Hello, I'm your personal assistant. I'm listening."
 
 # Candidate intents the LLM classifier picks from (label -> description). Ordered;
 # the keys are also the valid set. Mirrors the keyphrase registrations below and the
@@ -145,9 +144,9 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     registry.register(WebSearchSkill(search, llm, count=config.web_search.result_count))
     registry.register(GeneralSkill(llm, config.llm.system_prompt), default=True)
 
-    # Greeting.
-    log.info("Speaking greeting: %r", GREETING)
-    await out.play(await tts.synthesize(GREETING))
+    # Startup chime.
+    log.info("Playing startup chime")
+    await out.play(chime(tts.sample_rate))
 
     # Voice in: wake -> record -> transcribe.
     detector = OpenWakeWordDetector(
@@ -191,11 +190,15 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     scheduler = ReminderScheduler(
         store, tts, out, arbiter, poll_seconds=config.scheduling.poll_seconds
     )
+    # Optional control channel: line commands on stdin (typed commands, live
+    # volume) from the monitor TUI when the daemon runs as its child.
+    control = ControlChannel(pipeline, out)
 
-    # Pipeline (wake -> reply) and scheduler (proactive reminders) share the one
-    # event loop, audio output, and arbiter; both run until interrupted.
+    # Pipeline (wake -> reply), scheduler (proactive reminders), and control
+    # channel share the one event loop, audio output, and arbiter; all run until
+    # interrupted.
     try:
-        await asyncio.gather(pipeline.run(), scheduler.run())
+        await asyncio.gather(pipeline.run(), scheduler.run(), control.run())
     finally:
         store.close()
 

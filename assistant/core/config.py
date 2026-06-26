@@ -58,6 +58,10 @@ class LlmConfig(BaseModel):
     host: str = "http://localhost:11434"
     timeout: float = 60.0
     health_timeout: float = 5.0  # separate, shorter timeout for the health check
+    # Command the monitor TUI runs to (re)start the LLM server. Default manages a
+    # local `ollama serve` as a child (no sudo); systemd users can point it at
+    # e.g. ["systemctl", "--user", "restart", "ollama"].
+    serve_cmd: list[str] = ["ollama", "serve"]
     # Answers are spoken aloud, so steer the model toward short, plain replies.
     system_prompt: str = (
         "You are a helpful voice assistant. Answers are read aloud, so reply in "

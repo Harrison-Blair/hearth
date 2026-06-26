@@ -163,6 +163,44 @@ async def test_no_speech_without_earcon_plays_nothing():
     assert tts.spoke == []
 
 
+async def test_submit_text_routes_like_a_spoken_turn():
+    # A typed command (TUI chat box) runs the same route -> skill -> speak path.
+    skill = FakeSkill()
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(FakeAudioIn(0), FakeDetector(), skill, tts, out, AudioArbiter())
+
+    await pipeline.submit_text("  what time is it  ")
+
+    assert skill.handled == [("what time is it", "general")]  # stripped + routed
+    assert tts.spoke == ["it is noon"]
+    assert out.played == [b"AUDIO"]
+
+
+async def test_submit_text_holds_arbiter():
+    # The typed turn must acquire the audio arbiter so it can't collide with a
+    # reminder announcement or wake capture.
+    skill = FakeSkill()
+    arbiter = AudioArbiter()
+    pipeline = _pipeline(FakeAudioIn(0), FakeDetector(), skill, FakeTTS(), FakeOut(), arbiter)
+
+    async with arbiter.hold("reminder"):
+        # Arbiter is held: submit_text should block, so run it with a timeout and
+        # confirm nothing was handled while we held the lock.
+        import asyncio
+
+        with __import__("pytest").raises(asyncio.TimeoutError):
+            await asyncio.wait_for(pipeline.submit_text("hello"), timeout=0.05)
+    assert skill.handled == []  # never routed while the arbiter was held
+
+
+async def test_submit_text_ignores_blank():
+    skill = FakeSkill()
+    pipeline = _pipeline(FakeAudioIn(0), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter())
+    await pipeline.submit_text("   ")
+    assert skill.handled == []
+
+
 async def test_skill_exception_is_spoken_and_loop_survives():
     detector = FakeDetector()
     tts = FakeTTS()

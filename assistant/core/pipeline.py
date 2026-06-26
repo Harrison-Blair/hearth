@@ -94,6 +94,20 @@ class VoicePipeline:
             self._detector.reset()
             log.info("Listening for wake word...")
 
+    async def submit_text(self, text: str) -> None:
+        """Inject a typed command as if it had been transcribed from speech.
+
+        Used by the control channel (the monitor TUI's chat box). Runs the same
+        route -> skill -> speak path as a spoken turn, and holds the arbiter so a
+        typed turn can't collide with wake capture or a reminder announcement.
+        """
+        text = text.strip()
+        if not text:
+            return
+        log.info("Heard (typed): %r", text)
+        async with self._arbiter.hold("text"):
+            await self._handle(text)
+
     async def _handle(self, transcript: str) -> None:
         intent = await self._router.route(transcript)
         skill = self._registry.get(intent.type)

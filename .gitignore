@@ -8,6 +8,7 @@ dist/
 *.db-journal
 *.db-wal
 *.db-shm
+.env
 models/*
 !models/wake/
 models/wake/*
@@ -19,3 +20,6 @@ training/data/
 training/work/
 training/piper-sample-generator/
 training/.venv-train/
+
+# Scraped Ollama registry cache (discovery.py)
+.cache/

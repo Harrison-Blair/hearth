@@ -26,3 +26,8 @@ def tone(sample_rate: int, *, freq: float = 660.0, ms: int = 180, amplitude: flo
     envelope[-fade:] = np.linspace(1.0, 0.0, fade, dtype=np.float32)
     samples = (wave * envelope * 32767.0).astype(np.int16)
     return samples.tobytes()
+
+
+def chime(sample_rate: int) -> bytes:
+    """A short two-note ascending chime as int16 PCM at ``sample_rate``."""
+    return tone(sample_rate, freq=660.0, ms=120) + tone(sample_rate, freq=880.0, ms=160)
