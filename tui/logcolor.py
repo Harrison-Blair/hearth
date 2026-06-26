@@ -65,6 +65,19 @@ def colorize_message(message: str) -> Text:
     return _style_message(message)
 
 
+# Repeat counter for collapsed duplicate lines — dim+italic so it reads as an
+# annotation, distinct from the actual log data (whose styling is untouched).
+_COUNTER_STYLE = "dim italic"
+
+
+def with_counter(text: Text, count: int) -> Text:
+    """Return a copy of `text` with a dim ``×count`` repeat counter appended."""
+    out = text.copy()
+    out.append("  ")  # plain separator, so only the counter token carries the style
+    out.append(f"×{count}", style=_COUNTER_STYLE)
+    return out
+
+
 def _style_message(message: str) -> Text:
     """Highlight a [tag], a prompt:/system:/response: label, and quoted content."""
     text = Text(message)

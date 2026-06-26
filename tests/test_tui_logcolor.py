@@ -1,4 +1,4 @@
-from tui.logcolor import colorize_line, colorize_message
+from tui.logcolor import colorize_line, colorize_message, with_counter
 
 
 def _style_over(text, substring):
@@ -62,3 +62,14 @@ def test_freeform_level_keyword_and_status_code():
 def test_freeform_warn_keyword_maps_to_warning_style():
     text = colorize_line("[GIN] level=WARN msg=slow")
     assert _style_over(text, "WARN") == "bold bright_yellow"
+
+
+def test_with_counter_appends_dim_span_without_touching_data():
+    line = "12:34:56 INFO    assistant.core.pipeline: ok"
+    base = colorize_line(line)
+    out = with_counter(base, 5)
+    # The original data is unchanged; the counter is a distinct dim span.
+    assert out.plain == f"{line}  ×5"
+    assert base.plain == line  # source not mutated
+    assert str(_style_over(out, "×5")) == "dim italic"
+    assert _style_over(out, "12:34:56") == "bold bright_cyan"  # data styling intact

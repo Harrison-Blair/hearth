@@ -1,4 +1,4 @@
-from tui.logparse import parse
+from tui.logparse import dedup_key, parse
 
 
 def test_parses_well_formed_line():
@@ -32,3 +32,17 @@ def test_non_matching_line_falls_back_gracefully():
     assert p.message == line
     assert p.raw == line
     assert p.is_llm is False
+
+
+def test_dedup_key_ignores_timestamp():
+    # Same event a second apart collapses; differing message does not.
+    a = parse("12:00:00 WARNING assistant.llm: reconnecting")
+    b = parse("12:00:01 WARNING assistant.llm: reconnecting")
+    c = parse("12:00:02 WARNING assistant.llm: gave up")
+    assert dedup_key(a) == dedup_key(b)
+    assert dedup_key(a) != dedup_key(c)
+
+
+def test_dedup_key_falls_back_to_raw_for_unparsed_lines():
+    line = '  File "x.py", line 3, in <module>'
+    assert dedup_key(parse(line)) == line

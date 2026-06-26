@@ -38,3 +38,14 @@ def parse(line: str) -> LogLine:
         return LogLine(None, None, None, line, line)
     ts, level, logger, message = m.groups()
     return LogLine(ts, level, logger, message, line)
+
+
+def dedup_key(line: LogLine) -> str:
+    """Key for collapsing consecutive duplicate log lines (ignores the timestamp).
+
+    Two events that differ only by their per-second timestamp share a key, so a
+    repeating message collapses. Unparsed lines (tracebacks, raw prints) fall back
+    to the verbatim text — they collapse only when byte-identical."""
+    if line.level is None:
+        return line.raw
+    return f"{line.level}\x00{line.logger}\x00{line.message}"

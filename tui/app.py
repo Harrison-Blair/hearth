@@ -40,8 +40,9 @@ from textual.widgets.selection_list import Selection
 from assistant.wake import registry
 from tui import configfile, discovery, envfile
 from tui.config_schema import FIELDS, Field, changed_fields, coerce, overrides_for
+from tui.collapse import CollapsingWriter
 from tui.logcolor import colorize_line, colorize_message
-from tui.logparse import parse
+from tui.logparse import dedup_key, parse
 from tui.supervisor import ENV_FILE, DaemonSupervisor, free_ollama_port
 
 if TYPE_CHECKING:
@@ -299,6 +300,10 @@ class AssistantTUI(App):
         self._applog = self.query_one("#applog", RichLog)
         self._llmlog = self.query_one("#llmlog", RichLog)
         self._ollamalog = self.query_one("#ollamalog", RichLog)
+        # Collapse consecutive duplicate lines per pane into a single ×N counter.
+        self._applog_cw = CollapsingWriter(self._applog)
+        self._llmlog_cw = CollapsingWriter(self._llmlog)
+        self._ollamalog_cw = CollapsingWriter(self._ollamalog)
         self.query_one("#envedit", TextArea).text = envfile.read(ENV_FILE)
         self.run_worker(self._populate_selects(), group="selects")
         self.run_worker(self._refresh_installed(), group="installed")
@@ -565,9 +570,10 @@ class AssistantTUI(App):
     async def _pump(self) -> None:
         async for line in self.supervisor.lines():
             parsed = parse(line)
-            self._applog.write(colorize_line(parsed.raw))
+            key = dedup_key(parsed)
+            self._applog_cw.write(colorize_line(parsed.raw), key)
             if parsed.is_llm:
-                self._llmlog.write(colorize_message(parsed.message or parsed.raw))
+                self._llmlog_cw.write(colorize_message(parsed.message or parsed.raw), key)
         # stdout EOF: the child exited.
         if self._state != "restarting":
             self._set_state("stopped")
@@ -596,6 +602,9 @@ class AssistantTUI(App):
         self._applog.clear()
         self._llmlog.clear()
         self._ollamalog.clear()
+        self._applog_cw.reset()
+        self._llmlog_cw.reset()
+        self._ollamalog_cw.reset()
 
     async def _restart(self) -> None:
         self._set_state("restarting")
@@ -667,7 +676,7 @@ class AssistantTUI(App):
 
     async def _pump_ollama(self) -> None:
         async for line in self.ollama.lines():
-            self._ollamalog.write(colorize_line(line))
+            self._ollamalog_cw.write(colorize_line(line), line)
 
     async def _health_loop(self) -> None:
         while True:
