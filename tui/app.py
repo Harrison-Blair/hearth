@@ -53,7 +53,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 VOLUME_ENV = "ASSISTANT_AUDIO__OUTPUT_VOLUME"
-VOLUME_PRESETS = [("25%", 0.25), ("50%", 0.5), ("75%", 0.75), ("100%", 1.0)]
 MAX_LOG_LINES = 1000
 ENV_EXAMPLE_FILE = "env.example"
 HEALTH_POLL_SECONDS = 5.0
@@ -188,6 +187,8 @@ class AssistantTUI(App):
     RichLog { background: $surface; }
     .volume-row { height: 3; align: left middle; }
     .volume-row Button { margin: 0 1; min-width: 8; }
+    .volume-row Input { width: 9; }
+    .volume-row Label { width: auto; height: 3; content-align: left middle; padding: 0 1; }
     .llm-row { height: 3; align: left middle; }
     .llm-row Button { margin: 0 1; }
     #ollama-status { padding: 0 1; content-align: left middle; height: 3; }
@@ -212,8 +213,6 @@ class AssistantTUI(App):
     #registry-detail { width: 1fr; height: auto; border: round $panel; padding: 0 1; color: $text-muted; }
     .env-buttons { dock: top; height: 3; align: center middle; }
     .env-buttons Button { margin: 0 1; min-width: 8; }
-    .config-buttons { height: 3; align: center middle; }
-    .config-buttons Button { margin: 0 1; min-width: 8; }
     #envedit { height: 1fr; }
     #chat { dock: bottom; }
     """
@@ -282,13 +281,14 @@ class AssistantTUI(App):
 
     def _compose_config(self) -> ComposeResult:
         with VerticalScroll():
-            with Horizontal(classes="config-buttons"):
-                yield Button("Save", id="config-save", variant="primary")
-                yield Button("Reset to default", id="config-reset", variant="warning")
             with Horizontal(classes="volume-row"):
                 yield Button("Unmute" if self._muted else "Mute", id="vol-mute", variant="warning")
-                for label, _ in VOLUME_PRESETS:
-                    yield Button(label, id=f"vol-{int(_ * 100)}")
+                yield Label("Volume %")
+                yield Input(
+                    value=str(int(round(self._volume * 100))), id="vol-input", type="integer"
+                )
+                yield Button("Save", id="config-save", variant="primary")
+                yield Button("Reset to default", id="config-reset", variant="warning")
             with Horizontal(classes="llm-row"):
                 yield Static("ollama: …", id="ollama-status")
             for field in FIELDS:
@@ -845,22 +845,26 @@ class AssistantTUI(App):
 
     # ---- volume / mute -------------------------------------------------------
 
-    @on(Button.Pressed, ".volume-row Button")
-    async def _on_volume_button(self, event: Button.Pressed) -> None:
-        if event.button.id == "vol-mute":
-            if self._muted:
-                await self._apply_volume(self._last_volume, muted=False)
-            else:
-                if self._volume > 0.0:
-                    self._last_volume = self._volume
-                await self._apply_volume(0.0, muted=True)
-            self.query_one("#vol-mute", Button).label = "Unmute" if self._muted else "Mute"
+    @on(Button.Pressed, "#vol-mute")
+    async def _on_mute(self) -> None:
+        if self._muted:
+            await self._apply_volume(self._last_volume, muted=False)
+        else:
+            if self._volume > 0.0:
+                self._last_volume = self._volume
+            await self._apply_volume(0.0, muted=True)
+        self.query_one("#vol-mute", Button).label = "Unmute" if self._muted else "Mute"
+
+    @on(Input.Submitted, "#vol-input")
+    async def _on_volume_input(self, event: Input.Submitted) -> None:
+        try:
+            pct = int(event.value)
+        except ValueError:
             return
-        for _, value in VOLUME_PRESETS:
-            if event.button.id == f"vol-{int(value * 100)}":
-                await self._apply_volume(value, muted=False)
-                self.query_one("#vol-mute", Button).label = "Mute"
-                return
+        pct = max(0, min(100, pct))
+        value = pct / 100
+        await self._apply_volume(value, muted=value == 0)
+        self.query_one("#vol-mute", Button).label = "Unmute" if self._muted else "Mute"
 
     async def _apply_volume(self, value: float, *, muted: bool) -> None:
         self._volume = value
@@ -871,6 +875,10 @@ class AssistantTUI(App):
         self._overrides[VOLUME_ENV] = str(value)
         try:
             self.query_one(f"#{_field_id(_volume_field())}", Input).value = str(value)
+        except Exception:  # noqa: BLE001 - widget may not exist in a custom layout
+            pass
+        try:
+            self.query_one("#vol-input", Input).value = str(int(round(value * 100)))
         except Exception:  # noqa: BLE001 - widget may not exist in a custom layout
             pass
         self._refresh_status()
