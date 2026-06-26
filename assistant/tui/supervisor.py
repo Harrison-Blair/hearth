@@ -21,7 +21,13 @@ from assistant.tui import envfile
 
 log = logging.getLogger(__name__)
 
-DAEMON_ARGV = [sys.executable, "-m", "assistant.app"]
+# Frozen: sys.executable is the onefile binary (which defaults to the daemon).
+# From source: spawn the daemon module under the interpreter.
+DAEMON_ARGV = (
+    [sys.executable]
+    if getattr(sys, "frozen", False)
+    else [sys.executable, "-m", "assistant.app"]
+)
 ENV_FILE = ".env"
 _PID_RE = re.compile(r"pid=(\d+)")
 
