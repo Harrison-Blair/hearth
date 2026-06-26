@@ -14,6 +14,7 @@ import inspect
 import json
 import logging
 import re
+from collections import deque
 from typing import TYPE_CHECKING
 
 from textual import on
@@ -113,22 +114,68 @@ def _registry_detail_text(m: "discovery.RegistryModel") -> Text:
 
 
 class ScreenWidthRichLog(RichLog):
-    """A RichLog that wraps to its on-screen width.
+    """A RichLog that wraps to its on-screen width and re-wraps on demand.
 
     Textual's ``RichLog.write`` measures content against ``app.console``, whose
     width is the ``COLUMNS`` env var (default 80) — not the widget's actual size
     — so text wraps at ~80 cols regardless of terminal width. Defaulting
     ``width`` to the live content region makes wrapping track the screen.
+
+    A line written while its tab is hidden has a 0-width content region, so it
+    falls back to ``min_width`` and wraps wrong. ``RichLog`` only keeps the
+    pre-wrapped strips (no source), so we record each logical line's source and
+    :meth:`reflow` re-wraps the backlog to the current width — called when the
+    tab is reselected (see ``AssistantTUI._reflow_active_logs``).
     """
 
+    _records_history = True  # marker CollapsingWriter duck-types on
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Source per logical line, capped like the rendered backlog (max_lines).
+        self._history: deque = deque(maxlen=self.max_lines)
+        self._wrap_width: int | None = None  # width the backlog is wrapped at
+
     def write(
-        self, content, width=None, expand=False, shrink=True, scroll_end=None, animate=False
+        self,
+        content,
+        width=None,
+        expand=False,
+        shrink=True,
+        scroll_end=None,
+        animate=False,
+        replace_last=False,
     ):
         if width is None:
             region = self.scrollable_content_region.width
             if region:
                 width = region
-        return super().write(content, width, expand, shrink, scroll_end, animate)
+        result = super().write(content, width, expand, shrink, scroll_end, animate)
+        # Record only once actually rendered: super() defers writes until the size
+        # is known, then replays them through write(), which would double-record.
+        if self._size_known:
+            if replace_last and self._history:
+                self._history[-1] = content  # collapse rewrote the last line in place
+            else:
+                self._history.append(content)
+            self._wrap_width = width or self.scrollable_content_region.width or self.min_width
+        return result
+
+    def clear(self):
+        self._history.clear()
+        self._wrap_width = None
+        return super().clear()
+
+    def reflow(self) -> bool:
+        """Re-wrap the recorded backlog to the current width. True if it changed."""
+        region = self.scrollable_content_region.width
+        if not region or not self._history or region == self._wrap_width:
+            return False
+        entries = list(self._history)
+        self.clear()
+        for content in entries:
+            self.write(content)
+        return True
 
 
 class AssistantTUI(App):
@@ -304,6 +351,12 @@ class AssistantTUI(App):
         self._applog_cw = CollapsingWriter(self._applog)
         self._llmlog_cw = CollapsingWriter(self._llmlog)
         self._ollamalog_cw = CollapsingWriter(self._ollamalog)
+        # Collapse writer per log id, so a re-wrap can restart its (now stale) run.
+        self._cw_for = {
+            "applog": self._applog_cw,
+            "llmlog": self._llmlog_cw,
+            "ollamalog": self._ollamalog_cw,
+        }
         self.query_one("#envedit", TextArea).text = envfile.read(ENV_FILE)
         self.run_worker(self._populate_selects(), group="selects")
         self.run_worker(self._refresh_installed(), group="installed")
@@ -311,6 +364,22 @@ class AssistantTUI(App):
             self.run_worker(self._do_search(self._last_query), group="search", exclusive=True)
         self.run_worker(self._startup(), group="startup")
         self.run_worker(self._health_loop(), group="health")
+
+    @on(TabbedContent.TabActivated)
+    def _reflow_active_logs(self, event: TabbedContent.TabActivated) -> None:
+        # A log wrapped at the wrong width while its tab was hidden; re-wrap it to
+        # the visible width now. Defer until after refresh so the content region
+        # has its on-screen size.
+        pane = event.pane
+        if pane is not None:
+            self.call_after_refresh(self._reflow_pane_logs, pane)
+
+    def _reflow_pane_logs(self, pane: TabPane) -> None:
+        for widget in pane.query(ScreenWidthRichLog):
+            if widget.reflow():
+                cw = self._cw_for.get(widget.id)
+                if cw is not None:
+                    cw.reset()  # the run's tail strip count is stale after re-wrap
 
     @on(TabbedContent.TabActivated, pane="#tab-models")
     def _on_models_tab(self) -> None:
