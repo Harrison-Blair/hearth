@@ -27,7 +27,7 @@ LEVEL_STYLES: dict[str, str] = {
 
 _TIMESTAMP_STYLE = "bold bright_cyan"
 _LOGGER_STYLE = "bold bright_blue"
-_QUOTE_STYLE = "bold bright_magenta"
+_QUOTE_STYLE = "bold bright_green"
 _TAG_STYLE = "bold bright_cyan"
 _LABEL_STYLE = "bold"
 
@@ -96,4 +96,4 @@ def _status_style(code: str) -> str:
         return "bold bright_green"
     if code[0] == "3":
         return "bold bright_yellow"
-    return "bold white on red"  # 4xx / 5xx
+    return "bold bright_blue"  # 4xx / 5xx — blue, not an alarming red

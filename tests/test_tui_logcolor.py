@@ -41,7 +41,7 @@ def test_timestamp_and_logger_styled():
 
 def test_quoted_content_highlighted():
     line = "12:00:00 INFO    assistant.core.pipeline: Reply: 'it is noon'"
-    assert _style_over(colorize_line(line), "'it is noon'") == "bold bright_magenta"
+    assert _style_over(colorize_line(line), "'it is noon'") == "bold bright_green"
 
 
 def test_llm_message_tag_and_label():
@@ -55,8 +55,8 @@ def test_freeform_level_keyword_and_status_code():
     line = '[GIN] ERROR | 500 | failed "/api/chat"'
     text = colorize_line(line)
     assert _style_over(text, "ERROR") == "bold white on red"
-    assert _style_over(text, "500") == "bold white on red"
-    assert _style_over(text, '"/api/chat"') == "bold bright_magenta"
+    assert _style_over(text, "500") == "bold bright_blue"
+    assert _style_over(text, '"/api/chat"') == "bold bright_green"
 
 
 def test_freeform_warn_keyword_maps_to_warning_style():
