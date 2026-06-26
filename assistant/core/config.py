@@ -10,6 +10,8 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
+from assistant.wake.registry import phrases_for
+
 
 class AudioConfig(BaseModel):
     # null -> system default; int -> device index; str -> name substring match.
@@ -31,7 +33,6 @@ class RecorderConfig(BaseModel):
 
 
 class WakeConfig(BaseModel):
-    phrase: str = "hey assistant"
     model_path: str | None = None
     model_paths: list[str] | None = None  # load a series of models (any wakes)
     model_name: str = "hey_jarvis"
@@ -43,6 +44,10 @@ class WakeConfig(BaseModel):
         if self.model_paths:
             return self.model_paths
         return [self.model_path] if self.model_path else [self.model_name]
+
+    def phrases(self) -> list[str]:
+        """The acceptable wake phrases, derived from the loaded models."""
+        return phrases_for(self.model_refs())
 
 
 class SttConfig(BaseModel):

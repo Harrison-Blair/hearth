@@ -21,7 +21,6 @@ recorder:
   preroll_frames: 6         # ~0.5s kept before wake to recover a clipped command
 
 wake:
-  phrase: "hey assistant"
   model_path: "models/wake/hey_assistant.onnx"   # trained "hey assistant" model (Phase 2a)
   model_name: "hey_jarvis"  # stock fallback if model_path is unset
   threshold: 0.6

@@ -40,7 +40,7 @@ def test_web_search_env_override(monkeypatch):
 def test_loads_yaml_and_overrides_defaults():
     # Config() reads config.yaml from the repo root (pytest cwd).
     cfg = Config()
-    assert cfg.wake.phrase == "hey assistant"
+    assert cfg.wake.phrases() == ["hey assistant"]  # derived from the loaded model
     assert cfg.stt.model == "base.en"
     assert cfg.audio.sample_rate == 16000
     assert cfg.wake.threshold == 0.6  # config.yaml overrides the 0.5 default

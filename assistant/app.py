@@ -59,7 +59,7 @@ def main() -> None:
     log.info("Personal assistant booting (v%s)", __import__("assistant").__version__)
     log.info(
         "Config: wake=%r models=%s | stt=%s | llm=%s@%s | tts=%s",
-        config.wake.phrase,
+        ", ".join(config.wake.phrases()),
         config.wake.model_refs(),
         config.stt.model,
         config.llm.model,
