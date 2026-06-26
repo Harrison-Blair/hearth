@@ -49,5 +49,17 @@ storage:
 scheduling:
   poll_seconds: 1.0       # how often the scheduler checks for due reminders
 
+web_search:
+  provider: "ddgs"        # keyless DuckDuckGo scraper
+  result_count: 3
+  timeout: 10.0
+  region: "wt-wt"         # wt-wt = no region
+  timelimit: "d"          # recency window: d/w/m/y; bias toward fresh results
+  max_snippet_chars: 500  # truncate each result body
+  # Optional keyed accelerator (live answer box). Set the key via
+  # ASSISTANT_WEB_SEARCH__API_KEY; leave blank to stay keyless (ddgs only).
+  api_key: ""
+  tavily_endpoint: "https://api.tavily.com/search"
+
 logging:
   level: "INFO"

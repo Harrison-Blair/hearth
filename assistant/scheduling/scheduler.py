@@ -21,6 +21,10 @@ from assistant.tts.base import TextToSpeech
 
 log = logging.getLogger(__name__)
 
+# Spoken once on boot when the app was off as several reminders came due, so the
+# user hears one "while I was away" recap instead of a burst of separate alerts.
+_AWAY_PREAMBLE = "While I was away, {n} reminders came due."
+
 
 class ReminderScheduler:
     def __init__(
@@ -39,12 +43,20 @@ class ReminderScheduler:
         self._arbiter = arbiter
         self._poll_seconds = poll_seconds
         self._now = now
+        # The first poll returns the whole backlog that came due while we were off;
+        # coalesce it into one announcement. Steady-state polls fire one at a time.
+        self._first_poll = True
 
     async def run(self) -> None:
         log.info("Reminder scheduler started (poll=%.1fs)", self._poll_seconds)
         while True:
-            for reminder in self._store.due(self._now()):
-                await self._fire(reminder)
+            due = self._store.due(self._now())
+            if self._first_poll and len(due) > 1:
+                await self._fire_summary(due)
+            else:
+                for reminder in due:
+                    await self._fire(reminder)
+            self._first_poll = False
             await asyncio.sleep(self._poll_seconds)
 
     async def _fire(self, reminder) -> None:
@@ -52,6 +64,17 @@ class ReminderScheduler:
             log.info("Reminder due: %r", reminder.speech)
             async with self._arbiter.hold("reminder"):
                 await self._audio_out.play(await self._tts.synthesize(reminder.speech))
-            self._store.mark_fired(reminder.id)
+            self._store.delete(reminder.id)
         except Exception as exc:  # noqa: BLE001 - one failure must not kill the loop
             log.error("Failed to fire reminder %s: %s", reminder.id, exc)
+
+    async def _fire_summary(self, due) -> None:
+        try:
+            log.info("Catch-up: %d reminders came due while away", len(due))
+            text = _AWAY_PREAMBLE.format(n=len(due)) + " " + " ".join(r.speech for r in due)
+            async with self._arbiter.hold("reminder"):
+                await self._audio_out.play(await self._tts.synthesize(text))
+            for reminder in due:
+                self._store.delete(reminder.id)
+        except Exception as exc:  # noqa: BLE001 - one failure must not kill the loop
+            log.error("Failed to announce catch-up summary: %s", exc)

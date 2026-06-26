@@ -38,6 +38,11 @@ class ReminderStore:
     def __init__(self, db_path: str) -> None:
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
+        # WAL lets the scheduler's reads and writes overlap without blocking, and
+        # synchronous=NORMAL trades a vanishingly small crash-durability window for
+        # far fewer fsyncs. No-ops on an in-memory db. (WAL spawns -wal/-shm sidecars.)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 

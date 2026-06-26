@@ -70,6 +70,20 @@ class SchedulingConfig(BaseModel):
     poll_seconds: float = 1.0  # how often the scheduler checks for due reminders
 
 
+class WebSearchConfig(BaseModel):
+    provider: str = "ddgs"
+    result_count: int = 3
+    timeout: float = 10.0
+    region: str = "wt-wt"  # ddgs region; wt-wt = no region
+    timelimit: str = "d"  # ddgs recency window: d/w/m/y; bias toward fresh results
+    max_snippet_chars: int = 500  # truncate each result body (latency + injection surface)
+    # Optional keyed accelerator. When set, app.py uses Tavily (live answer box) with
+    # the keyless ddgs scraper as fallback. Usually supplied via
+    # ASSISTANT_WEB_SEARCH__API_KEY rather than committed to config.yaml.
+    api_key: str = ""
+    tavily_endpoint: str = "https://api.tavily.com/search"
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
@@ -90,6 +104,7 @@ class Config(BaseSettings):
     tts: TtsConfig = TtsConfig()
     storage: StorageConfig = StorageConfig()
     scheduling: SchedulingConfig = SchedulingConfig()
+    web_search: WebSearchConfig = WebSearchConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @classmethod

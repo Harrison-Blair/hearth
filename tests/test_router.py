@@ -48,6 +48,22 @@ async def test_manage_reminders_disambiguate():
     assert (await router.route("what are my reminders")).type == "list_reminders"
 
 
+async def test_web_search_keyphrases_route_and_preserve_others():
+    # Mirror app.py registration order.
+    router = KeyphraseRouter()
+    router.add("reminder", "remind me", "set a reminder")
+    router.add("list_reminders", "my reminders", "any reminders", "have reminders")
+    router.add("web_search", "search the web", "search for", "look up", "look it up",
+               "google", "what's the latest", "latest on")
+
+    assert (await router.route("search the web for the weather")).type == "web_search"
+    assert (await router.route("what's the latest on the election")).type == "web_search"
+    assert (await router.route("look up the world cup score")).type == "web_search"
+    # Existing intents still route; a bare question falls through to general.
+    assert (await router.route("remind me to call mom")).type == "reminder"
+    assert (await router.route("what is the capital of France")).type == "general"
+
+
 async def test_clock_keyphrases_route_to_clock_intents():
     router = KeyphraseRouter()
     router.add("time", "what time", "the time")

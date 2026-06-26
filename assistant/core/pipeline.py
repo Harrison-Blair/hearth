@@ -38,6 +38,7 @@ class VoicePipeline:
         arbiter: AudioArbiter,
         preroll_frames: int = 6,
         sample_rate: int = 16000,
+        no_speech_earcon: bytes = b"",
     ) -> None:
         self._audio_in = audio_in
         self._detector = detector
@@ -52,6 +53,9 @@ class VoicePipeline:
         # immediately after the wake word (clipped by detection latency) is recovered.
         self._preroll_frames = preroll_frames
         self._sample_rate = sample_rate
+        # Short blip played when we wake but hear nothing, so the user gets
+        # feedback instead of silence. Empty -> no earcon (e.g. in tests).
+        self._no_speech_earcon = no_speech_earcon
 
     async def run(self) -> None:
         frames = self._audio_in.stream()
@@ -84,6 +88,8 @@ class VoicePipeline:
                     await self._handle(transcript)
                 else:
                     log.info("No speech captured.")
+                    if self._no_speech_earcon:
+                        await self._audio_out.play(self._no_speech_earcon)
 
             self._detector.reset()
             log.info("Listening for wake word...")
@@ -97,7 +103,12 @@ class VoicePipeline:
             return
 
         log.info("Routing to skill %r (intent=%s)", skill.name, intent.type)
-        result = await skill.handle(Command(transcript), intent)
+        try:
+            result = await skill.handle(Command(transcript), intent)
+        except Exception as exc:  # noqa: BLE001 - a skill crash must not kill the loop
+            log.error("Skill %r failed: %s", skill.name, exc)
+            await self._speak("Sorry, something went wrong.")
+            return
         log.info("Reply: %r", result.speech)
         await self._speak(result.speech)
 

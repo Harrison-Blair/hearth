@@ -42,12 +42,21 @@ class FakeRecorder:
 
 
 class FakeSTT:
-    def __init__(self):
+    def __init__(self, transcript="what time is it"):
         self.calls = []
+        self._transcript = transcript
 
     async def transcribe(self, audio):
         self.calls.append(audio)
-        return "what time is it"
+        return self._transcript
+
+
+class RaisingSkill(Skill):
+    name = "raising"
+    intents = {"general"}
+
+    async def handle(self, cmd, intent):
+        raise RuntimeError("skill boom")
 
 
 class FakeSkill(Skill):
@@ -79,12 +88,13 @@ class FakeOut:
         self.played.append(audio)
 
 
-def _pipeline(audio_in, detector, skill, tts, out, arbiter):
+def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None, no_speech_earcon=b""):
     registry = SkillRegistry()
     registry.register(skill, default=True)
     return VoicePipeline(
-        audio_in, detector, FakeRecorder(), FakeSTT(),
+        audio_in, detector, FakeRecorder(), stt or FakeSTT(),
         KeyphraseRouter(), registry, tts, out, arbiter,
+        no_speech_earcon=no_speech_earcon,
     )
 
 
@@ -120,3 +130,47 @@ async def test_busy_arbiter_skips_wake_detection():
     assert skill.handled == []
     assert tts.spoke == []
     assert out.played == []
+
+
+async def test_no_speech_plays_earcon():
+    skill = FakeSkill()
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, tts, out, AudioArbiter(),
+        stt=FakeSTT(transcript=""), no_speech_earcon=b"BEEP",
+    )
+
+    await pipeline.run()
+
+    assert out.played == [b"BEEP"]  # blip instead of silence
+    assert skill.handled == []      # nothing transcribed -> no routing
+    assert tts.spoke == []
+
+
+async def test_no_speech_without_earcon_plays_nothing():
+    skill = FakeSkill()
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, tts, out, AudioArbiter(),
+        stt=FakeSTT(transcript=""),  # default earcon is empty
+    )
+
+    await pipeline.run()
+
+    assert out.played == []
+    assert tts.spoke == []
+
+
+async def test_skill_exception_is_spoken_and_loop_survives():
+    detector = FakeDetector()
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(FakeAudioIn(3), detector, RaisingSkill(), tts, out, AudioArbiter())
+
+    await pipeline.run()
+
+    assert tts.spoke == ["Sorry, something went wrong."]
+    assert out.played == [b"AUDIO"]
+    assert detector.resets == 1  # turn completed; loop kept going

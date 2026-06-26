@@ -1,10 +1,25 @@
-from assistant.core.config import Config, LlmConfig, WakeConfig
+from assistant.core.config import Config, LlmConfig, WakeConfig, WebSearchConfig
 
 
 def test_model_defaults():
     # Defaults live on the sub-models, independent of config.yaml.
     assert WakeConfig().threshold == 0.5
     assert LlmConfig().provider == "ollama"
+    assert WebSearchConfig().provider == "ddgs"
+    assert WebSearchConfig().result_count == 3
+
+
+def test_web_search_config_loads():
+    cfg = Config()
+    assert cfg.web_search.provider == "ddgs"
+    assert cfg.web_search.region == "wt-wt"
+    assert cfg.web_search.timelimit == "d"
+    assert cfg.web_search.api_key == ""  # keyless by default
+
+
+def test_web_search_env_override(monkeypatch):
+    monkeypatch.setenv("ASSISTANT_WEB_SEARCH__RESULT_COUNT", "5")
+    assert Config().web_search.result_count == 5
 
 
 def test_loads_yaml_and_overrides_defaults():

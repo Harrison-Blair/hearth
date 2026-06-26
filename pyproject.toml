@@ -25,8 +25,11 @@ vad = ["webrtcvad", "setuptools<81"]  # webrtcvad imports pkg_resources (removed
 llm = ["httpx"]  # async HTTP client for the Ollama provider
 nlu = ["dateparser"]
 scheduling = ["apscheduler"]
-search = ["ddgs"]  # keyless DuckDuckGo scraper for the web search skill
+search = ["ddgs", "httpx"]  # keyless ddgs scraper + httpx for the keyed Tavily backend
 dev = ["pytest", "pytest-asyncio", "ruff"]
+# Every runtime capability in one shot. Excludes openWakeWord, which must be
+# installed with --no-deps (see the `wake` note above).
+all = ["personal-assistant[tts,wake,stt,vad,llm,nlu,scheduling,search]"]
 
 [project.scripts]
 assistant = "assistant.app:main"
