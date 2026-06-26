@@ -58,9 +58,9 @@ bash training/train.sh --phrase "athena" --smoke      # quick validation first
 bash training/train.sh --phrase "friday" --name fri   # custom model-file name
 ```
 
-This stamps a config from `wakeword.yml` (overriding only the phrase + model
-name), trains, installs `models/wake/<name>.onnx`, and prints the `config.yaml`
-lines. Each phrase gets its own clips/model, so runs never clobber each other.
+This stamps a config from `wakeword.yml` (overriding the phrase + model name),
+trains, installs `models/wake/<name>.onnx`, and prints the `config.yaml` lines.
+Each phrase gets its own clips/model, so runs never clobber each other.
 
 **Pick the phrase well — this matters more than the tooling:**
 
@@ -70,9 +70,12 @@ lines. Each phrase gets its own clips/model, so runs never clobber each other.
 - **Short, common single words false-trigger heavily** ("go", "now", "hey") —
   everyday speech trips them. A short name ("Sam", "Max") is also harder than a
   long one.
-- For a **one-word trigger**, compensate in `wakeword.yml`: raise `n_samples`,
-  lower `target_false_positives_per_hour`, and add similar-sounding words to
-  `custom_negative_phrases`.
+- A **one-word trigger is auto-optimized for accuracy** by `make_config.py`: it
+  raises `n_samples`, lowers `target_false_positives_per_hour`, and seeds
+  `custom_negative_phrases` with the plural plus CMU-dictionary soundalikes (real
+  words that sound similar, to suppress false accepts). Soundalikes need the
+  training-only `pronouncing` dep (installed by `bootstrap.sh`); without it you
+  still get the plural plus openWakeWord's built-in phoneme-overlap negatives.
 - espeak handles most names; verify pronunciation for unusual spellings with
   `espeak-ng "your word"`.
 
@@ -183,7 +186,10 @@ frame, so load the series you actually use.
 
 - `wakeword.yml` → `n_samples` (more positives = more robust, slower), `steps`,
   `target_false_positives_per_hour`, `custom_negative_phrases` (add real-world
-  false triggers you observe). Changes here apply to every phrase you train.
+  false triggers you observe). These are the baseline for every phrase; a
+  single-word phrase additionally auto-tunes `n_samples`,
+  `target_false_positives_per_hour`, and `custom_negative_phrases` (see
+  "Changing the wake phrase").
 - `setup_data.py --audioset-shards N` for more background variety (500 clips each).
 - If it false-triggers or misses in your room, the highest-leverage fixes are
   raising `n_samples` and adding the offending phrases to `custom_negative_phrases`.

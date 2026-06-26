@@ -16,14 +16,14 @@ target_phrase:
 
 # Extra phrases to push down as negatives (beyond the auto phoneme-overlap ones).
 # Leave empty for the first pass; add real-world false triggers here later.
-# One-word "penguin" tune: similar-sounding words to suppress false accepts.
-custom_negative_phrases: ["penguins", "pelican", "pendulum", "begin again", "linguine", "engine"]
+# (A single-word phrase auto-seeds its plural + soundalikes here — make_config.py.)
+custom_negative_phrases: []
 
 # Synthetic clip counts. 20k positives is a solid first pass; the upstream docs
 # recommend 20k+ and note 100k+ is best. Raise for a more robust model (slower).
-# Raised to 40k for the one-word "penguin" trigger (more robust; slower Stage 1).
+# A single-word phrase auto-raises this to 40k for robustness (make_config.py).
 # `--smoke` overrides these to tiny values for a fast end-to-end validation run.
-n_samples: 40000
+n_samples: 20000
 n_samples_val: 2000
 tts_batch_size: 50
 augmentation_batch_size: 16
@@ -61,5 +61,5 @@ model_type: "dnn"
 layer_size: 32
 steps: 50000
 max_negative_weight: 1500
-# Lowered from 0.2 for the one-word "penguin" trigger (stricter false-accept gate).
-target_false_positives_per_hour: 0.1
+# A single-word phrase auto-lowers this to 0.1 (stricter accept gate; make_config.py).
+target_false_positives_per_hour: 0.2

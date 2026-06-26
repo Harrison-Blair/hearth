@@ -41,9 +41,10 @@ while [ $# -gt 0 ]; do
 done
 JOBS="${JOBS:-${WW_JOBS:-$(nproc)}}"   # core budget for this run (synth shards + stage 2-3 threads)
 
-# --phrase / --smoke stamp a config from wakeword.yml; an explicit *.yml is used
-# as-is; bare `train.sh` trains the default phrase straight from wakeword.yml.
-if [ -n "$PHRASE" ] || [ "$SMOKE" -eq 1 ]; then
+# Unless an explicit *.yml was given, stamp a config from wakeword.yml — so even
+# the bare default run passes through make_config.py and gets single-word
+# auto-tuning when the phrase is one word. An explicit *.yml is used as-is.
+if [ -z "$CFG" ]; then
   gen_args=()
   [ -n "$PHRASE" ] && gen_args+=(--phrase "$PHRASE")
   [ -n "$NAME" ] && gen_args+=(--name "$NAME")
@@ -51,7 +52,6 @@ if [ -n "$PHRASE" ] || [ "$SMOKE" -eq 1 ]; then
   CFG=$("$PY" training/make_config.py "${gen_args[@]}")
   echo "==> Generated config: $CFG"
 fi
-CFG="${CFG:-training/wakeword.yml}"
 MODEL=$("$PY" -c "import yaml; print(yaml.safe_load(open('$CFG'))['model_name'])")
 
 # Stage 1: Piper synthesizes positive + adversarial-negative clips (slowest step).
