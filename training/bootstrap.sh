@@ -38,6 +38,16 @@ pip install \
 pip install "openwakeword==0.6.0" --no-deps
 # --no-deps skips the bundled feature models; fetch them (melspectrogram + embedding).
 python -c "import openwakeword.utils as u; u.download_models([])"
+# Make Stages 2-3 (feature extraction + dataloader) honor a core budget: upstream
+# hardcodes os.cpu_count()//2, so train.sh exports OWW_NCPU and we patch the two
+# call sites to read it. Lets a single run use all cores and keeps parallel batches
+# (train_batch.sh --jobs) from oversubscribing. Idempotent (grep guard).
+TRAIN_PY="$(echo "$VENV"/lib/python*/site-packages/openwakeword/train.py)"
+if ! grep -q "OWW_NCPU" "$TRAIN_PY"; then
+  sed -i 's|n_cpus = n_cpus//2|n_cpus = int(os.environ.get("OWW_NCPU", os.cpu_count() or 1))|g' \
+    "$TRAIN_PY"
+  echo "    patched openwakeword.train to honor OWW_NCPU"
+fi
 
 echo "==> [3/6] Cloning piper-sample-generator (dscripka fork, espeak-based)"
 if [ ! -d "$FORK" ]; then

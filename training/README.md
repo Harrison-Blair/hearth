@@ -108,6 +108,32 @@ The gate thresholds are flags on `evaluate.py` (`--min-tp`, `--max-fp`,
 `--min-separation`) if you need to tune them; `train_batch.sh` evaluates at the
 `config.yaml` wake threshold (0.6).
 
+## Going faster (parallelism)
+
+Clip synthesis (Stage 1) is the long pole, and by default openWakeWord runs it in
+a single process. Both scripts take `--jobs N` to use a budget of **N cores**:
+
+```bash
+bash training/train.sh --phrase "athena" --jobs 16     # one phrase, 16 cores
+bash training/train_batch.sh --jobs 4 phrases.txt      # 4 phrases at a time
+```
+
+- **`train.sh --jobs N`** shards Stage 1 across N worker processes and runs
+  Stages 2–3 (features/train) on N threads. It also logs a live **ETA**
+  (`Stage 1: 6300/44000 clips (14%) · 12.4 clips/s · ~51m left`) and the total
+  Stage-1 time when done. Default `N` = `$WW_JOBS` or `nproc`.
+- **`train_batch.sh --jobs P`** trains P phrases concurrently, splitting the
+  `$WW_CORES` (default `nproc`) budget so each phrase gets `nproc/P` cores. Commits
+  are serialized after the wave (one per model, in input order); per-phrase output
+  goes to `training/work/<slug>.train.log` instead of streaming live.
+- Quality is unchanged — `n_samples` and every clip count stay the same; this is
+  pure parallelism, not a sample-count trade-off.
+- **Memory** is the limit: each synth worker loads its own ~255 MB Piper voice, so
+  `--jobs 16` needs ~10–14 GB RAM. Lower `--jobs` if you hit pressure.
+- `--jobs 1` is the original single-process behavior (unchanged). The core-budget
+  patch that lets Stages 2–3 use all cores is applied by `bootstrap.sh`; if you
+  bootstrapped before this change, re-run it (idempotent) to pick it up.
+
 ## Loading several phrases at once
 
 The runtime can load a **series** of models so any of them wakes the assistant —
@@ -138,7 +164,8 @@ frame, so load the series you actually use.
   validation set, plus RIR + AudioSet background audio. All resumable/idempotent.
 - **Disk:** features + generated clips need ~25–30 GB free under `training/`.
 - **Compute:** CPU is fine (the classifier is tiny). Clip generation is the long
-  pole (~hours for a 20k full run). No GPU/CUDA required.
+  pole (~hours for a 20k full run on one core) — use `--jobs N` to spread it
+  across cores (see "Going faster"). No GPU/CUDA required.
 - **Everything under `training/data`, `training/work`, `training/.venv-train`, and
   the cloned generator is git-ignored** — only `wakeword.yml` and the scripts are tracked.
 
