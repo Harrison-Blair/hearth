@@ -35,12 +35,12 @@ class RecorderConfig(BaseModel):
 class WakeConfig(BaseModel):
     model_path: str | None = None
     model_paths: list[str] | None = None  # load a series of models (any wakes)
-    model_name: str = "hey_jarvis"
+    model_name: str = "models/wake/hey_assistant.onnx"
     threshold: float = 0.5
 
     def model_refs(self) -> list[str]:
         """Models to load, most specific first: a series, else a single path,
-        else the stock bootstrap name."""
+        else the bundled default "hey assistant" model."""
         if self.model_paths:
             return self.model_paths
         return [self.model_path] if self.model_path else [self.model_name]

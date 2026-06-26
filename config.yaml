@@ -22,8 +22,7 @@ recorder:
 
 wake:
   model_path: "models/wake/hey_assistant.onnx"   # trained "hey assistant" model (Phase 2a)
-  model_name: "hey_jarvis"  # stock fallback if model_path is unset
-  threshold: 0.6
+  threshold: 0.5          # lower = fewer missed wakes (at the cost of more false ones)
 
 stt:
   model: "base.en"

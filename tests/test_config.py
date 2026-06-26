@@ -10,9 +10,9 @@ def test_model_defaults():
 
 
 def test_wake_model_refs_precedence():
-    # Stock fallback when nothing is configured.
-    assert WakeConfig().model_refs() == ["hey_jarvis"]
-    # A single custom path wins over the stock name.
+    # Bundled default model when nothing is configured.
+    assert WakeConfig().model_refs() == ["models/wake/hey_assistant.onnx"]
+    # A single custom path wins over the default.
     assert WakeConfig(model_path="a.onnx").model_refs() == ["a.onnx"]
     # A series wins over everything (the multi-phrase case).
     cfg = WakeConfig(model_path="a.onnx", model_paths=["a.onnx", "b.onnx"])
@@ -43,7 +43,7 @@ def test_loads_yaml_and_overrides_defaults():
     assert cfg.wake.phrases() == ["hey assistant"]  # derived from the loaded model
     assert cfg.stt.model == "base.en"
     assert cfg.audio.sample_rate == 16000
-    assert cfg.wake.threshold == 0.6  # config.yaml overrides the 0.5 default
+    assert cfg.wake.threshold == 0.5  # tuned for fewer missed wakes
     assert cfg.recorder.silence_ms == 800
     assert cfg.stt.beam_size == 5
     assert cfg.stt.vad_filter is True

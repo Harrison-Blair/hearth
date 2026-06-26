@@ -2,7 +2,7 @@
 
 Loads one or more models (``WakeConfig.model_refs()``): a series of trained
 ``.onnx`` paths so several phrases all wake the assistant, a single custom model,
-or a stock bootstrap model by name (e.g. ``hey_jarvis``) before any are trained.
+or the bundled default ``models/wake/hey_assistant.onnx`` when none is configured.
 Any loaded model firing above threshold triggers a wake.
 """
 
