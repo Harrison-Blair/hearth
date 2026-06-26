@@ -149,6 +149,45 @@ def test_wake_model_choices_pairs_phrase_and_path(tmp_path):
     ]
 
 
+def test_clean_smoke_models_deletes_files_and_prunes_manifest(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+
+    (tmp_path / "penguin.onnx").touch()
+    (tmp_path / "penguin_smoke.onnx").touch()
+    manifest = tmp_path / "models.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "penguin": {"phrase": "penguin", "model_path": "models/wake/penguin.onnx"},
+                "penguin_smoke": {
+                    "phrase": "penguin smoke",
+                    "model_path": "models/wake/penguin_smoke.onnx",
+                },
+            }
+        )
+    )
+    monkeypatch.setattr(discovery.registry, "MANIFEST", Path(manifest))
+
+    removed = discovery.clean_smoke_models(str(tmp_path))
+
+    assert removed == [str(tmp_path / "penguin_smoke.onnx")]
+    assert (tmp_path / "penguin.onnx").exists()
+    assert not (tmp_path / "penguin_smoke.onnx").exists()
+    assert json.loads(manifest.read_text()) == {
+        "penguin": {"phrase": "penguin", "model_path": "models/wake/penguin.onnx"}
+    }
+
+
+def test_clean_smoke_models_noop_when_none(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    (tmp_path / "penguin.onnx").touch()
+    monkeypatch.setattr(discovery.registry, "MANIFEST", Path(tmp_path / "models.json"))
+    assert discovery.clean_smoke_models(str(tmp_path)) == []
+    assert (tmp_path / "penguin.onnx").exists()
+
+
 def test_log_levels_static():
     assert discovery.log_levels() == ["DEBUG", "INFO", "WARNING", "ERROR"]
 

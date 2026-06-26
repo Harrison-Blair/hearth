@@ -13,6 +13,7 @@ import asyncio
 import inspect
 import json
 import logging
+import os
 import re
 from collections import deque
 from typing import TYPE_CHECKING
@@ -196,6 +197,7 @@ class AssistantTUI(App):
     /* Expand to fit the options; cap at ~10 rows and scroll the rest. */
     #field-wake_model_paths { height: auto; max-height: 12; border: round $panel; margin-bottom: 1; }
     #wake-phrases { height: auto; padding: 0 1; color: $text-muted; }
+    #wake-clean-smoke { margin: 1 0; }
     .models-search { height: 3; }
     .models-search Input { width: 1fr; }
     .models-search Button { margin: 0 1; }
@@ -296,6 +298,9 @@ class AssistantTUI(App):
                     yield Label(field.label)
                     yield self._field_widget(field)
                     yield Static(id="wake-phrases")
+                    yield Button(
+                        "Clean smoke-test models", id="wake-clean-smoke", variant="warning"
+                    )
                     continue
                 with Horizontal(classes="field-row"):
                     yield Label(field.label)
@@ -446,6 +451,18 @@ class AssistantTUI(App):
     @on(SelectionList.SelectedChanged, "#field-wake_model_paths")
     def _on_wake_models_changed(self) -> None:
         self._refresh_wake_phrases()
+
+    @on(Button.Pressed, "#wake-clean-smoke")
+    def _on_clean_smoke(self) -> None:
+        removed = discovery.clean_smoke_models()
+        if removed:
+            self._applog.write(
+                f"Removed {len(removed)} smoke-test model(s): "
+                + ", ".join(os.path.basename(p) for p in removed)
+            )
+        else:
+            self._applog.write("No smoke-test models to remove.")
+        self.run_worker(self._populate_selects(), group="selects")
 
     # ---- model detail --------------------------------------------------------
 

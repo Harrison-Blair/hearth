@@ -341,6 +341,29 @@ def wake_model_choices(root: str = WAKE_MODEL_DIR, **_: object) -> list[tuple[st
     return [(registry.phrase_for(path), path) for path in wake_models(root)]
 
 
+def clean_smoke_models(root: str = WAKE_MODEL_DIR) -> list[str]:
+    """Delete every wake model whose name ends in `_smoke` and drop its manifest
+    entry. Returns the deleted .onnx paths."""
+    removed = []
+    for path in wake_models(root):
+        if os.path.splitext(os.path.basename(path))[0].endswith("_smoke"):
+            os.remove(path)
+            removed.append(path)
+    if removed and registry.MANIFEST.exists():
+        data = _json.loads(registry.MANIFEST.read_text())
+        kept = {
+            k: v
+            for k, v in data.items()
+            if not k.endswith("_smoke")
+            and not os.path.splitext(os.path.basename(v.get("model_path", "")))[0].endswith(
+                "_smoke"
+            )
+        }
+        if kept != data:
+            registry.MANIFEST.write_text(_json.dumps(kept, indent=2, sort_keys=True) + "\n")
+    return removed
+
+
 def log_levels(**_: object) -> list[str]:
     return ["DEBUG", "INFO", "WARNING", "ERROR"]
 
