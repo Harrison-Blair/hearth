@@ -132,7 +132,10 @@ bash training/train_batch.sh --jobs 4 phrases.txt      # 4 phrases at a time
 - **`train.sh --jobs N`** shards Stage 1 across N worker processes and runs
   Stages 2–3 (features/train) on N threads. It also logs a live **ETA**
   (`Stage 1: 6300/44000 clips (14%) · 12.4 clips/s · ~51m left`) and the total
-  Stage-1 time when done. Default `N` = `$WW_JOBS` or `nproc`.
+  Stage-1 time when done. Stages 2–3 then render `Compute features` and
+  `Training (seq 1/2/3)` as live progress bars with ETA, degrading to plain
+  `Phase: cur/total (NN%)` lines under `--stream`/log capture. Default `N` =
+  `$WW_JOBS` or `nproc`.
 - **`train_batch.sh --jobs P`** trains P phrases concurrently, splitting the
   `$WW_CORES` (default `nproc`) budget so each phrase gets `nproc/P` cores. With
   the default `--jobs 1` a single phrase gets the whole budget (cap it with

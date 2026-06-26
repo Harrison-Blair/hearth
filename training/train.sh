@@ -82,21 +82,11 @@ export OWW_NCPU="$JOBS"
 # The ONNX (all the runtime needs) is written first, so tolerate the tflite failure
 # and verify the ONNX actually landed.
 t0=$SECONDS
-# Stream output live, but collapse just the trailing onnx_tf traceback (the
-# expected tflite-conversion failure) into one line. Any other traceback is
-# flushed verbatim at EOF, so a real failure still shows its full stack.
-"$PY" -m openwakeword.train --training_config "$CFG" --generate_clips --augment_clips --train_model 2>&1 \
-  | awk '
-      /^Traceback \(most recent call last\):/ { buffering=1; buf=$0; next }
-      buffering { buf=buf ORS $0; if ($0 ~ /onnx_tf/) tflite=1; next }
-      { print; next }
-      END {
-        if (buffering && tflite)
-          print "==> Skipping ONNX->tflite conversion (expected; runtime uses ONNX)."
-        else if (buffering)
-          print buf
-      }
-    ' || true
+# train_model.py runs this step behind per-phase rich progress bars and collapses
+# the expected onnx_tf tflite traceback to one line (any other traceback is
+# flushed verbatim, so a real failure still shows its full stack). It exits with
+# the subprocess's code; the ONNX-exists check below stays the success oracle.
+"$PY" training/train_model.py --config "$CFG" || true
 echo "==> generate+augment+train took $((SECONDS - t0))s"
 [ -f "$SRC" ] || { echo "ERROR: training did not produce $SRC" >&2; exit 1; }
 
