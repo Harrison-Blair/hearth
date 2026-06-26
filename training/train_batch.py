@@ -64,6 +64,23 @@ COMMIT = True
 CPP = 1
 TOTAL = 0
 USE_LIVE = True
+STREAM = False  # tee per-phrase train/eval output to the terminal (disables the table)
+
+
+def _run_logged(cmd: list[str], log_path: str, mode: str) -> int:
+    """Run cmd writing combined stdout/stderr to log_path. When STREAM is set,
+    also echo each line to the terminal so a single run is visible live (the log
+    is still written, so scrape_installed/read_metrics keep working)."""
+    if not STREAM:
+        with open(log_path, mode) as log:
+            return subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT).returncode
+    with open(log_path, mode) as log:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, bufsize=1)
+        for line in p.stdout:
+            sys.stdout.write(line)
+            log.write(line)
+        return p.wait()
 
 
 # --------------------------------------------------------------------------- #
@@ -141,11 +158,10 @@ def _train_one(st: PhraseState) -> None:
 
     set_status(st, "training")
     t0 = time.monotonic()
-    with open(st.log, "w") as log:
-        rc = subprocess.run(
-            ["bash", "training/train.sh", "--phrase", st.phrase, "--jobs", str(CPP), *smoke],
-            stdout=log, stderr=subprocess.STDOUT,
-        ).returncode
+    rc = _run_logged(
+        ["bash", "training/train.sh", "--phrase", st.phrase, "--jobs", str(CPP), *smoke],
+        st.log, "w",
+    )
     st.train_secs = time.monotonic() - t0
 
     model = scrape_installed(st.log)
@@ -159,14 +175,13 @@ def _train_one(st: PhraseState) -> None:
 
     set_status(st, "evaluating")
     t0 = time.monotonic()
-    with open(st.log, "a") as log:
-        rc = subprocess.run(
-            [PY, "training/evaluate.py", "--model", model,
-             "--positives", f"training/work/{st.model_slug}/positive_test",
-             "--backgrounds", "training/data/audioset_16k",
-             "--threshold", THRESHOLD, "--gate", "--json", st.evj],
-            stdout=log, stderr=subprocess.STDOUT,
-        ).returncode
+    rc = _run_logged(
+        [PY, "training/evaluate.py", "--model", model,
+         "--positives", f"training/work/{st.model_slug}/positive_test",
+         "--backgrounds", "training/data/audioset_16k",
+         "--threshold", THRESHOLD, "--gate", "--json", st.evj],
+        st.log, "a",
+    )
     st.eval_secs = time.monotonic() - t0
     read_metrics(st)  # evaluate.py writes the JSON before the gate exit, so metrics exist
     set_status(st, "passed" if rc == 0 else "gate_failed")
@@ -291,7 +306,7 @@ def run_wave(states: list[PhraseState], jobs: int) -> None:
 
 # --------------------------------------------------------------------------- #
 def main() -> int:
-    global SMOKE, COMMIT, CPP, TOTAL, USE_LIVE
+    global SMOKE, COMMIT, CPP, TOTAL, USE_LIVE, STREAM
 
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -309,10 +324,12 @@ def main() -> int:
     ap.add_argument("--smoke", action="store_true", help="fast end-to-end dry run")
     ap.add_argument("--no-commit", dest="commit", action="store_false", help="train+test only")
     ap.add_argument("--jobs", type=int, default=1, help="phrases to train concurrently")
+    ap.add_argument("--stream", action="store_true",
+                    help="stream per-phrase train/eval output to the terminal (disables the table)")
     ap.add_argument("inputs", nargs="*", help="phrases, or a phrases file")
     a = ap.parse_args()
 
-    SMOKE, COMMIT = a.smoke, a.commit
+    SMOKE, COMMIT, STREAM = a.smoke, a.commit, a.stream
     jobs = max(1, a.jobs)
 
     phrases = resolve_phrases(a.inputs)
@@ -321,10 +338,12 @@ def main() -> int:
         return 1
 
     TOTAL = len(phrases)
-    if jobs > 1:
-        budget = int(os.environ.get("WW_CORES") or (os.cpu_count() or 1))
-        CPP = max(1, budget // jobs)
-    USE_LIVE = sys.stdout.isatty()  # animate only on a real tty (not just forced color)
+    # Split the core budget across concurrent phrases; with jobs=1 a single phrase
+    # gets the whole budget (matching train.sh's nproc default) instead of 1 core.
+    budget = int(os.environ.get("WW_CORES") or (os.cpu_count() or 1))
+    CPP = max(1, budget // jobs)
+    # Animate only on a real tty; --stream tees raw output instead of the table.
+    USE_LIVE = sys.stdout.isatty() and not STREAM
 
     states = [PhraseState(idx=i, phrase=p, slug=phrase_slug(p)) for i, p in enumerate(phrases, 1)]
 

@@ -87,7 +87,15 @@ bash training/train_batch.sh                       # phrases from training/phras
 bash training/train_batch.sh "jarvis" "athena"     # or phrases as args
 bash training/train_batch.sh --smoke               # fast end-to-end dry run (tiny models)
 bash training/train_batch.sh --no-commit           # train + test only, no commits
+bash training/train_batch.sh --stream "penguin"    # tee full train/eval output live
 ```
+
+By default the per-phrase `train.sh` + `evaluate.py` output is hidden behind the
+live table (it goes to `training/work/<slug>.train.log`). Pass **`--stream`** to
+tee that output to the terminal instead — you see the Stage-1 synth ETA, training
+progress, and the eval distribution/gate live. Best for a single phrase, where the
+table is overkill; for a multi-phrase run the interleaved output is noisy, so
+prefer `tail -f training/work/<slug>.train.log` per phrase there.
 
 For each phrase it runs `train.sh`, then **gates** the model with `evaluate.py`:
 
@@ -123,9 +131,11 @@ bash training/train_batch.sh --jobs 4 phrases.txt      # 4 phrases at a time
   (`Stage 1: 6300/44000 clips (14%) · 12.4 clips/s · ~51m left`) and the total
   Stage-1 time when done. Default `N` = `$WW_JOBS` or `nproc`.
 - **`train_batch.sh --jobs P`** trains P phrases concurrently, splitting the
-  `$WW_CORES` (default `nproc`) budget so each phrase gets `nproc/P` cores. Commits
-  are serialized after the wave (one per model, in input order); per-phrase output
-  goes to `training/work/<slug>.train.log` instead of streaming live.
+  `$WW_CORES` (default `nproc`) budget so each phrase gets `nproc/P` cores. With
+  the default `--jobs 1` a single phrase gets the whole budget (cap it with
+  `WW_CORES=N` if memory is tight). Commits are serialized after the wave (one per
+  model, in input order); per-phrase output goes to
+  `training/work/<slug>.train.log` unless you pass `--stream`.
 - Quality is unchanged — `n_samples` and every clip count stay the same; this is
   pure parallelism, not a sample-count trade-off.
 - **Memory** is the limit: each synth worker loads its own ~255 MB Piper voice, so
