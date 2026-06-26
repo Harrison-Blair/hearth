@@ -57,7 +57,9 @@ class WebSearchSkill(Skill):
             results = await self._search.search(query, count=self._count)
             if not results:
                 return SkillResult("I couldn't find anything about that.", success=False)
-            summary = await self._llm.complete(self._summary_prompt(results), system=_SUMMARY_SYSTEM)
+            summary = await self._llm.complete(
+                self._summary_prompt(results), system=_SUMMARY_SYSTEM, label="search"
+            )
             if not summary:
                 return SkillResult("I couldn't summarize what I found.", success=False)
             return SkillResult(
@@ -70,7 +72,11 @@ class WebSearchSkill(Skill):
 
     async def _refine(self, text: str) -> str:
         try:
-            data = json.loads(await self._llm.complete(_REFINE_PROMPT.format(text=text), json=True))
+            data = json.loads(
+                await self._llm.complete(
+                    _REFINE_PROMPT.format(text=text), json=True, label="search"
+                )
+            )
             query = data.get("query")
             if isinstance(query, str) and query.strip():
                 return query.strip()

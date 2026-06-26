@@ -36,7 +36,9 @@ class ClassifierRouter(IntentRouter):
 
     async def route(self, text: str) -> Intent:
         try:
-            data = json.loads(await self._llm.complete(self._prompt(text), json=True))
+            data = json.loads(
+                await self._llm.complete(self._prompt(text), json=True, label="classify")
+            )
             label = data.get("intent")
             if isinstance(label, str):
                 label = label.strip().lower()

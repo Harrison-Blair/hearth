@@ -22,7 +22,7 @@ class FakeLLM:
         self.payload = payload
         self.calls = []
 
-    async def complete(self, prompt, *, system=None, json=False):
+    async def complete(self, prompt, *, system=None, json=False, label=""):
         self.calls.append(prompt)
         return self.payload
 

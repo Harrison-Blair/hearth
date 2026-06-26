@@ -12,6 +12,10 @@ from assistant.llm.base import LLMProvider
 log = logging.getLogger(__name__)
 
 
+def _clip(s: str, n: int) -> str:
+    return s if len(s) <= n else s[:n] + "…"
+
+
 class OllamaProvider(LLMProvider):
     def __init__(
         self,
@@ -25,7 +29,9 @@ class OllamaProvider(LLMProvider):
         self._timeout = timeout
         self._health_timeout = health_timeout
 
-    async def complete(self, prompt: str, *, system: str | None = None, json: bool = False) -> str:
+    async def complete(
+        self, prompt: str, *, system: str | None = None, json: bool = False, label: str = ""
+    ) -> str:
         payload: dict = {"model": self._model, "prompt": prompt, "stream": False}
         if system:
             payload["system"] = system
@@ -36,7 +42,13 @@ class OllamaProvider(LLMProvider):
             resp = await client.post(f"{self._host}/api/generate", json=payload)
             resp.raise_for_status()
             data = resp.json()
-        return data.get("response", "").strip()
+        response = data.get("response", "").strip()
+        tag = label or "llm"
+        log.info("[%s] prompt: %s", tag, _clip(prompt, 200))
+        if system:
+            log.info("[%s] system: %s", tag, _clip(system, 120))
+        log.info("[%s] response: %s", tag, response)
+        return response
 
     async def health(self) -> bool:
         try:

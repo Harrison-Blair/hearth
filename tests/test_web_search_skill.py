@@ -31,7 +31,7 @@ class FakeLLM:
         self.refine_raw = refine_raw  # override the raw refine response (e.g. bad JSON)
         self.prompts = []
 
-    async def complete(self, prompt, *, system=None, json=False):  # noqa: A002 - matches ABC
+    async def complete(self, prompt, *, system=None, json=False, label=""):  # noqa: A002 - matches ABC
         self.prompts.append((prompt, system))
         if json:
             return self.refine_raw if self.refine_raw is not None else f'{{"query": "{self.refined}"}}'

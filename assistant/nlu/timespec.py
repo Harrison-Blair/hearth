@@ -118,7 +118,7 @@ async def _extract_via_llm(
         f'Request: "{text}"'
     )
     try:
-        data = json.loads(await llm.complete(prompt, json=True))
+        data = json.loads(await llm.complete(prompt, json=True, label="timespec"))
     except Exception as exc:  # noqa: BLE001 - any LLM/JSON failure -> graceful None
         log.warning("LLM reminder extraction failed: %s", exc)
         return None
@@ -188,7 +188,7 @@ async def parse_management(
         f'Request: "{text}"'
     )
     try:
-        data = json.loads(await llm.complete(prompt, json=True))
+        data = json.loads(await llm.complete(prompt, json=True, label="timespec"))
     except Exception as exc:  # noqa: BLE001 - any LLM/JSON failure -> graceful none
         log.warning("LLM reminder management parse failed: %s", exc)
         return ManagementAction(action="none")

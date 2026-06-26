@@ -8,7 +8,7 @@ class FakeLLM:
         self.exc = exc
         self.calls = []
 
-    async def complete(self, prompt, *, system=None, json=False):
+    async def complete(self, prompt, *, system=None, json=False, label=""):
         self.calls.append((prompt, system))
         if self.exc:
             raise self.exc

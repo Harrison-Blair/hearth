@@ -21,7 +21,7 @@ class GeneralSkill(Skill):
 
     async def handle(self, cmd: Command, intent: Intent) -> SkillResult:
         try:
-            answer = await self._llm.complete(cmd.text, system=self._system)
+            answer = await self._llm.complete(cmd.text, system=self._system, label="answer")
         except Exception as exc:  # noqa: BLE001 - never crash the loop on an LLM error
             log.error("LLM completion failed: %s", exc)
             return SkillResult(speech="Sorry, I couldn't reach my language model.", success=False)
