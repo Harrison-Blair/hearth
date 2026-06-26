@@ -6,7 +6,12 @@ build/
 dist/
 *.db
 *.db-journal
-models/
+*.db-wal
+*.db-shm
+models/*
+!models/wake/
+models/wake/*
+!models/wake/*.onnx
 wakeword/*.onnx
 
 # Wake-word training artifacts (data, generated clips, cloned generator, isolated venv) — see training/README.md

@@ -30,6 +30,16 @@ the LLM is unreachable so routing keeps working fully offline.
 
 ## Setup
 
+The quickest path is the install script, which does everything below (system
+packages, venv, deps, models, Ollama) and can optionally install a `--user`
+systemd service. Run `./install.sh --help` for per-step flags:
+
+```bash
+./install.sh
+```
+
+Or set it up manually:
+
 The Python version is pinned in `.python-version` (3.12) and managed with
 [pyenv](https://github.com/pyenv/pyenv), so nothing is installed into the system
 Python:
