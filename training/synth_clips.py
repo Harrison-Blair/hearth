@@ -35,6 +35,8 @@ from pathlib import Path
 
 import yaml
 
+from ui import console  # shared rich console (degrades to plain when not a tty)
+
 # The four clip sets openWakeWord generates, in the order train.py emits them.
 # `count`: which config field drives the clip count. `noise`: noise_scales and
 # noise_scale_ws value (train sets use 0.98, test sets 1.0). `neg`: adversarial
@@ -118,39 +120,77 @@ def run_worker(cfg: dict, set_name: str, count: int, threads: int, with_custom: 
 
 
 # --------------------------------------------------------------------------- #
-# ETA poller: count clips on disk across all four sets and extrapolate.
+# Stage-1 progress: count clips on disk across all four sets and extrapolate.
+# A rich progress bar on a tty; the original plain per-poll line when output is
+# captured (non-tty, e.g. under train_batch.py's log redirection).
 # --------------------------------------------------------------------------- #
-class EtaPoller:
-    def __init__(self, cfg: dict, total: int, interval: float = 5.0):
+class StageOneProgress:
+    def __init__(self, cfg: dict, total: int, interval: float | None = None):
         self._dirs = [set_dir(cfg, s) for s in SETS]
         self._total = total
-        self._interval = interval
+        self._tty = sys.stdout.isatty()  # animate only on a real tty (not just forced color)
+        self._interval = interval if interval is not None else (2.0 if self._tty else 5.0)
         self._stop = threading.Event()
         self._t = threading.Thread(target=self._loop, daemon=True)
+        self._progress = None
+        self._task = None
 
-    def start(self) -> None:
+    def __enter__(self) -> "StageOneProgress":
+        if self._tty:
+            from rich.progress import (
+                BarColumn,
+                MofNCompleteColumn,
+                Progress,
+                TaskProgressColumn,
+                TextColumn,
+                TimeRemainingColumn,
+            )
+
+            self._progress = Progress(
+                TextColumn("[bold]Stage 1 synth[/]"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TaskProgressColumn(),
+                TimeRemainingColumn(compact=True),
+                console=console,
+            )
+            self._progress.start()
+            self._task = self._progress.add_task("synth", total=self._total)
         self._t.start()
+        return self
 
-    def stop(self) -> None:
+    def __exit__(self, *exc) -> None:
         self._stop.set()
         self._t.join(timeout=2.0)
+        if self._progress is not None:
+            self._progress.update(self._task, completed=min(self._count(), self._total))
+            self._progress.stop()
+
+    def _count(self) -> int:
+        return sum(count_wavs(d) for d in self._dirs)
 
     def _loop(self) -> None:
         start = time.monotonic()
         while not self._stop.wait(self._interval):
-            done = sum(count_wavs(d) for d in self._dirs)
+            done = self._count()
+            if self._progress is not None:
+                self._progress.update(self._task, completed=min(done, self._total))
+                continue
             elapsed = time.monotonic() - start
             pct = 100.0 * done / self._total if self._total else 0.0
             if done > 0 and elapsed > 8.0:
                 rate = done / elapsed
                 eta = (self._total - done) / rate if rate > 0 else 0
-                print(
+                console.print(
                     f"    Stage 1: {done}/{self._total} clips ({pct:.0f}%) · "
                     f"{rate:.1f} clips/s · ~{fmt_dur(eta)} left",
-                    flush=True,
+                    markup=False,
                 )
             else:
-                print(f"    Stage 1: {done}/{self._total} clips ({pct:.0f}%) · warming up…", flush=True)
+                console.print(
+                    f"    Stage 1: {done}/{self._total} clips ({pct:.0f}%) · warming up…",
+                    markup=False,
+                )
 
 
 def fmt_dur(seconds: float) -> str:
@@ -175,17 +215,17 @@ def run_set(cfg: dict, set_name: str, jobs: int, cores: int) -> None:
 
     existing = count_wavs(out_dir)
     if existing >= count:
-        print(f"  [{set_name}] {existing} clips already present — skipping", flush=True)
+        console.print(f"  [{set_name}] {existing} clips already present — skipping", markup=False)
         return
     remaining = count - existing
 
     workers = min(jobs, max(1, remaining // MIN_CHUNK))
     threads = max(1, cores // jobs)
     shares = [c for c in split_evenly(remaining, workers) if c > 0]
-    print(
+    console.print(
         f"  [{set_name}] {remaining} clips via {len(shares)} worker(s) "
         f"× {threads} thread(s){' (+' + str(existing) + ' existing)' if existing else ''}",
-        flush=True,
+        markup=False,
     )
 
     procs = []
@@ -211,19 +251,19 @@ def run_set(cfg: dict, set_name: str, jobs: int, cores: int) -> None:
     failed = [i for i, p in enumerate(procs) if p.wait() != 0]
     got = count_wavs(out_dir)
     if failed:
-        print(f"  [{set_name}] WARNING: {len(failed)} worker(s) exited non-zero", flush=True)
+        console.print(f"  [{set_name}] WARNING: {len(failed)} worker(s) exited non-zero", markup=False)
     if got < count:
         # The monolith's resume guard self-heals a small shortfall (it tops up
         # single-threaded), but flag it loudly so a large miss is visible.
-        print(f"  [{set_name}] WARNING: only {got}/{count} clips on disk", flush=True)
+        console.print(f"  [{set_name}] WARNING: only {got}/{count} clips on disk", markup=False)
 
 
 def run_orchestrator(cfg: dict, jobs: int, cores: int) -> None:
     phrases = cfg["target_phrase"]
-    print(
+    console.print(
         f"==> Stage 1 (parallel synth): {cfg['model_name']} · phrase={phrases[0]!r} · "
         f"jobs={jobs} cores={cores}",
-        flush=True,
+        markup=False,
     )
 
     # Pre-warm the adversarial-text phonemizer once so its lazy model download
@@ -233,23 +273,19 @@ def run_orchestrator(cfg: dict, jobs: int, cores: int) -> None:
 
         generate_adversarial_texts(input_text=phrases[0], N=1, include_partial_phrase=1.0)
     except Exception as e:  # best-effort warm-up; workers still work without it
-        print(f"    (adversarial-text pre-warm skipped: {e})", flush=True)
+        console.print(f"    (adversarial-text pre-warm skipped: {e})", markup=False)
 
     total = 2 * int(cfg["n_samples"]) + 2 * int(cfg["n_samples_val"])
-    poller = EtaPoller(cfg, total)
-    poller.start()
     t0 = time.monotonic()
-    try:
+    with StageOneProgress(cfg, total):
         for set_name in SETS:
             run_set(cfg, set_name, jobs, cores)
-    finally:
-        poller.stop()
 
     elapsed = time.monotonic() - t0
-    print(
+    console.print(
         f"==> Stage 1 done in {fmt_dur(elapsed)}. Stages 2–3 (augment+features+train) "
         f"follow on {jobs} core(s) — usually a few minutes; the model is then exported.",
-        flush=True,
+        markup=False,
     )
 
 

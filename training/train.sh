@@ -61,16 +61,9 @@ SRC="training/work/${MODEL}.onnx"
 rm -f "$SRC"
 
 # Up-front summary so the scale of the (long, quiet) run is visible before Piper
-# starts synthesizing. Read straight from the resolved config.
-"$PY" - "$CFG" <<'PY'
-import sys, yaml
-c = yaml.safe_load(open(sys.argv[1]))
-smoke = "yes" if c["model_name"].endswith("_smoke") else "no"
-print("==> Run config:")
-print(f"    model={c['model_name']}  phrase={c['target_phrase'][0]!r}  smoke={smoke}")
-print(f"    n_samples={c['n_samples']}  n_samples_val={c['n_samples_val']}  steps={c['steps']}")
-print("    Stage 1 (Piper clip synthesis) is the slowest and quietest — be patient.")
-PY
+# starts synthesizing. Read straight from the resolved config (rich panel; degrades
+# to plain text when stdout isn't a tty, e.g. under train_batch.py's log capture).
+"$PY" training/ui.py run-config --config "$CFG"
 
 # Stage 1 parallelism: with --jobs > 1, pre-synthesize the clip sets across JOBS
 # worker processes (with a JOBS-clip-per-second ETA). openwakeword.train then finds
@@ -111,8 +104,6 @@ DST="models/wake/${MODEL}.onnx"
 mkdir -p "$(dirname "$DST")"
 cp "$SRC" "$DST"
 PHRASE_OUT=$("$PY" -c "import yaml; print(yaml.safe_load(open('$CFG'))['target_phrase'][0])")
+# Keep this line a plain echo: train_batch.py scrapes "installed at <path>.onnx".
 echo "==> Trained model installed at $DST"
-echo "    Wire it up in config.yaml:"
-echo "      wake:"
-echo "        phrase: \"$PHRASE_OUT\""
-echo "        model_path: \"$DST\""
+"$PY" training/ui.py wire-up --phrase "$PHRASE_OUT" --dst "$DST"

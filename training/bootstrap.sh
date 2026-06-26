@@ -34,7 +34,8 @@ pip install \
   torchinfo torchmetrics speechbrain==0.5.14 \
   audiomentations==0.33.0 torch-audiomentations==0.12.0 acoustics==0.2.6 \
   mutagen pronouncing deep-phonemizer espeak-phonemizer webrtcvad \
-  onnx onnxruntime pyyaml tqdm requests librosa soundfile "pyarrow>=17"
+  onnx onnxruntime pyyaml tqdm requests librosa soundfile "pyarrow>=17" \
+  rich  # pretty training UI: train.sh panels + train_batch.py live dashboard
 pip install "openwakeword==0.6.0" --no-deps
 # --no-deps skips the bundled feature models; fetch them (melspectrogram + embedding).
 python -c "import openwakeword.utils as u; u.download_models([])"
