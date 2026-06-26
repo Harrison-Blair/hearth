@@ -1,4 +1,4 @@
-from assistant.tui.logparse import parse
+from tui.logparse import parse
 
 
 def test_parses_well_formed_line():

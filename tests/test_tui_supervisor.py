@@ -1,6 +1,6 @@
 import sys
 
-from assistant.tui.supervisor import DaemonSupervisor
+from tui.supervisor import DaemonSupervisor
 
 # A child that reports two env vars, then echoes one line from stdin, then exits.
 ECHO_CHILD = (

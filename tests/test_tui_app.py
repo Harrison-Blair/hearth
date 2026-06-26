@@ -1,4 +1,4 @@
-from assistant.tui.app import _as_option
+from tui.app import _as_option
 
 
 def test_as_option_normalizes_str_and_tuple():

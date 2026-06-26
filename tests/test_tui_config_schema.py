@@ -1,4 +1,4 @@
-from assistant.tui.config_schema import (
+from tui.config_schema import (
     FIELDS,
     Field,
     changed_fields,

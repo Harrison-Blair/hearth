@@ -97,7 +97,7 @@ button.
 
 ```bash
 pip install -e ".[tui]"
-python -m assistant.tui
+python -m tui
 ```
 
 It does **not** import the native audio/model deps — only the daemon child does.

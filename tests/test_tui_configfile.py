@@ -1,5 +1,5 @@
-from assistant.tui import configfile
-from assistant.tui.config_schema import FIELDS, coerce
+from tui import configfile
+from tui.config_schema import FIELDS, coerce
 
 
 def _field(key):

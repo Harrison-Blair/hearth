@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from assistant.tui import discovery
+from tui import discovery
 
 
 @dataclass(frozen=True)

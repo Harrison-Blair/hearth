@@ -1,6 +1,6 @@
 import httpx
 
-from assistant.tui import discovery
+from tui import discovery
 
 
 def _patch_transport(monkeypatch, handler):

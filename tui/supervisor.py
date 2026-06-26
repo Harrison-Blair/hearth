@@ -17,7 +17,7 @@ import sys
 from collections.abc import AsyncIterator
 from urllib.parse import urlparse
 
-from assistant.tui import envfile
+from tui import envfile
 
 log = logging.getLogger(__name__)
 

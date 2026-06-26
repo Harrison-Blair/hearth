@@ -1,4 +1,4 @@
-from assistant.tui import envfile
+from tui import envfile
 
 EXAMPLE = """# example
 ASSISTANT_LLM__MODEL=qwen2.5:3b-instruct

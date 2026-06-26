@@ -38,11 +38,11 @@ from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
 
 from assistant.wake import registry
-from assistant.tui import configfile, discovery, envfile
-from assistant.tui.config_schema import FIELDS, Field, changed_fields, coerce, overrides_for
-from assistant.tui.logcolor import colorize_line, colorize_message
-from assistant.tui.logparse import parse
-from assistant.tui.supervisor import ENV_FILE, DaemonSupervisor, free_ollama_port
+from tui import configfile, discovery, envfile
+from tui.config_schema import FIELDS, Field, changed_fields, coerce, overrides_for
+from tui.logcolor import colorize_line, colorize_message
+from tui.logparse import parse
+from tui.supervisor import ENV_FILE, DaemonSupervisor, free_ollama_port
 
 if TYPE_CHECKING:
     from assistant.core.config import Config

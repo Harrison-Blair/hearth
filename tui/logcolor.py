@@ -1,6 +1,6 @@
 """Colorize daemon/Ollama log lines into Rich ``Text`` for the TUI log views.
 
-Reuses :func:`assistant.tui.logparse.parse` to split the daemon's
+Reuses :func:`tui.logparse.parse` to split the daemon's
 ``"%(asctime)s %(levelname)-7s %(name)s: %(message)s"`` format, then styles each
 field (high-contrast bold palette). Lines that aren't daemon-formatted — tracebacks,
 the Ollama server's own GIN/slog output — get a best-effort pass that highlights
@@ -14,7 +14,7 @@ import re
 
 from rich.text import Text
 
-from assistant.tui.logparse import parse
+from tui.logparse import parse
 
 # High-contrast bold palette, keyed by Python log level.
 LEVEL_STYLES: dict[str, str] = {

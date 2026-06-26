@@ -1,6 +1,6 @@
 """Control channel: line commands read from stdin while the daemon runs.
 
-The monitor TUI (`assistant.tui`) supervises the daemon as a child process and
+The monitor TUI (`tui`) supervises the daemon as a child process and
 writes newline commands to its stdin. This lets the TUI drive the live daemon
 without a restart:
 

@@ -1,9 +1,9 @@
 from textual.widgets import RichLog, Static, TabbedContent, TabPane
 
 from assistant.core.config import LlmConfig
-from assistant.tui import discovery
-from assistant.tui.app import AssistantTUI
-from assistant.tui.supervisor import DaemonSupervisor
+from tui import discovery
+from tui.app import AssistantTUI
+from tui.supervisor import DaemonSupervisor
 
 
 def test_serve_cmd_default():
@@ -85,7 +85,7 @@ async def test_restart_llm_adopts_external_server(monkeypatch):
         freed["host"] = host
         return 4242
 
-    monkeypatch.setattr("assistant.tui.app.free_ollama_port", _fake_free)
+    monkeypatch.setattr("tui.app.free_ollama_port", _fake_free)
     ollama = FakeSupervisor()  # _running defaults to False
     app = AssistantTUI(supervisor=FakeSupervisor(), ollama=ollama)
     async with app.run_test() as pilot:
@@ -126,7 +126,7 @@ async def test_health_badge_reflects_up(monkeypatch):
 
 async def test_health_badge_reflects_down(monkeypatch):
     monkeypatch.setattr(discovery, "ollama_health", _fake_health(False))
-    monkeypatch.setattr("assistant.tui.app.free_ollama_port", _fake_free_none)
+    monkeypatch.setattr("tui.app.free_ollama_port", _fake_free_none)
     app = AssistantTUI(supervisor=FakeSupervisor(), ollama=FakeSupervisor())
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -138,7 +138,7 @@ async def test_ollama_autostarts_when_down(monkeypatch):
     # No server answering on launch => the TUI starts one and streams its output,
     # with no button press.
     monkeypatch.setattr(discovery, "ollama_health", _fake_health(False))
-    monkeypatch.setattr("assistant.tui.app.free_ollama_port", _fake_free_none)
+    monkeypatch.setattr("tui.app.free_ollama_port", _fake_free_none)
     ollama = FakeSupervisor(lines=["server starting", "listening on 11434"])
     app = AssistantTUI(supervisor=FakeSupervisor(), ollama=ollama)
     async with app.run_test() as pilot:

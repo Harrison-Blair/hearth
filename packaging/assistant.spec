@@ -58,7 +58,7 @@ hiddenimports += [
     "apscheduler.executors.asyncio",
     "apscheduler.jobstores.memory",
     "tzlocal", "tzdata", "ddgs",
-    "assistant.app", "assistant.bootstrap", "assistant.tui.app",
+    "assistant.app", "assistant.bootstrap", "tui.app",
 ]
 
 

@@ -69,6 +69,14 @@ threshold is config so the Raspberry Pi 5 deployment is config-only. **Add new
 tunables as a typed field on the relevant `*Config` model, mirrored in
 `config.yaml` — never hard-code a path, threshold, or device id in a component.**
 
+**The monitor TUI is a separate top-level package** (`tui/`, a sibling of
+`assistant/`, run with `python -m tui`). It supervises the daemon as a child
+process (`python -m assistant.app` over a stdin control channel) and never
+imports the pipeline/skills/LLM code or any native deps — its only `assistant`
+imports are `core.config.Config` and `wake.registry`. **Keep this dependency
+one-directional (`tui` → `assistant`); nothing under `assistant/` may import
+`tui`.**
+
 ## Conventions
 
 - All pipeline-facing capability methods are `async`. `pytest` runs in

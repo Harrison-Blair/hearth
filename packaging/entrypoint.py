@@ -56,7 +56,7 @@ def main() -> int:
         return bootstrap_run(argv[1:])
 
     if argv and argv[0] == "tui":
-        from assistant.tui.app import main as tui_main
+        from tui.app import main as tui_main
 
         tui_main()
         return 0

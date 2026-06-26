@@ -1,4 +1,4 @@
-from assistant.tui.logcolor import colorize_line, colorize_message
+from tui.logcolor import colorize_line, colorize_message
 
 
 def _style_over(text, substring):
