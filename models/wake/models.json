@@ -6,5 +6,13 @@
     "separation": 0.8745084583759307,
     "tp_rate": 0.9466666666666667,
     "trained_at": "2026-06-25T23:09:25"
+  },
+  "hey_calcifer": {
+    "fp_rate": 0.0,
+    "model_path": "models/wake/hey_calcifer.onnx",
+    "phrase": "hey calcifer",
+    "separation": 0.8363097459077835,
+    "tp_rate": 0.9566666666666667,
+    "trained_at": "2026-07-03T04:57:39"
   }
 }
