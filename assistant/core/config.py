@@ -38,8 +38,14 @@ class RecorderConfig(BaseModel):
 class WakeConfig(BaseModel):
     model_path: str | None = None
     model_paths: list[str] | None = None  # load a series of models (any wakes)
-    model_name: str = "models/wake/hey_assistant.onnx"
+    model_name: str = "models/wake/calcifer.onnx"
+    # Global across models; set from the manifest's per-model optimal threshold
+    # after training (per-model thresholds deliberately not built).
     threshold: float = 0.5
+    # Score every Nth 80ms frame once the ~2s window is full; raise to 2-4 on the
+    # Pi 5 to cut CPU (stateless predict recomputes the full window per call) at
+    # <= N*80ms extra latency.
+    score_interval: int = 1
 
     def model_refs(self) -> list[str]:
         """Models to load, most specific first: a series, else a single path,
@@ -82,6 +88,11 @@ class LlmConfig(BaseModel):
     )
 
 
+class NluConfig(BaseModel):
+    command_keyphrase: str = "tool"
+    command_aliases: dict[str, str] = {}
+
+
 class TtsConfig(BaseModel):
     voice: str = "en_US-lessac-medium"
     model_path: str | None = None
@@ -96,17 +107,10 @@ class SchedulingConfig(BaseModel):
 
 
 class WebSearchConfig(BaseModel):
-    provider: str = "ddgs"
+    language: str = "en"  # Wikipedia language variant (e.g. en, de, fr)
     result_count: int = 3
     timeout: float = 10.0
-    region: str = "wt-wt"  # ddgs region; wt-wt = no region
-    timelimit: str = "d"  # ddgs recency window: d/w/m/y; bias toward fresh results
     max_snippet_chars: int = 500  # truncate each result body (latency + injection surface)
-    # Optional keyed accelerator. When set, app.py uses Tavily (live answer box) with
-    # the keyless ddgs scraper as fallback. Usually supplied via
-    # ASSISTANT_WEB_SEARCH__API_KEY rather than committed to config.yaml.
-    api_key: str = ""
-    tavily_endpoint: str = "https://api.tavily.com/search"
 
 
 class LoggingConfig(BaseModel):
@@ -126,6 +130,7 @@ class Config(BaseSettings):
     wake: WakeConfig = WakeConfig()
     stt: SttConfig = SttConfig()
     llm: LlmConfig = LlmConfig()
+    nlu: NluConfig = NluConfig()
     tts: TtsConfig = TtsConfig()
     storage: StorageConfig = StorageConfig()
     scheduling: SchedulingConfig = SchedulingConfig()

@@ -1,10 +1,10 @@
 """Registry for the trained wake-word series (models/wake/models.json).
 
-The manifest indexes every committed model — its phrase and eval metrics — so you
+The manifest indexes every trained model — its phrase and eval metrics — so you
 can see what you've trained and select which series the runtime loads.
 
 Subcommands (run from the repo root):
-  upsert <slug> --phrase "X" --eval <eval.json>   # record one model (used by train_batch.sh)
+  upsert <slug> --phrase "X" --eval <eval.json>   # record one model (used by train.py)
   list                                            # show the trained series
   regen                                           # rebuild manifest from models/wake/*.onnx on disk
   select <slug-or-phrase> [...]                   # load this series: writes config.yaml wake.model_paths
@@ -28,8 +28,8 @@ CONFIG = Path("config.yaml")
 
 
 def slug(phrase: str) -> str:
-    """Phrase -> model name. Mirrors make_config.slug (kept inline so this module
-    has no yaml dependency and runs under the assistant runtime venv)."""
+    """Phrase -> model name: lowercase, non-alphanumerics collapsed to underscores.
+    Kept dependency-free so this module runs under the assistant runtime venv."""
     return re.sub(r"[^a-z0-9]+", "_", phrase.lower()).strip("_") or "wakeword"
 
 
@@ -44,13 +44,17 @@ def save(data: dict) -> None:
 
 def cmd_upsert(a: argparse.Namespace) -> None:
     m = load()
+    # livekit's <model>_eval.json: report the operating point its find_best_threshold
+    # picked (max recall subject to the FPPH target), which is the threshold the
+    # runtime should wake on. gate_passed = did that point actually meet the target.
     ev = json.loads(Path(a.eval).read_text())
     m[a.slug] = {
         "phrase": a.phrase,
         "model_path": f"models/wake/{a.slug}.onnx",
-        "tp_rate": ev["tp_rate"],
-        "fp_rate": ev["fp_rate"],
-        "separation": ev["separation"],
+        "fpph": ev["optimal_fpph"],
+        "recall": ev["optimal_recall"],
+        "threshold": ev["optimal_threshold"],
+        "gate_passed": ev["optimal_fpph"] <= a.target_fpph,
         "trained_at": datetime.now().isoformat(timespec="seconds"),
     }
     save(m)
@@ -62,14 +66,15 @@ def cmd_list(_a: argparse.Namespace) -> None:
     if not m:
         print("(no models trained yet)")
         return
-    print(f"{'slug':<20} {'phrase':<22} {'tp':>6} {'fp':>6} {'sep':>7}")
+    print(f"{'slug':<20} {'phrase':<22} {'recall':>7} {'fpph':>7} {'thr':>6}")
     for k in sorted(m):
         e = m[k]
         # regen'd (untrained) entries carry no eval metrics yet.
-        tp = f"{e['tp_rate']:>6.1%}" if "tp_rate" in e else f"{'—':>6}"
-        fp = f"{e['fp_rate']:>6.1%}" if "fp_rate" in e else f"{'—':>6}"
-        sep = f"{e['separation']:>+7.3f}" if "separation" in e else f"{'—':>7}"
-        print(f"{k:<20} {e['phrase']:<22} {tp} {fp} {sep}")
+        recall = f"{e['recall']:>7.1%}" if "recall" in e else f"{'—':>7}"
+        fpph = f"{e['fpph']:>7.2f}" if "fpph" in e else f"{'—':>7}"
+        thr = f"{e['threshold']:>6.2f}" if "threshold" in e else f"{'—':>6}"
+        gate = " ✗gate" if e.get("gate_passed") is False else ""
+        print(f"{k:<20} {e['phrase']:<22} {recall} {fpph} {thr}{gate}")
 
 
 def cmd_regen(_a: argparse.Namespace) -> None:
@@ -153,7 +158,9 @@ if __name__ == "__main__":
     up = sub.add_parser("upsert")
     up.add_argument("slug")
     up.add_argument("--phrase", required=True)
-    up.add_argument("--eval", required=True, help="evaluate.py --json output")
+    up.add_argument("--eval", required=True, help="livekit <model>_eval.json")
+    up.add_argument("--target-fpph", type=float, default=0.1,
+                    help="FPPH gate: gate_passed = optimal_fpph <= this")
     up.set_defaults(func=cmd_upsert)
 
     sub.add_parser("list").set_defaults(func=cmd_list)

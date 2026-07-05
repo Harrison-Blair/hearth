@@ -368,6 +368,24 @@ def log_levels(**_: object) -> list[str]:
     return ["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
+def stt_model_options(**_: object) -> list[str]:
+    """faster-whisper model sizes, smallest first (English variants where they exist)."""
+    return [
+        "tiny.en",
+        "tiny",
+        "base.en",
+        "base",
+        "small.en",
+        "small",
+        "distil-small.en",
+        "medium.en",
+        "medium",
+        "distil-medium.en",
+        "large-v3",
+        "distil-large-v3",
+    ]
+
+
 def current_config() -> Config:
     """Effective config (yaml + ASSISTANT_* env) used to seed the form."""
     return Config()

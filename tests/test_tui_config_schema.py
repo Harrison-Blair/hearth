@@ -42,3 +42,16 @@ def test_schema_ships_expected_fields():
     assert ("wake", "model_paths") in keys
     assert ("llm", "model") in keys
     assert ("audio", "output_volume") in keys
+
+
+def test_no_free_text_fields_remain():
+    # Touch-only target: every field must be a stepper, picker, or checkbox list.
+    assert all(f.kind in ("select", "multiselect", "number") for f in FIELDS)
+
+
+def test_number_fields_carry_stepper_bounds():
+    by_key = {f.key: f for f in FIELDS}
+    vol = by_key[("audio", "output_volume")]
+    assert (vol.lo, vol.hi, vol.step) == (0.0, 1.0, 0.05)
+    vad = by_key[("recorder", "aggressiveness")]
+    assert (vad.lo, vad.hi, vad.step) == (0, 3, 1)

@@ -24,6 +24,10 @@ class Field:
     # None for free text/number; for selects, a provider with signature
     # (host=..., **_) -> list[str] | Awaitable[list[str]] (see discovery).
     options: Callable | None = None
+    # Stepper bounds for "number" fields (ignored for other kinds).
+    lo: float = 0.0
+    hi: float = 1.0
+    step: float = 1.0
 
     @property
     def env(self) -> str:
@@ -65,11 +69,11 @@ def changed_fields(
 
 FIELDS: list[Field] = [
     Field(("wake", "model_paths"), "Wake models", "multiselect", discovery.wake_model_choices),
-    Field(("wake", "threshold"), "Wake threshold", "number"),
+    Field(("wake", "threshold"), "Wake threshold", "number", lo=0.0, hi=1.0, step=0.05),
     Field(("llm", "model"), "LLM model", "select", discovery.ollama_model_options),
     Field(("logging", "level"), "Log level", "select", discovery.log_levels),
-    Field(("stt", "model"), "STT model", "text"),
-    Field(("audio", "output_volume"), "Output volume", "number"),
-    Field(("recorder", "silence_ms"), "Silence (ms)", "number"),
-    Field(("recorder", "aggressiveness"), "VAD aggressiveness", "number"),
+    Field(("stt", "model"), "STT model", "select", discovery.stt_model_options),
+    Field(("audio", "output_volume"), "Output volume", "number", lo=0.0, hi=1.0, step=0.05),
+    Field(("recorder", "silence_ms"), "Silence (ms)", "number", lo=100, hi=3000, step=100),
+    Field(("recorder", "aggressiveness"), "VAD aggressiveness", "number", lo=0, hi=3, step=1),
 ]

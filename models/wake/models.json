@@ -1,18 +1,11 @@
 {
-  "hey_assistant": {
-    "fp_rate": 0.0,
-    "model_path": "models/wake/hey_assistant.onnx",
-    "phrase": "hey assistant",
-    "separation": 0.8745084583759307,
-    "tp_rate": 0.9466666666666667,
-    "trained_at": "2026-06-25T23:09:25"
-  },
-  "hey_calcifer": {
-    "fp_rate": 0.0,
-    "model_path": "models/wake/hey_calcifer.onnx",
-    "phrase": "hey calcifer",
-    "separation": 0.8363097459077835,
-    "tp_rate": 0.9566666666666667,
-    "trained_at": "2026-07-03T04:57:39"
+  "calcifer": {
+    "fpph": 0.03876469828143171,
+    "gate_passed": true,
+    "model_path": "models/wake/calcifer.onnx",
+    "phrase": "Calcifer",
+    "recall": 0.9097333333333333,
+    "threshold": 0.66,
+    "trained_at": "2026-07-05T06:22:05"
   }
 }

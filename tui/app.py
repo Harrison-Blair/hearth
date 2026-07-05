@@ -1,10 +1,17 @@
 """Textual monitor TUI for the assistant daemon.
 
-Supervises ``python -m assistant.app`` as a child, streams its logs into Logs/LLM
-tabs, edits config via ``ASSISTANT_*`` env overrides (applied on restart), and
-drives the live daemon over its stdin control channel: a chat box that mimics
-transcribed speech, and instant mute/volume. Laid out for a 3.5" 480x320
-touchscreen — tabbed views, big tappable buttons.
+Supervises ``python -m assistant.app`` as a child, streams its logs into the
+Logs screen's App/LLM/Ollama channels, edits config via ``ASSISTANT_*`` env
+overrides (applied on restart), and drives the live daemon over its stdin
+control channel (instant mute/volume; a desktop-only chat modal that mimics
+transcribed speech). Laid out for a 3.5" 320x480 portrait touchscreen
+(≈40x30 cells) — one focused screen per job, full-width tappable buttons.
+
+The app is the controller: it owns the supervisors, log pumps, health poll,
+pull queue, and volume state. Screens (``tui/screens/``) are thin views that
+call back into the app. Screens are installed once and stay mounted after
+their first visit, so log writes land while they're covered; writes before the
+Logs screen's first visit are buffered and drained on its mount.
 """
 
 from __future__ import annotations
@@ -16,50 +23,36 @@ import logging
 import os
 import re
 from collections import deque
-from typing import TYPE_CHECKING
 
-from textual import on
-from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
 from rich.text import Text
-from textual.widgets import (
-    Button,
-    Input,
-    Label,
-    OptionList,
-    ProgressBar,
-    RichLog,
-    Select,
-    SelectionList,
-    Static,
-    TabbedContent,
-    TabPane,
-    TextArea,
-)
-from textual.widgets.option_list import Option
-from textual.widgets.selection_list import Selection
+from textual import on
+from textual.app import App
+from textual.events import TextSelected
+from textual.widgets import Button, Static
 
 from assistant.wake import registry
-from tui import configfile, discovery, envfile
-from tui.config_schema import FIELDS, Field, changed_fields, coerce, overrides_for
+from tui import configfile, discovery
 from tui.collapse import CollapsingWriter
+from tui.config_schema import FIELDS, Field, changed_fields, overrides_for
 from tui.logcolor import colorize_line, colorize_message
 from tui.logparse import dedup_key, parse
-from tui.supervisor import ENV_FILE, DaemonSupervisor, free_ollama_port
-
-if TYPE_CHECKING:
-    from assistant.core.config import Config
+from tui.screens import (
+    ConfigScreen,
+    HomeScreen,
+    InstalledScreen,
+    LogsScreen,
+    ModelDetailScreen,
+    ModelsScreen,
+)
+from tui.supervisor import DaemonSupervisor, free_ollama_port
+from tui.widgets import NavBar, ScreenWidthRichLog, Stepper  # noqa: F401 - re-exported
 
 log = logging.getLogger(__name__)
 
 VOLUME_ENV = "ASSISTANT_AUDIO__OUTPUT_VOLUME"
 MAX_LOG_LINES = 1000
-ENV_EXAMPLE_FILE = "env.example"
 HEALTH_POLL_SECONDS = 5.0
-
-
-def _field_id(field: Field) -> str:
-    return "field-" + "_".join(field.key)
+LOG_CHANNELS = ("app", "llm", "ollama")
 
 
 def _as_option(item: object) -> tuple[str, str]:
@@ -80,141 +73,10 @@ def _default_query(model: str) -> str:
     return m.group(0) if m else "qwen"
 
 
-def _result_meta(m: "discovery.RegistryModel") -> str:
-    return "   ".join(
-        filter(None, [" · ".join(m.sizes), " ".join(m.capabilities), f"↧{m.pulls}" if m.pulls else ""])
-    )
-
-
-def _result_option(m: "discovery.RegistryModel", installed: bool = False) -> Option:
-    """A two-line OptionList row for a registry search hit."""
-    meta = _result_meta(m)
-    text = Text()
-    if installed:
-        text.append("✓ ", style="green")
-    text.append(m.name, style="bold")
-    if meta:
-        text.append(f"   {meta}", style="dim")
-    if m.description:
-        desc = m.description if len(m.description) <= 90 else m.description[:90].rstrip() + "…"
-        text.append("\n" + desc, style="dim italic")
-    return Option(text)
-
-
-def _registry_detail_text(m: "discovery.RegistryModel") -> Text:
-    """Full, untruncated detail for the selected registry model."""
-    text = Text()
-    text.append(m.name, style="bold")
-    meta = _result_meta(m)
-    if meta:
-        text.append(f"\n{meta}", style="dim")
-    if m.description:
-        text.append(f"\n\n{m.description}")
-    return text
-
-
-class ScreenWidthRichLog(RichLog):
-    """A RichLog that wraps to its on-screen width and re-wraps on demand.
-
-    Textual's ``RichLog.write`` measures content against ``app.console``, whose
-    width is the ``COLUMNS`` env var (default 80) — not the widget's actual size
-    — so text wraps at ~80 cols regardless of terminal width. Defaulting
-    ``width`` to the live content region makes wrapping track the screen.
-
-    A line written while its tab is hidden has a 0-width content region, so it
-    falls back to ``min_width`` and wraps wrong. ``RichLog`` only keeps the
-    pre-wrapped strips (no source), so we record each logical line's source and
-    :meth:`reflow` re-wraps the backlog to the current width — called when the
-    tab is reselected (see ``AssistantTUI._reflow_active_logs``).
-    """
-
-    _records_history = True  # marker CollapsingWriter duck-types on
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        # Source per logical line, capped like the rendered backlog (max_lines).
-        self._history: deque = deque(maxlen=self.max_lines)
-        self._wrap_width: int | None = None  # width the backlog is wrapped at
-
-    def write(
-        self,
-        content,
-        width=None,
-        expand=False,
-        shrink=True,
-        scroll_end=None,
-        animate=False,
-        replace_last=False,
-    ):
-        if width is None:
-            region = self.scrollable_content_region.width
-            if region:
-                width = region
-        result = super().write(content, width, expand, shrink, scroll_end, animate)
-        # Record only once actually rendered: super() defers writes until the size
-        # is known, then replays them through write(), which would double-record.
-        if self._size_known:
-            if replace_last and self._history:
-                self._history[-1] = content  # collapse rewrote the last line in place
-            else:
-                self._history.append(content)
-            self._wrap_width = width or self.scrollable_content_region.width or self.min_width
-        return result
-
-    def clear(self):
-        self._history.clear()
-        self._wrap_width = None
-        return super().clear()
-
-    def reflow(self) -> bool:
-        """Re-wrap the recorded backlog to the current width. True if it changed."""
-        region = self.scrollable_content_region.width
-        if not region or not self._history or region == self._wrap_width:
-            return False
-        entries = list(self._history)
-        self.clear()
-        for content in entries:
-            self.write(content)
-        return True
-
-
 class AssistantTUI(App):
     CSS = """
-    #status { dock: top; height: 1; background: $boost; color: $text; padding: 0 1; }
-    Button { padding: 0 2; }
-    #buttons { dock: bottom; height: 3; align: center middle; }
-    #buttons Button { margin: 0 1; min-width: 10; }
+    Button { min-width: 0; padding: 0 1; height: 3; }
     RichLog { background: $surface; }
-    .volume-row { height: 3; align: left middle; }
-    .volume-row Button { margin: 0 1; min-width: 8; }
-    .volume-row Input { width: 9; }
-    .volume-row Label { width: auto; height: 3; content-align: left middle; padding: 0 1; }
-    .llm-row { height: 3; align: left middle; }
-    .llm-row Button { margin: 0 1; }
-    #ollama-status { padding: 0 1; content-align: left middle; height: 3; }
-    .field-row { height: 3; }
-    .field-row Label { width: 22; content-align: left middle; height: 3; }
-    #model-detail { height: auto; padding: 0 1; color: $text-muted; }
-    /* Expand to fit the options; cap at ~10 rows and scroll the rest. */
-    #field-wake_model_paths { height: auto; max-height: 12; border: round $panel; margin-bottom: 1; }
-    #wake-phrases { height: auto; padding: 0 1; color: $text-muted; }
-    #wake-clean-smoke { margin: 1 0; }
-    .models-search { height: 3; }
-    .models-search Input { width: 1fr; }
-    .models-search Button { margin: 0 1; }
-    #search-results { height: 8; border: round $panel; }
-    #model-tags { height: 6; border: round $panel; }
-    #installed-list { height: 6; border: round $panel; }
-    #pull-status { padding: 0 1; color: $text-muted; }
-    #pull-queue { padding: 0 1; color: $text-muted; }
-    #pull-progress { height: 1; }
-    .install-row { height: auto; }
-    .install-col { width: 1fr; height: auto; }
-    #registry-detail { width: 1fr; height: auto; border: round $panel; padding: 0 1; color: $text-muted; }
-    .env-buttons { dock: top; height: 3; align: center middle; }
-    .env-buttons Button { margin: 0 1; min-width: 8; }
-    #envedit { height: 1fr; }
-    #chat { dock: bottom; }
     """
 
     def __init__(
@@ -234,252 +96,211 @@ class AssistantTUI(App):
         self._volume = self._config.audio.output_volume
         self._muted = self._volume == 0.0
         self._last_volume = self._volume or 1.0
-        # Models tab: registry browsing + a sequential pull queue.
+        # Models: registry browsing + a sequential pull queue.
         self._search_results: list[discovery.RegistryModel] = []
-        self._tags: list[discovery.RegistryTag] = []
         self._installed: list[discovery.OllamaModel] = []
         self._pull_queue: list[str] = []
         self._pulling = False
         self._last_query = _default_query(self._config.llm.model)
-        self._selected_ref: str | None = None
-
-    # ---- layout --------------------------------------------------------------
-
-    def compose(self) -> ComposeResult:
-        yield Static(id="status")
-        with TabbedContent():
-            with TabPane("Logs", id="tab-logs"):
-                yield ScreenWidthRichLog(
-                    id="applog", highlight=False, markup=False, wrap=True, max_lines=MAX_LOG_LINES
-                )
-            with TabPane("Ollama", id="tab-ollama"):
-                yield ScreenWidthRichLog(
-                    id="ollamalog",
-                    highlight=False,
-                    markup=False,
-                    wrap=True,
-                    max_lines=MAX_LOG_LINES,
-                )
-            with TabPane("LLM", id="tab-llm"):
-                yield ScreenWidthRichLog(
-                    id="llmlog", highlight=False, markup=False, wrap=True, max_lines=MAX_LOG_LINES
-                )
-                yield Input(id="chat", placeholder="Type a command (sent as speech)…")
-            with TabPane("Config", id="tab-config"):
-                yield from self._compose_config()
-            with TabPane("Env", id="tab-env"):
-                yield from self._compose_env()
-            with TabPane("Models", id="tab-models"):
-                yield from self._compose_models()
-        with Horizontal(id="buttons"):
-            yield Button("Start", id="btn-start", variant="success")
-            yield Button("Stop", id="btn-stop", variant="error")
-            yield Button("Restart", id="btn-restart")
-            yield Button("Apply & Restart", id="btn-apply", variant="primary")
-            yield Button("Restart LLM", id="btn-ollama-restart", variant="warning")
-            yield Button("Clear", id="btn-clear")
-
-    def _compose_config(self) -> ComposeResult:
-        with VerticalScroll():
-            with Horizontal(classes="volume-row"):
-                yield Button("Unmute" if self._muted else "Mute", id="vol-mute", variant="warning")
-                yield Label("Volume %")
-                yield Input(
-                    value=str(int(round(self._volume * 100))), id="vol-input", type="integer"
-                )
-                yield Button("Save", id="config-save", variant="primary")
-                yield Button("Reset to default", id="config-reset", variant="warning")
-            with Horizontal(classes="llm-row"):
-                yield Static("ollama: …", id="ollama-status")
-            for field in FIELDS:
-                if field.kind == "multiselect":
-                    # Full-width so the checkbox list can show many options and scroll,
-                    # rather than being clipped into a one-line field row.
-                    yield Label(field.label)
-                    yield self._field_widget(field)
-                    yield Static(id="wake-phrases")
-                    yield Button(
-                        "Clean smoke-test models", id="wake-clean-smoke", variant="warning"
-                    )
-                    continue
-                with Horizontal(classes="field-row"):
-                    yield Label(field.label)
-                    yield self._field_widget(field)
-            yield Static(id="model-detail")
-
-    def _field_widget(self, field: Field):
-        wid = _field_id(field)
-        if field.kind == "multiselect":
-            # Options and selection are filled in on mount (discovered live).
-            return SelectionList(id=wid)
-        current = discovery.current_value(self._config, field.key)
-        if field.kind == "select":
-            # Options are filled in on mount (some are discovered live).
-            return Select([(current, current)] if current else [], id=wid, allow_blank=True)
-        return Input(value=current, id=wid)
-
-    def _compose_env(self) -> ComposeResult:
-        with Horizontal(classes="env-buttons"):
-            yield Button("Save", id="env-save", variant="primary")
-            yield Button("Add missing", id="env-add")
-            yield Button("Remove extra", id="env-remove", variant="warning")
-            yield Button("Reload", id="env-reload")
-        yield TextArea(id="envedit")
-
-    def _compose_models(self) -> ComposeResult:
-        with VerticalScroll():
-            with Horizontal(classes="models-search"):
-                yield Input(
-                    value=self._last_query, id="model-search", placeholder="Search ollama.com…"
-                )
-                yield Button("Refresh", id="models-refresh")
-            yield OptionList(id="search-results")
-            yield OptionList(id="model-tags")
-            with Horizontal(classes="install-row"):
-                with Vertical(classes="install-col"):
-                    yield Button("Install selected", id="model-install", variant="success")
-                    yield Static("", id="pull-status")
-                    yield ProgressBar(id="pull-progress", total=100, show_eta=False)
-                    yield Static("", id="pull-queue")
-                yield Static("", id="registry-detail")
-            yield Label("Installed")
-            yield OptionList(id="installed-list")
-            yield Button("Delete selected", id="model-delete", variant="error")
+        # Log channels: writers exist once LogsScreen has mounted; until then
+        # lines wait here (bounded like the widgets' backlog).
+        self._writers: dict[str, CollapsingWriter] = {}
+        self._pending: dict[str, deque] = {
+            name: deque(maxlen=MAX_LOG_LINES) for name in LOG_CHANNELS
+        }
 
     # ---- lifecycle -----------------------------------------------------------
 
     async def on_mount(self) -> None:
-        self._applog = self.query_one("#applog", RichLog)
-        self._llmlog = self.query_one("#llmlog", RichLog)
-        self._ollamalog = self.query_one("#ollamalog", RichLog)
-        # Collapse consecutive duplicate lines per pane into a single ×N counter.
-        self._applog_cw = CollapsingWriter(self._applog)
-        self._llmlog_cw = CollapsingWriter(self._llmlog)
-        self._ollamalog_cw = CollapsingWriter(self._ollamalog)
-        # Collapse writer per log id, so a re-wrap can restart its (now stale) run.
-        self._cw_for = {
-            "applog": self._applog_cw,
-            "llmlog": self._llmlog_cw,
-            "ollamalog": self._ollamalog_cw,
-        }
-        self.query_one("#envedit", TextArea).text = envfile.read(ENV_FILE)
-        self.run_worker(self._populate_selects(), group="selects")
-        self.run_worker(self._refresh_installed(), group="installed")
-        if self._last_query:
-            self.run_worker(self._do_search(self._last_query), group="search", exclusive=True)
+        self._home = HomeScreen()
+        self._logs_screen = LogsScreen()
+        self._config_screen = ConfigScreen()
+        self._models_screen = ModelsScreen()
+        self._installed_screen = InstalledScreen()
+        self.install_screen(self._home, name="home")
+        self.install_screen(self._logs_screen, name="logs")
+        self.install_screen(self._config_screen, name="config")
+        self.install_screen(self._models_screen, name="models")
+        self.install_screen(self._installed_screen, name="installed")
+        await self.push_screen("home")
+        self._refresh_status()
         self.run_worker(self._startup(), group="startup")
         self.run_worker(self._health_loop(), group="health")
-
-    @on(TabbedContent.TabActivated)
-    def _reflow_active_logs(self, event: TabbedContent.TabActivated) -> None:
-        # A log wrapped at the wrong width while its tab was hidden; re-wrap it to
-        # the visible width now. Defer until after refresh so the content region
-        # has its on-screen size.
-        pane = event.pane
-        if pane is not None:
-            self.call_after_refresh(self._reflow_pane_logs, pane)
-
-    def _reflow_pane_logs(self, pane: TabPane) -> None:
-        for widget in pane.query(ScreenWidthRichLog):
-            if widget.reflow():
-                cw = self._cw_for.get(widget.id)
-                if cw is not None:
-                    cw.reset()  # the run's tail strip count is stale after re-wrap
-
-    @on(TabbedContent.TabActivated, pane="#tab-models")
-    def _on_models_tab(self) -> None:
-        # Pick up models pulled out-of-band (e.g. `ollama pull` in a terminal).
-        self.run_worker(self._refresh_installed(), group="installed")
-
-    @on(TabbedContent.TabActivated, pane="#tab-config")
-    def _on_config_tab(self) -> None:
-        # Pick up models installed since mount (via the Models tab or `ollama pull`)
-        # so the LLM model dropdown always reflects what's currently installed.
-        self.run_worker(self._populate_selects(), group="selects")
 
     async def _startup(self) -> None:
         await self._start_daemon()
         await self._ensure_ollama()
 
-    async def _populate_selects(self, config: Config | None = None) -> None:
-        cfg = config or self._config
-        host = cfg.llm.host
-        for field in FIELDS:
-            if field.kind not in ("select", "multiselect") or field.options is None:
-                continue
-            try:
-                result = field.options(host=host)
-                if inspect.isawaitable(result):
-                    result = await result
-            except Exception as exc:  # noqa: BLE001 - discovery is best-effort
-                log.warning("option discovery for %s failed: %s", field.key, exc)
-                result = []
-            if field.kind == "multiselect":
-                self._populate_multiselect(field, cfg, result)
-                continue
-            current = discovery.current_value(cfg, field.key)
-            pairs = [_as_option(item) for item in result]
-            if current and current not in [value for _, value in pairs]:
-                pairs.insert(0, (current, current))
-            select = self.query_one(f"#{_field_id(field)}", Select)
-            select.set_options(pairs)
-            if current:
-                select.value = current
-        self._refresh_wake_phrases()
+    async def on_unmount(self) -> None:
+        await self.supervisor.stop()
+        await self.ollama.stop()  # only stops it if the TUI started it
 
-    def _populate_multiselect(self, field: Field, cfg: Config, result: list) -> None:
-        # Pre-check whatever the effective config actually loads (model_refs honours
-        # the model_paths > model_path > model_name precedence).
-        current = set(cfg.wake.model_refs())
-        sel = self.query_one(f"#{_field_id(field)}", SelectionList)
-        sel.clear_options()
-        sel.add_options(
-            Selection(label, value, value in current)
-            for label, value in (_as_option(item) for item in result)
-        )
+    @on(TextSelected)
+    async def _on_text_selected(self) -> None:
+        text = self.screen.get_selected_text()
+        if text:
+            self.copy_to_clipboard(text)
 
-    def _refresh_wake_phrases(self) -> None:
-        """Update the read-only line listing the phrases the checked models wake on."""
-        try:
-            sel = self.query_one("#field-wake_model_paths", SelectionList)
-        except Exception:  # noqa: BLE001 - not mounted yet
+    # ---- log channels ----------------------------------------------------------
+
+    def _attach_logs(self, screen: LogsScreen) -> None:
+        """LogsScreen mounted: wire its widgets up and drain the buffered lines."""
+        for name in LOG_CHANNELS:
+            self._writers[name] = CollapsingWriter(screen.log_widget(name))
+            pending = self._pending[name]
+            while pending:
+                text, key = pending.popleft()
+                self._writers[name].write(text, key)
+
+    def _log(self, channel: str, content: str | Text, key: str | None = None) -> None:
+        text = content if isinstance(content, Text) else Text(str(content))
+        key = key if key is not None else text.plain
+        writer = self._writers.get(channel)
+        if writer is not None:
+            writer.write(text, key)
+        else:
+            self._pending[channel].append((text, key))
+
+    def _reset_writer(self, channel: str) -> None:
+        writer = self._writers.get(channel)
+        if writer is not None:
+            writer.reset()  # its tail strip count is stale after a re-wrap/clear
+
+    def _clear_logs(self) -> None:
+        for name in LOG_CHANNELS:
+            if name in self._writers:
+                self._logs_screen.log_widget(name).clear()
+            self._pending[name].clear()
+            self._reset_writer(name)
+
+    async def _send_text(self, text: str) -> None:
+        """Inject a typed utterance as if it were transcribed speech (desktop chat)."""
+        self._log("llm", f"You (typed): {text}")
+        await self.supervisor.send(f"TEXT {text}")
+
+    # ---- daemon control ------------------------------------------------------
+
+    async def _start_daemon(self) -> None:
+        await self.supervisor.start(self._overrides)
+        self._set_state("running")
+        self.run_worker(self._pump(), exclusive=True, group="pump")
+
+    async def _pump(self) -> None:
+        async for line in self.supervisor.lines():
+            parsed = parse(line)
+            key = dedup_key(parsed)
+            self._log("app", colorize_line(parsed.raw), key)
+            if parsed.is_llm:
+                self._log("llm", colorize_message(parsed.message or parsed.raw), key)
+        # stdout EOF: the child exited.
+        if self._state != "restarting":
+            self._set_state("stopped")
+
+    async def _on_start(self) -> None:
+        if not self.supervisor.running:
+            await self._start_daemon()
+
+    async def _on_stop(self) -> None:
+        self._set_state("stopped")
+        await self.supervisor.stop()
+
+    async def _restart(self) -> None:
+        self._set_state("restarting")
+        await self.supervisor.restart(self._overrides)
+        # Refresh the seed config so the status panel reflects applied overrides.
+        self._config = discovery.current_config()
+        self._set_state("running")
+        self.run_worker(self._pump(), exclusive=True, group="pump")
+
+    # ---- LLM server (Ollama) -------------------------------------------------
+
+    async def _ensure_ollama(self) -> None:
+        """Bring the LLM server up on launch and stream its output — no button press.
+
+        Non-destructive: if a server is already responding we leave it alone (we
+        can't capture an external process's output, and killing a healthy server
+        would be surprising). Only start one when nothing answers."""
+        if await discovery.ollama_health(self._config.llm.host):
+            self._log("ollama", "LLM server already running.")
             return
-        phrases = registry.phrases_for(list(sel.selected))
-        text = ", ".join(phrases) if phrases else "(no wake models selected)"
-        self.query_one("#wake-phrases", Static).update(f"Wake phrases: {text}")
+        self._log("ollama", "Starting LLM server…")
+        # Clear a stale/non-responding holder of the port so the child can bind.
+        pid = await free_ollama_port(self._config.llm.host)
+        if pid:
+            self._log("ollama", f"Stopped stale ollama serve (pid {pid}).")
+        await self.ollama.start()
+        self.run_worker(self._pump_ollama(), exclusive=True, group="ollama-pump")
+        self.run_worker(self._check_ollama_health(), group="health-now")
 
-    @on(SelectionList.SelectedChanged, "#field-wake_model_paths")
-    def _on_wake_models_changed(self) -> None:
-        self._refresh_wake_phrases()
+    async def _on_ollama_restart(self) -> None:
+        self._log("app", "Restarting LLM server… (see Ollama channel in Logs)")
+        self._log("ollama", "Restarting LLM server…")
+        # A server we didn't spawn (a bare `ollama serve` from another shell) owns
+        # the port; the supervisor can't SIGTERM a child it never started, so free
+        # the port by pid first — otherwise `ollama serve` hits "address in use".
+        if not self.ollama.running:
+            pid = await free_ollama_port(self._config.llm.host)
+            if pid:
+                self._log("ollama", f"Stopped external ollama serve (pid {pid}).")
+        await self.ollama.restart()
+        # Stream the server's own output into the Ollama channel (so a failed start
+        # is visible — the reason health was failing in the first place).
+        self.run_worker(self._pump_ollama(), exclusive=True, group="ollama-pump")
+        self.run_worker(self._check_ollama_health(), group="health-now")
 
-    @on(Button.Pressed, "#wake-clean-smoke")
-    def _on_clean_smoke(self) -> None:
+    async def _pump_ollama(self) -> None:
+        async for line in self.ollama.lines():
+            self._log("ollama", colorize_line(line), line)
+
+    async def _health_loop(self) -> None:
+        while True:
+            await self._check_ollama_health()
+            await asyncio.sleep(HEALTH_POLL_SECONDS)
+
+    async def _check_ollama_health(self) -> None:
+        self._ollama_up = await discovery.ollama_health(self._config.llm.host)
+        self._refresh_status()
+
+    # ---- config editing --------------------------------------------------------
+
+    async def _select_options(self, field: Field, current: str = "") -> list[tuple[str, str]]:
+        """Resolve a field's options provider into (label, value) pairs."""
+        try:
+            result = field.options(host=self._config.llm.host) if field.options else []
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:  # noqa: BLE001 - discovery is best-effort
+            log.warning("option discovery for %s failed: %s", field.key, exc)
+            result = []
+        pairs = [_as_option(item) for item in result]
+        if current and current not in [value for _, value in pairs]:
+            pairs.insert(0, (current, current))
+        return pairs
+
+    async def _refresh_wake_options(self, cfg=None) -> None:
+        wake_field = next(f for f in FIELDS if f.kind == "multiselect")
+        options = await self._select_options(wake_field)
+        self._config_screen.populate_wake_models(cfg or self._config, options)
+
+    def _clean_smoke_models(self) -> None:
         removed = discovery.clean_smoke_models()
         if removed:
-            self._applog.write(
+            self._log(
+                "app",
                 f"Removed {len(removed)} smoke-test model(s): "
-                + ", ".join(os.path.basename(p) for p in removed)
+                + ", ".join(os.path.basename(p) for p in removed),
             )
         else:
-            self._applog.write("No smoke-test models to remove.")
-        self.run_worker(self._populate_selects(), group="selects")
-
-    # ---- model detail --------------------------------------------------------
-
-    @on(Select.Changed, "#field-llm_model")  # _field_id(("llm", "model"))
-    def _on_model_selected(self, event: Select.Changed) -> None:
-        detail = self.query_one("#model-detail", Static)
-        if event.value in (None, Select.BLANK):
-            detail.update("")
-            return
-        name = str(event.value)
-        detail.update(f"Loading details for {name}…")
-        self.run_worker(self._show_model_detail(name), group="model-detail", exclusive=True)
+            self._log("app", "No smoke-test models to remove.")
+        self.run_worker(self._refresh_wake_options(), group="wake-options")
 
     async def _show_model_detail(self, name: str) -> None:
         host = self._config.llm.host
         info = await discovery.ollama_model_detail(host, name)
-        detail = self.query_one("#model-detail", Static)
+        try:
+            detail = self._config_screen.query_one("#model-detail", Static)
+        except Exception:  # noqa: BLE001 - config screen not visited yet
+            return
         if info is None:
             # Distinguish a down server from a model that genuinely has no details.
             if await discovery.ollama_health(host):
@@ -498,356 +319,103 @@ class AssistantTUI(App):
         caps = ", ".join(info.capabilities) if info.capabilities else "—"
         detail.update(f"{name}: {' · '.join(parts)}  |  capabilities: {caps}")
 
-    # ---- models tab (registry search / pull queue / installed) ---------------
+    async def _on_config_save(self, values: dict[tuple[str, ...], object]) -> None:
+        configfile.write_fields(configfile.CONFIG_FILE, values)
+        self._log("app", f"Saved {configfile.CONFIG_FILE} — restarting…")
+        await self._restart()
 
-    @on(Input.Submitted, "#model-search")
-    async def _on_model_search(self, event: Input.Submitted) -> None:
-        self._last_query = event.value.strip()
-        if self._last_query:
-            self.run_worker(self._do_search(self._last_query), group="search", exclusive=True)
+    async def _on_config_apply(self, form: dict[tuple[str, ...], str]) -> None:
+        current = {
+            field.key: discovery.current_value(self._config, field.key)
+            for field in FIELDS
+            if field.kind != "multiselect"
+        }
+        self._overrides.update(overrides_for(changed_fields(form, current)))
+        self._collect_multiselect_override()
+        await self._restart()
 
-    @on(Button.Pressed, "#models-refresh")
-    async def _on_models_refresh(self) -> None:
-        if self._last_query:
-            self.run_worker(
-                self._do_search(self._last_query, refresh=True), group="search", exclusive=True
-            )
-        self.run_worker(self._refresh_installed(), group="installed")
+    def _collect_multiselect_override(self) -> None:
+        # wake.model_paths rides an env var as a JSON list (Config parses it back).
+        wake_field = next(f for f in FIELDS if f.kind == "multiselect")
+        selected = self._config_screen.selected_wake_models()
+        if set(selected) == set(self._config.wake.model_refs()):
+            return  # unchanged from the effective config
+        self._overrides[wake_field.env] = json.dumps(selected)
+
+    async def _on_config_reset(self) -> None:
+        data = configfile.read(configfile.DEFAULT_CONFIG_FILE)
+        if not data:
+            self._log("app", f"No {configfile.DEFAULT_CONFIG_FILE} found.")
+            return
+        defaults = discovery.config_from_dict(data)
+        self._config_screen.set_from_config(defaults)
+        await self._refresh_wake_options(cfg=defaults)
+        self._log("app", f"Reset fields to {configfile.DEFAULT_CONFIG_FILE} — Save to persist.")
+
+    # ---- models (registry search / pull queue / installed) ---------------------
 
     async def _do_search(self, query: str, *, refresh: bool = False) -> None:
-        results = await discovery.search_registry(query, refresh=refresh)
-        self._search_results = results
-        self._tags = []
-        self.query_one("#model-tags", OptionList).clear_options()
-        if not results:
-            opts = self.query_one("#search-results", OptionList)
-            opts.clear_options()
-            opts.add_option(Option("(no results — is ollama.com reachable?)", disabled=True))
-            return
-        self._render_search_results()
+        self._search_results = await discovery.search_registry(query, refresh=refresh)
+        self._models_screen.render_results(self._search_results, self._installed_names())
 
     def _installed_names(self) -> set[str]:
         return {m.name for m in self._installed}
 
-    @staticmethod
-    def _is_installed(slug: str, installed: set[str]) -> bool:
-        # registry slug "qwen2.5" matches pulled "qwen2.5:3b-instruct"
-        return any(n == slug or n.startswith(f"{slug}:") for n in installed)
+    def _open_model_detail(self, model: discovery.RegistryModel) -> None:
+        async def _load_and_push() -> None:
+            tags = await discovery.registry_tags(model.name)
+            self.push_screen(ModelDetailScreen(model, tags))
 
-    def _render_search_results(self) -> None:
-        opts = self.query_one("#search-results", OptionList)
-        opts.clear_options()
-        installed = self._installed_names()
-        opts.add_options(
-            _result_option(m, self._is_installed(m.name, installed)) for m in self._search_results
-        )
-
-    def _render_tags(self) -> None:
-        opts = self.query_one("#model-tags", OptionList)
-        opts.clear_options()
-        installed = self._installed_names()
-        opts.add_options(
-            Option(f"{'✓ ' if t.ref in installed else ''}{t.ref}   {t.size}".rstrip())
-            for t in self._tags
-        )
-
-    @on(OptionList.OptionSelected, "#search-results")
-    def _on_result_selected(self, event: OptionList.OptionSelected) -> None:
-        if not self._search_results:
-            return
-        m = self._search_results[event.option_index]
-        self.query_one("#registry-detail", Static).update(_registry_detail_text(m))
-        self.run_worker(self._load_tags(m.name), group="tags", exclusive=True)
-
-    async def _load_tags(self, name: str) -> None:
-        tags = await discovery.registry_tags(name)
-        self._tags = tags
-        if not tags:
-            opts = self.query_one("#model-tags", OptionList)
-            opts.clear_options()
-            opts.add_option(Option(f"(no tags found for {name})", disabled=True))
-            return
-        self._render_tags()
-
-    @on(OptionList.OptionSelected, "#model-tags")
-    def _on_tag_selected(self, event: OptionList.OptionSelected) -> None:
-        if not self._tags:
-            return
-        self._selected_ref = self._tags[event.option_index].ref
-        self.query_one("#pull-status", Static).update(
-            f"selected {self._selected_ref} — press Install"
-        )
-
-    @on(Button.Pressed, "#model-install")
-    def _on_model_install(self) -> None:
-        if self._selected_ref:
-            self._enqueue_pull(self._selected_ref)
+        self.run_worker(_load_and_push(), group="tags", exclusive=True)
 
     def _enqueue_pull(self, ref: str) -> None:
         if ref in self._pull_queue:
             return
         self._pull_queue.append(ref)
-        self._render_queue()
+        self._render_pull(f"queued {ref}", None)
         if not self._pulling:
             self.run_worker(self._pull_worker(), group="pull", exclusive=True)
 
-    def _render_queue(self) -> None:
+    def _render_pull(self, status: str, percent: float | None) -> None:
         queued = self._pull_queue[1:] if self._pulling else self._pull_queue
-        text = f"queued: {', '.join(queued)}" if queued else ""
-        self.query_one("#pull-queue", Static).update(text)
+        if self._models_screen.is_attached:
+            self._models_screen.set_pull_status(status, percent, queued)
 
     async def _pull_worker(self) -> None:
         self._pulling = True
-        status = self.query_one("#pull-status", Static)
-        bar = self.query_one("#pull-progress", ProgressBar)
         try:
             while self._pull_queue:
                 ref = self._pull_queue[0]
-                self._render_queue()
-                bar.update(total=100, progress=0)
+                self._render_pull(f"pulling {ref}…", 0)
                 try:
                     async for p in discovery.pull_model(self._config.llm.host, ref):
-                        status.update(f"pulling {ref}: {p.status}")
-                        bar.update(progress=p.percent)
-                    status.update(f"pulled {ref} ✓")
-                    self._ollamalog.write(f"pulled {ref}")
+                        self._render_pull(f"pulling {ref}: {p.status}", p.percent)
+                    self._render_pull(f"pulled {ref} ✓", 100)
+                    self._log("ollama", f"pulled {ref}")
                 except Exception as exc:  # noqa: BLE001 - network/server, surface and continue
-                    status.update(f"pull of {ref} failed: {exc}")
-                    self._ollamalog.write(f"pull of {ref} failed: {exc}")
+                    self._render_pull(f"pull of {ref} failed: {exc}", None)
+                    self._log("ollama", f"pull of {ref} failed: {exc}")
                 self._pull_queue.pop(0)
-                self._render_queue()
                 await self._refresh_installed()
-                self.run_worker(self._populate_selects(), group="selects")
         finally:
             self._pulling = False
-
-    @on(Button.Pressed, "#model-delete")
-    async def _on_model_delete(self) -> None:
-        opts = self.query_one("#installed-list", OptionList)
-        idx = opts.highlighted
-        if idx is None or not self._installed:
-            return
-        name = self._installed[idx].name
-        if await discovery.delete_model(self._config.llm.host, name):
-            self._ollamalog.write(f"deleted {name}")
-        await self._refresh_installed()
-        self.run_worker(self._populate_selects(), group="selects")
+            self._render_pull("", None)
 
     async def _refresh_installed(self) -> None:
         self._installed = await discovery.ollama_models_info(self._config.llm.host)
-        opts = self.query_one("#installed-list", OptionList)
-        opts.clear_options()
-        for m in self._installed:
-            meta = " · ".join(p for p in (m.human_size if m.size else "", m.parameter_size) if p)
-            opts.add_option(Option(f"{m.name}   {meta}".rstrip()))
+        if self._installed_screen.is_attached:
+            self._installed_screen.render_installed(self._installed)
         # Keep the browser's ✓ markers in sync with what's now installed.
-        if self._search_results:
-            self._render_search_results()
-        if self._tags:
-            self._render_tags()
+        if self._search_results and self._models_screen.is_attached:
+            self._models_screen.render_results(self._search_results, self._installed_names())
 
-    # ---- daemon control ------------------------------------------------------
-
-    async def _start_daemon(self) -> None:
-        await self.supervisor.start(self._overrides)
-        self._set_state("running")
-        self.run_worker(self._pump(), exclusive=True, group="pump")
-
-    async def _pump(self) -> None:
-        async for line in self.supervisor.lines():
-            parsed = parse(line)
-            key = dedup_key(parsed)
-            self._applog_cw.write(colorize_line(parsed.raw), key)
-            if parsed.is_llm:
-                self._llmlog_cw.write(colorize_message(parsed.message or parsed.raw), key)
-        # stdout EOF: the child exited.
-        if self._state != "restarting":
-            self._set_state("stopped")
-
-    @on(Button.Pressed, "#btn-start")
-    async def _on_start(self) -> None:
-        if not self.supervisor.running:
-            await self._start_daemon()
-
-    @on(Button.Pressed, "#btn-stop")
-    async def _on_stop(self) -> None:
-        self._set_state("stopped")
-        await self.supervisor.stop()
-
-    @on(Button.Pressed, "#btn-restart")
-    async def _on_restart(self) -> None:
-        await self._restart()
-
-    @on(Button.Pressed, "#btn-apply")
-    async def _on_apply(self) -> None:
-        self._collect_overrides()
-        await self._restart()
-
-    @on(Button.Pressed, "#btn-clear")
-    def _on_clear(self) -> None:
-        self._applog.clear()
-        self._llmlog.clear()
-        self._ollamalog.clear()
-        self._applog_cw.reset()
-        self._llmlog_cw.reset()
-        self._ollamalog_cw.reset()
-
-    async def _restart(self) -> None:
-        self._set_state("restarting")
-        await self.supervisor.restart(self._overrides)
-        # Refresh the seed config so the status bar reflects applied overrides.
-        self._config = discovery.current_config()
-        self._set_state("running")
-        self.run_worker(self._pump(), exclusive=True, group="pump")
-
-    def _collect_overrides(self) -> None:
-        form: dict[tuple[str, ...], str] = {}
-        current: dict[tuple[str, ...], str] = {}
-        for field in FIELDS:
-            if field.kind == "multiselect":
-                self._collect_multiselect_override(field)
-                continue
-            current[field.key] = discovery.current_value(self._config, field.key)
-            widget = self.query_one(f"#{_field_id(field)}")
-            value = widget.value
-            if value in (None, Select.BLANK):
-                continue
-            form[field.key] = str(value)
-        self._overrides.update(overrides_for(changed_fields(form, current)))
-
-    def _collect_multiselect_override(self, field: Field) -> None:
-        # wake.model_paths rides an env var as a JSON list (Config parses it back).
-        sel = self.query_one(f"#{_field_id(field)}", SelectionList)
-        selected = list(sel.selected)
-        if set(selected) == set(self._config.wake.model_refs()):
-            return  # unchanged from the effective config
-        self._overrides[field.env] = json.dumps(selected)
-
-    # ---- LLM server (Ollama) -------------------------------------------------
-
-    async def _ensure_ollama(self) -> None:
-        """Bring the LLM server up on launch and stream its output — no button press.
-
-        Non-destructive: if a server is already responding we leave it alone (we
-        can't capture an external process's output, and killing a healthy server
-        would be surprising). Only start one when nothing answers."""
-        if await discovery.ollama_health(self._config.llm.host):
-            self._ollamalog.write("LLM server already running.")
-            return
-        self._ollamalog.write("Starting LLM server…")
-        # Clear a stale/non-responding holder of the port so the child can bind.
-        pid = await free_ollama_port(self._config.llm.host)
-        if pid:
-            self._ollamalog.write(f"Stopped stale ollama serve (pid {pid}).")
-        await self.ollama.start()
-        self.run_worker(self._pump_ollama(), exclusive=True, group="ollama-pump")
-        self.run_worker(self._check_ollama_health(), group="health-now")
-
-    @on(Button.Pressed, "#btn-ollama-restart")
-    async def _on_ollama_restart(self) -> None:
-        self._applog.write("Restarting LLM server… (see Ollama tab)")
-        self._ollamalog.write("Restarting LLM server…")
-        # A server we didn't spawn (a bare `ollama serve` from another shell) owns
-        # the port; the supervisor can't SIGTERM a child it never started, so free
-        # the port by pid first — otherwise `ollama serve` hits "address in use".
-        if not self.ollama.running:
-            pid = await free_ollama_port(self._config.llm.host)
-            if pid:
-                self._ollamalog.write(f"Stopped external ollama serve (pid {pid}).")
-        await self.ollama.restart()
-        # Stream the server's own output into the Ollama tab (so a failed start is
-        # visible — the reason health was failing in the first place).
-        self.run_worker(self._pump_ollama(), exclusive=True, group="ollama-pump")
-        self.run_worker(self._check_ollama_health(), group="health-now")
-
-    async def _pump_ollama(self) -> None:
-        async for line in self.ollama.lines():
-            self._ollamalog_cw.write(colorize_line(line), line)
-
-    async def _health_loop(self) -> None:
-        while True:
-            await self._check_ollama_health()
-            await asyncio.sleep(HEALTH_POLL_SECONDS)
-
-    async def _check_ollama_health(self) -> None:
-        self._ollama_up = await discovery.ollama_health(self._config.llm.host)
-        try:
-            badge = (
-                "[green]ollama: up[/green]" if self._ollama_up else "[red]ollama: DOWN[/red]"
-            )
-            self.query_one("#ollama-status", Static).update(badge)
-        except Exception:  # noqa: BLE001 - widget not mounted yet
-            pass
-        self._refresh_status()
-
-    # ---- config persistence --------------------------------------------------
-
-    @on(Button.Pressed, "#config-save")
-    async def _on_config_save(self) -> None:
-        values: dict[tuple[str, ...], object] = {}
-        for field in FIELDS:
-            widget = self.query_one(f"#{_field_id(field)}")
-            if field.kind == "multiselect":
-                values[field.key] = coerce(field, list(widget.selected))
-                continue
-            value = widget.value
-            if value in (None, Select.BLANK):
-                continue
-            values[field.key] = coerce(field, value)
-        configfile.write_fields(configfile.CONFIG_FILE, values)
-        self._applog.write(f"Saved {configfile.CONFIG_FILE} — restarting…")
-        await self._restart()
-
-    @on(Button.Pressed, "#config-reset")
-    async def _on_config_reset(self) -> None:
-        data = configfile.read(configfile.DEFAULT_CONFIG_FILE)
-        if not data:
-            self._applog.write(f"No {configfile.DEFAULT_CONFIG_FILE} found.")
-            return
-        defaults = discovery.config_from_dict(data)
-        for field in FIELDS:
-            if field.kind not in ("select", "multiselect"):
-                self.query_one(f"#{_field_id(field)}", Input).value = discovery.current_value(
-                    defaults, field.key
-                )
-        await self._populate_selects(defaults)
-        self._applog.write(f"Reset fields to {configfile.DEFAULT_CONFIG_FILE} — Save to persist.")
-
-    # ---- .env editor ---------------------------------------------------------
-
-    @on(Button.Pressed, "#env-save")
-    def _on_env_save(self) -> None:
-        envfile.write(ENV_FILE, self.query_one("#envedit", TextArea).text)
-        self._applog.write(f"Saved {ENV_FILE} — Restart to apply.")
-
-    @on(Button.Pressed, "#env-add")
-    def _on_env_add(self) -> None:
-        editor = self.query_one("#envedit", TextArea)
-        editor.text = envfile.add_missing(editor.text, envfile.read(ENV_EXAMPLE_FILE))
-
-    @on(Button.Pressed, "#env-remove")
-    def _on_env_remove(self) -> None:
-        editor = self.query_one("#envedit", TextArea)
-        editor.text = envfile.remove_extra(editor.text, envfile.read(ENV_EXAMPLE_FILE))
-
-    @on(Button.Pressed, "#env-reload")
-    def _on_env_reload(self) -> None:
-        self.query_one("#envedit", TextArea).text = envfile.read(ENV_FILE)
-
-    # ---- chat box ------------------------------------------------------------
-
-    @on(Input.Submitted, "#chat")
-    async def _on_chat(self, event: Input.Submitted) -> None:
-        text = event.value.strip()
-        event.input.value = ""
-        if not text:
-            return
-        self._llmlog.write(f"You (typed): {text}")
-        await self.supervisor.send(f"TEXT {text}")
+    async def _delete_model(self, name: str) -> None:
+        if await discovery.delete_model(self._config.llm.host, name):
+            self._log("ollama", f"deleted {name}")
+        await self._refresh_installed()
 
     # ---- volume / mute -------------------------------------------------------
 
-    @on(Button.Pressed, "#vol-mute")
     async def _on_mute(self) -> None:
         if self._muted:
             await self._apply_volume(self._last_volume, muted=False)
@@ -855,70 +423,62 @@ class AssistantTUI(App):
             if self._volume > 0.0:
                 self._last_volume = self._volume
             await self._apply_volume(0.0, muted=True)
-        self.query_one("#vol-mute", Button).label = "Unmute" if self._muted else "Mute"
 
-    @on(Input.Submitted, "#vol-input")
-    async def _on_volume_input(self, event: Input.Submitted) -> None:
-        try:
-            pct = int(event.value)
-        except ValueError:
-            return
-        pct = max(0, min(100, pct))
-        value = pct / 100
+    async def _nudge_volume(self, delta: float) -> None:
+        value = round(max(0.0, min(1.0, self._volume + delta)), 2)
         await self._apply_volume(value, muted=value == 0)
-        self.query_one("#vol-mute", Button).label = "Unmute" if self._muted else "Mute"
 
     async def _apply_volume(self, value: float, *, muted: bool) -> None:
         self._volume = value
         self._muted = muted
         # Live (no restart) via the control channel...
         await self.supervisor.send(f"SET audio.output_volume {value}")
-        # ...and persist for the next (re)start via the env override + number field.
+        # ...and persist for the next (re)start via the env override.
         self._overrides[VOLUME_ENV] = str(value)
-        try:
-            self.query_one(f"#{_field_id(_volume_field())}", Input).value = str(value)
-        except Exception:  # noqa: BLE001 - widget may not exist in a custom layout
-            pass
-        try:
-            self.query_one("#vol-input", Input).value = str(int(round(value * 100)))
-        except Exception:  # noqa: BLE001 - widget may not exist in a custom layout
-            pass
+        if self._config_screen.is_attached:
+            self._config_screen.set_volume(value)
         self._refresh_status()
 
-    # ---- status bar ----------------------------------------------------------
+    # ---- status ---------------------------------------------------------------
 
     def _set_state(self, state: str) -> None:
         self._state = state
         self._refresh_status()
 
-    def _refresh_status(self) -> None:
+    def _status_text(self) -> Text:
         model = self._overrides.get("ASSISTANT_LLM__MODEL") or self._config.llm.model
         refs_override = self._overrides.get("ASSISTANT_WAKE__MODEL_PATHS")
         refs = json.loads(refs_override) if refs_override else None
         phrases = ", ".join(registry.phrases_for(refs or self._config.wake.model_refs())) or "(none)"
-        vol = "MUTED" if self._muted else f"vol {self._volume:.2f}"
-        ollama = "ollama up" if self._ollama_up else "ollama DOWN"
-        # No square brackets: the status Static renders Rich markup, which would
-        # swallow "[RUNNING]" as a tag.
-        text = (
-            f"{self._state.upper()}  |  model: {model}  |  {ollama}  "
-            f"|  wake: {phrases}  |  {vol}"
-        )
+        state_style = {"running": "green", "restarting": "yellow"}.get(self._state, "red")
+        text = Text()
+        text.append("● ", style=state_style)
+        text.append(f"daemon {self._state.upper()}\n")
+        text.append("● ", style="green" if self._ollama_up else "red")
+        text.append("ollama up\n" if self._ollama_up else "ollama DOWN\n")
+        text.append(f"model: {model}\n")
+        text.append(f"wake: {phrases}\n")
+        text.append("MUTED" if self._muted else f"vol {int(round(self._volume * 100))}%")
+        return text
+
+    def _refresh_status(self) -> None:
         try:
-            self.query_one("#status", Static).update(text)
-        except Exception:  # noqa: BLE001 - status not mounted yet
+            self._home.query_one("#home-status", Static).update(self._status_text())
+            self._home.query_one("#btn-toggle-daemon", Button).label = (
+                "Stop" if self._state == "running" else "Start"
+            )
+            self._home.query_one("#vol-value", Static).update(
+                "MUTED" if self._muted else f"{int(round(self._volume * 100))}%"
+            )
+            self._home.query_one("#vol-mute", Button).label = (
+                "Unmute" if self._muted else "Mute"
+            )
+        except Exception:  # noqa: BLE001 - home not mounted yet
             pass
-
-    async def on_unmount(self) -> None:
-        await self.supervisor.stop()
-        await self.ollama.stop()  # only stops it if the TUI started it
-
-
-def _volume_field() -> Field:
-    for field in FIELDS:
-        if field.key == ("audio", "output_volume"):
-            return field
-    raise KeyError("output_volume field missing from schema")
+        daemon_up = self._state == "running"
+        for screen in (self._config_screen, self._models_screen, self._installed_screen):
+            if screen.is_attached:
+                screen.query_one(NavBar).set_dots(daemon_up, self._ollama_up)
 
 
 def main() -> None:

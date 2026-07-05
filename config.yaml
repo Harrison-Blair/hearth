@@ -15,14 +15,12 @@ recorder:
   start_timeout_ms: 5000
   preroll_frames: 6
 wake:
-  model_path: models/wake/hey_assistant.onnx
-  threshold: 0.5
   model_paths:
-  - models/wake/hello_penguin.onnx
-  - models/wake/hey_penguin.onnx
-  - models/wake/yo_penguin.onnx
+    - models/wake/calcifer.onnx
+  threshold: 0.66  # calcifer's eval-optimal point: 91.0% recall @ 0.04 false-accepts/hr
+  score_interval: 1
 stt:
-  model: distil-small.en
+  model: distil-medium.en
   device: cpu
   compute_type: int8
   cpu_threads: 4
@@ -30,7 +28,7 @@ stt:
   beam_size: 5
   vad_filter: true
   condition_on_previous_text: false
-  initial_prompt: "Penguin. Set a reminder, what time is it, search the web."
+  initial_prompt: Calcifer. Set a reminder, what time is it, search the web.
 llm:
   provider: ollama
   model: qwen2.5:3b-instruct
@@ -48,13 +46,9 @@ storage:
 scheduling:
   poll_seconds: 1.0
 web_search:
-  provider: ddgs
+  language: en
   result_count: 3
   timeout: 10.0
-  region: wt-wt
-  timelimit: d
   max_snippet_chars: 500
-  api_key: ''
-  tavily_endpoint: https://api.tavily.com/search
 logging:
   level: INFO

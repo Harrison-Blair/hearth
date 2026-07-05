@@ -12,7 +12,7 @@ lives in `config.yaml`, so the Pi port is config-only.
 ## Status
 
 Phase 3 (first full slice) complete: `python -m assistant.app` speaks a greeting,
-then runs the end-to-end loop — wake word (openWakeWord) → record (WebRTC VAD) →
+then runs the end-to-end loop — wake word (livekit-wakeword) → record (WebRTC VAD) →
 transcribe (faster-whisper) → route (LLM classifier, keyphrase fallback) → answer (local LLM via Ollama) →
 speak (Piper). Everything runs locally. Earlier phases delivered the scaffolding,
 contracts, typed config, audio device auto-detection, and local TTS voice-out.
@@ -56,18 +56,16 @@ pytest                          # run tests
 Per-phase heavy/native dependencies are installed as each phase lands, e.g.
 `pip install -e ".[tts]"` (Piper), `.[wake]`, `.[stt]`, `.[vad]`, `.[llm]`, `.[scheduling]`.
 
-**Wake word (openWakeWord):** it hard-pins `tflite-runtime`, which has no
-Python 3.12 wheel. We run the ONNX backend instead, so install it without deps
-and download the stock models:
+**Wake word (livekit-wakeword):** a minimal onnxruntime + numpy runtime with the
+mel/embedding models bundled in the wheel — no extra install steps:
 
 ```bash
-pip install -e ".[wake]"                       # onnxruntime + requests
-pip install "openwakeword==0.6.0" --no-deps    # ONNX backend, skip tflite pin
-python -c "import openwakeword.utils as u; u.download_models(['hey_jarvis'])"
+pip install -e ".[wake]"                       # livekit-wakeword
 ```
 
-The stock `hey_jarvis` model bootstraps voice-in until the custom
-`hey assistant` model is trained (Phase 2a).
+The runtime loads the trained `.onnx` classifier(s) named in `config.yaml`
+(`wake.model_paths`); train the "Calcifer" model with `training/` (see
+`training/README.md`).
 
 ### System prerequisites
 
@@ -91,9 +89,10 @@ The stock `hey_jarvis` model bootstraps voice-in until the custom
 
 ## Monitor TUI
 
-A Textual terminal UI supervises the daemon as a child process — handy on the
-Raspberry Pi's 3.5" (480×320) touchscreen, where every control is a tappable
-button.
+A Textual terminal UI supervises the daemon as a child process — designed for
+the Raspberry Pi's 3.5" touchscreen in **portrait (320×480, ≈40×30 terminal
+cells)**, operated by touch alone: one focused screen per job, full-width
+tappable buttons, no typing required.
 
 ```bash
 pip install -e ".[tui]"
@@ -101,34 +100,33 @@ python -m tui
 ```
 
 It does **not** import the native audio/model deps — only the daemon child does.
-Tabs plus an `.env` editor, a top status bar (daemon state, model, wake
-phrase, volume), and a bottom button row:
+A **Home** screen shows status at a glance (daemon state, Ollama health, model,
+wake phrases, volume) with one-tap navigation and controls (Start/Stop, Restart,
+Restart LLM, mute and −/+ volume — volume changes apply instantly over the
+child's stdin control channel, no restart). From Home:
 
-- **Logs** — the daemon's full stdout.
-- **Ollama** — the LLM server's own diagnostics (model loads, HTTP request logs,
-  errors), streamed live whenever the TUI manages the server via **Restart LLM**.
-  An externally/systemd-managed Ollama exposes no stdout to capture, so the tab
-  shows a hint until you start the server from here.
-- **LLM** — a full **labeled call trace** of every model round-trip: the prompt,
-  system message, and response for each call, tagged by purpose
-  (`classify` / `timespec` / `answer` / `search`) so you see the model's actual
-  reasoning, not just the bare intent-classification JSON. Plus a **chat box**:
-  type a command and it's injected into the running pipeline *as if it were
-  transcribed speech* (bypasses the wake word), so it routes through the real
-  skills, reminders fire, and the reply is spoken.
-- **Config** — change the LLM/wake model (discovered live), log level,
-  thresholds, etc., then **Apply & Restart** to relaunch the child with the new
-  `ASSISTANT_*` env. A volume row gives **instant mute / 25–100%** with no
-  restart (sent live over the child's stdin control channel). The status bar
-  shows a live **Ollama health** badge; a **Restart LLM** button (re)starts the
-  LLM server on demand when health is failing and streams its output into Logs.
-  The command is `llm.serve_cmd` (default `["ollama", "serve"]`, managed as a
-  child — no sudo); systemd users can set it to e.g.
+- **Logs** — one log pane with three channels: **App** (the daemon's full
+  stdout), **LLM** (a labeled call trace of every model round-trip, tagged by
+  purpose — `classify` / `timespec` / `answer` / `search`), and **Olma** (the
+  LLM server's own diagnostics, streamed live whenever the TUI manages the
+  server; an externally-managed Ollama exposes no stdout to capture). On a
+  desktop, press `t` for a chat box that injects a typed command into the
+  running pipeline *as if it were transcribed speech* (bypasses the wake word),
+  so it routes through the real skills and the reply is spoken.
+- **Config** — every editable setting as a touch widget: checkbox list for wake
+  models, −/+ steppers for numbers (threshold, volume, VAD), full-screen
+  pickers for choices (LLM model discovered live, STT model, log level).
+  **Save** writes `config.yaml` and restarts; **Apply** relaunches the child
+  with `ASSISTANT_*` env overrides only (config.yaml untouched); **Reset**
+  re-seeds the form from `default-config.yaml`. A **Restart LLM** button on
+  Home (re)starts the LLM server on demand when health is failing — the command
+  is `llm.serve_cmd` (default `["ollama", "serve"]`, managed as a child — no
+  sudo); systemd users can set it to e.g.
   `["systemctl", "--user", "restart", "ollama"]`.
-- **Env** — edit a `.env` file in place (merged into the daemon's environment at
-  start, under config.yaml's precedence rules), with one-tap **Add missing from
-  `env.example`** / **Remove values not in `env.example`**. Copy `env.example` to
-  `.env` to get started; `.env` is gitignored.
+- **Models** — search the ollama.com registry, tap a result for its description
+  and pullable tags, install with streamed progress (queued pulls run in
+  order), and browse/delete installed models.
 
-Config changes are applied as `ASSISTANT_*` env overrides on restart — the TUI
-never rewrites `config.yaml`.
+A `.env` file (gitignored; copy `env.example` to start) is still merged into
+the daemon's environment at start, under config.yaml's precedence rules — edit
+it with any editor; the in-TUI editor was retired with the touch redesign.

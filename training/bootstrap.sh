@@ -1,79 +1,48 @@
 #!/usr/bin/env bash
-# One-time setup for wake-word training. Idempotent: re-running skips finished steps.
-# Run from the repo root:  bash training/bootstrap.sh
-#
-# Training uses an ISOLATED venv (training/.venv-train), not the project .venv:
-# the 2023-era openWakeWord training stack pins old numpy/scipy that conflict with
-# the assistant runtime. The runtime only consumes the trained .onnx, so the two
-# never need to share an environment.
+# Build training/.venv-train for livekit-wakeword training on the AMD RX 9070 XT
+# (RDNA4/gfx1201 -> ROCm PyTorch). The assistant runtime venv never gets torch;
+# the training deps live here only. Idempotent-ish: re-run to rebuild the venv.
 set -euo pipefail
+cd "$(dirname "$0")/.."
+VENV=training/.venv-train
 
-cd "$(git rev-parse --show-toplevel)"
-DATA="training/data"
-FORK="training/piper-sample-generator"
-VENV="training/.venv-train"
-mkdir -p "$DATA"
+# System deps (Arch): espeak-ng libsndfile ffmpeg sox.
+for bin in espeak-ng ffmpeg sox; do
+  command -v "$bin" >/dev/null \
+    || echo "WARNING: $bin not on PATH (Arch: sudo pacman -S espeak-ng libsndfile ffmpeg sox)"
+done
 
-echo "==> [1/6] Creating isolated training venv (coherent older scientific stack)"
-if [ ! -d "$VENV" ]; then
-  # Build from the project's Python 3.12 interpreter.
-  "$(command -v python3.12 || echo .venv/bin/python3.12)" -m venv "$VENV"
-fi
-# shellcheck disable=SC1091
-source "$VENV/bin/activate"
-pip install -U pip wheel >/dev/null
+# Build with the repo-pinned 3.12 (torch ROCm wheels lag the newest CPython, and a
+# bare `python` here may be 3.14). Prefer python3.12, then the pyenv-managed one.
+PY="$(command -v python3.12 || true)"
+[ -z "$PY" ] && command -v pyenv >/dev/null && PY="$(pyenv which python3.12 2>/dev/null || true)"
+[ -z "$PY" ] && PY=python
+echo "using interpreter: $PY ($("$PY" --version 2>&1))"
 
-echo "==> [2/6] Installing training dependencies (CPU torch, no TensorFlow)"
-# tflite export is skipped (runtime loads .onnx), so the whole TF stack is omitted.
-# numpy<2 / scipy<1.15 keep acoustics + the old audio libs importable.
-pip install "numpy==1.26.4" "scipy==1.13.1"
-# Pin torch 2.7: newer torchaudio (>=2.9) drops native decoding and requires
-# torchcodec, which doesn't support this system's FFmpeg 8. 2.7 decodes via soundfile.
-pip install "torch==2.7.1" "torchaudio==2.7.1" --index-url https://download.pytorch.org/whl/cpu
-pip install \
-  torchinfo torchmetrics speechbrain==0.5.14 \
-  audiomentations==0.33.0 torch-audiomentations==0.12.0 acoustics==0.2.6 \
-  mutagen pronouncing deep-phonemizer espeak-phonemizer webrtcvad \
-  onnx onnxruntime pyyaml tqdm requests librosa soundfile "pyarrow>=17" \
-  rich  # pretty training UI: train.sh panels + train_batch.py live dashboard
-pip install "openwakeword==0.6.0" --no-deps
-# --no-deps skips the bundled feature models; fetch them (melspectrogram + embedding).
-python -c "import openwakeword.utils as u; u.download_models([])"
-# Make Stages 2-3 (feature extraction + dataloader) honor a core budget: upstream
-# hardcodes os.cpu_count()//2, so train.sh exports OWW_NCPU and we patch the two
-# call sites to read it. Lets a single run use all cores and keeps parallel batches
-# (train_batch.sh --jobs) from oversubscribing. Idempotent (grep guard).
-TRAIN_PY="$(echo "$VENV"/lib/python*/site-packages/openwakeword/train.py)"
-if ! grep -q "OWW_NCPU" "$TRAIN_PY"; then
-  sed -i 's|n_cpus = n_cpus//2|n_cpus = int(os.environ.get("OWW_NCPU", os.cpu_count() or 1))|g' \
-    "$TRAIN_PY"
-  echo "    patched openwakeword.train to honor OWW_NCPU"
-fi
+"$PY" -m venv --clear "$VENV"   # --clear: rebuild from scratch, drop any stale deps
+"$VENV/bin/pip" install --upgrade pip
 
-echo "==> [3/6] Cloning piper-sample-generator (dscripka fork, espeak-based)"
-if [ ! -d "$FORK" ]; then
-  git clone --depth 1 https://github.com/dscripka/piper-sample-generator "$FORK"
-fi
-# torch>=2.6 defaults torch.load(weights_only=True), which rejects the VITS voice
-# checkpoint. The voice is a trusted rhasspy release, so force weights_only=False.
-sed -i 's/torch.load(model_path)/torch.load(model_path, weights_only=False)/' \
-  "$FORK/generate_samples.py"
+# Torch + torchaudio FIRST from the ROCm index, so the livekit install below can't
+# pull CUDA builds on top (livekit[train] depends on torchaudio, whose C++ extension
+# hard-loads libcudart from the default-PyPI CUDA wheel and fails on an AMD box).
+# gfx1201 (RDNA4) needs ROCm >= 6.4 wheels; if the 6.4 index lacks RDNA4 kernels,
+# switch to the newest ROCm index (e.g. rocm6.5/7.x). HSA_OVERRIDE_GFX_VERSION does
+# NOT apply to RDNA4 — there is no override fallback.
+ROCM_INDEX=https://download.pytorch.org/whl/rocm6.4
+"$VENV/bin/pip" install torch torchaudio --index-url "$ROCM_INDEX"
+# Let the livekit install resolve its other deps from PyPI, but keep torch/torchaudio
+# pinned to the ROCm builds we just installed.
+"$VENV/bin/pip" install "livekit-wakeword[train,eval,export]" \
+  --extra-index-url "$ROCM_INDEX"
 
-echo "==> [4/6] Downloading LibriTTS generator voice (~255 MB, resumable)"
-VOICE="$FORK/models/en-us-libritts-high.pt"
-if [ ! -s "$VOICE" ]; then
-  curl -L -C - -o "$VOICE" \
-    "https://github.com/rhasspy/piper-sample-generator/releases/download/v1.0.0/en-us-libritts-high.pt"
-fi
+# Assert we got the ROCm/HIP build and the GPU is actually usable.
+"$VENV/bin/python" - <<'PY'
+import torch
+assert torch.version.hip, f"expected a ROCm/HIP torch build, got {torch.version.cuda=}"
+assert torch.cuda.is_available(), "torch cannot see the GPU"
+x = torch.randn(1024, 1024, device="cuda")
+_ = (x @ x).sum().item()
+print(f"torch {torch.__version__} (HIP {torch.version.hip}) — GPU OK: {torch.cuda.get_device_name(0)}")
+PY
 
-echo "==> [5/6] Downloading pre-computed openWakeWord features (resumable)"
-# 16 GB negative training features + ~170 MB false-positive validation set.
-curl -L -C - -o "$DATA/openwakeword_features_ACAV100M_2000_hrs_16bit.npy" \
-  "https://huggingface.co/datasets/davidscripka/openwakeword_features/resolve/main/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
-curl -L -C - -o "$DATA/validation_set_features.npy" \
-  "https://huggingface.co/datasets/davidscripka/openwakeword_features/resolve/main/validation_set_features.npy"
-
-echo "==> [6/6] Building RIR + background audio datasets (16 kHz wav)"
-python training/setup_data.py
-
-echo "==> Bootstrap complete. Next:  bash training/train.sh --smoke   (fast validation run)"
+echo "bootstrap: training/.venv-train ready"

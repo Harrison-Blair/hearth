@@ -17,8 +17,10 @@ models/wake/*
 !models/wake/*.onnx
 wakeword/*.onnx
 
-# Wake-word training artifacts (data, generated clips, cloned generator, isolated venv) — see training/README.md
+# Wake-word training artifacts (downloaded data, generated clips/features, exported
+# models, effective configs, isolated venv) — see training/README.md
 training/data/
+training/output/
 training/work/
 training/piper-sample-generator/
 training/.venv-train/

@@ -12,7 +12,7 @@ def test_model_defaults():
     # Defaults live on the sub-models, independent of config.yaml.
     assert WakeConfig().threshold == 0.5
     assert LlmConfig().provider == "ollama"
-    assert WebSearchConfig().provider == "ddgs"
+    assert WebSearchConfig().language == "en"
     assert WebSearchConfig().result_count == 3
     assert SttConfig().device == "cpu"  # GPU boxes override via stt.device
     assert SttConfig().cpu_threads == 0  # 0 = ctranslate2 auto; the Pi pins this
@@ -25,8 +25,8 @@ def test_stt_device_env_override(monkeypatch):
 
 
 def test_wake_model_refs_precedence():
-    # Bundled default model when nothing is configured.
-    assert WakeConfig().model_refs() == ["models/wake/hey_assistant.onnx"]
+    # Default model when nothing is configured.
+    assert WakeConfig().model_refs() == ["models/wake/calcifer.onnx"]
     # A single custom path wins over the default.
     assert WakeConfig(model_path="a.onnx").model_refs() == ["a.onnx"]
     # A series wins over everything (the multi-phrase case).
@@ -41,10 +41,9 @@ def test_wake_model_paths_env_override(monkeypatch):
 
 def test_web_search_config_loads():
     cfg = Config()
-    assert cfg.web_search.provider == "ddgs"
-    assert cfg.web_search.region == "wt-wt"
-    assert cfg.web_search.timelimit == "d"
-    assert cfg.web_search.api_key == ""  # keyless by default
+    assert cfg.web_search.language == "en"
+    assert cfg.web_search.result_count == 3
+    assert cfg.web_search.max_snippet_chars == 500
 
 
 def test_web_search_env_override(monkeypatch):
@@ -55,7 +54,7 @@ def test_web_search_env_override(monkeypatch):
 def test_loads_yaml_and_overrides_defaults():
     # Config() reads config.yaml from the repo root (pytest cwd).
     cfg = Config()
-    assert cfg.stt.model == "distil-small.en"
+    assert cfg.stt.model == "distil-medium.en"
     assert cfg.stt.cpu_threads == 4  # pinned to the Pi 5's core count
     assert cfg.audio.sample_rate == 16000
     assert cfg.audio.normalize is True

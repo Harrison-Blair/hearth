@@ -10,7 +10,7 @@ audio:
   output: null
   sample_rate: 16000
   channels: 1
-  block_size: 1280        # 80ms frames at 16kHz (openWakeWord window)
+  block_size: 1280        # 80ms frames at 16kHz (wake-word frame size)
   output_volume: 0.5      # 0.5 = half volume; 1.0 = full
   normalize: true              # peak-normalize the utterance before STT
   normalize_target_peak: 0.97  # target peak as fraction of full scale
@@ -24,8 +24,9 @@ recorder:
   preroll_frames: 6         # ~0.5s kept before wake to recover a clipped command
 
 wake:
-  model_path: "models/wake/hey_assistant.onnx"   # trained "hey assistant" model (Phase 2a)
-  threshold: 0.6
+  model_path: "models/wake/calcifer.onnx"   # trained "Calcifer" model
+  threshold: 0.5              # set from the manifest's optimal threshold after training
+  score_interval: 1           # score every Nth 80ms frame; raise to 2-4 on the Pi to cut CPU
 
 stt:
   model: "distil-small.en"   # Pi-tuned: distil-whisper, big accuracy win over base.en at int8
@@ -55,16 +56,10 @@ scheduling:
   poll_seconds: 1.0       # how often the scheduler checks for due reminders
 
 web_search:
-  provider: "ddgs"        # keyless DuckDuckGo scraper
+  language: "en"          # Wikipedia language variant
   result_count: 3
   timeout: 10.0
-  region: "wt-wt"         # wt-wt = no region
-  timelimit: "d"          # recency window: d/w/m/y; bias toward fresh results
   max_snippet_chars: 500  # truncate each result body
-  # Optional keyed accelerator (live answer box). Set the key via
-  # ASSISTANT_WEB_SEARCH__API_KEY; leave blank to stay keyless (ddgs only).
-  api_key: ""
-  tavily_endpoint: "https://api.tavily.com/search"
 
 logging:
   level: "INFO"

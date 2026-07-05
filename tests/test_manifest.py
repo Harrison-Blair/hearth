@@ -36,3 +36,27 @@ def test_regen_backfills_disk_models_and_preserves_existing(tmp_path, monkeypatc
         "phrase": "penguin",
         "model_path": "models/wake/penguin.onnx",
     }
+
+
+def test_upsert_maps_livekit_eval_metrics(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    # A livekit <model>_eval.json: cmd_upsert records the *optimal* operating point.
+    eval_json = tmp_path / "calcifer_smoke_eval.json"
+    eval_json.write_text(json.dumps({
+        "aut": 0.02, "fpph": 3.1, "recall": 0.99, "accuracy": 0.98, "threshold": 0.5,
+        "optimal_threshold": 0.62, "optimal_recall": 0.93, "optimal_fpph": 0.05,
+        "n_positive": 50, "n_negative": 400, "validation_hours": 0.22,
+    }))
+    mod = _load_manifest_module()
+    mod.cmd_upsert(argparse.Namespace(
+        slug="calcifer_smoke", phrase="Calcifer", eval=str(eval_json), target_fpph=0.1,
+    ))
+
+    entry = json.loads((tmp_path / "models" / "wake" / "models.json").read_text())["calcifer_smoke"]
+    assert entry["phrase"] == "Calcifer"
+    assert entry["model_path"] == "models/wake/calcifer_smoke.onnx"
+    assert entry["threshold"] == 0.62  # optimal, not the fixed-0.5 threshold
+    assert entry["recall"] == 0.93
+    assert entry["fpph"] == 0.05
+    assert entry["gate_passed"] is True  # optimal_fpph 0.05 <= target 0.1
+    assert "trained_at" in entry

@@ -16,7 +16,7 @@ python -m assistant.app          # boot the daemon (Ctrl-C to stop)
 
 Heavy/native deps are split into per-capability extras (`tts`, `wake`, `stt`,
 `vad`, `llm`, `nlu`, `scheduling`) and installed only as a phase needs them — see
-README for the openWakeWord ONNX install quirk and the Ollama/Piper prerequisites.
+README for the Ollama/Piper prerequisites.
 Tests run without the native extras: anything that touches a model or device is
 stubbed, so `pip install -e ".[dev]"` alone is enough to run the suite.
 
@@ -36,7 +36,7 @@ against the `base.py` ABC — do not let the pipeline reach for a concrete type.
 
 **`app.py` is the only wiring point.** It is the composition root: it reads
 `Config`, constructs every concrete implementation (`PiperTTS`,
-`OpenWakeWordDetector`, `FasterWhisperSTT`, `OllamaProvider`, `KeyphraseRouter`,
+`LivekitWakeDetector`, `FasterWhisperSTT`, `OllamaProvider`, `KeyphraseRouter`,
 skills…), and injects them into `VoicePipeline`. Construction-time choices
 (which router phrases, which skills, the default skill) live here, not inside the
 components.
@@ -76,6 +76,14 @@ imports the pipeline/skills/LLM code or any native deps — its only `assistant`
 imports are `core.config.Config` and `wake.registry`. **Keep this dependency
 one-directional (`tui` → `assistant`); nothing under `assistant/` may import
 `tui`.**
+
+The TUI's deployment target is the Raspberry Pi 5's attached **320x480 px
+display in portrait** — roughly a 40×30-cell terminal at a typical font size —
+operated by **touch only** (keyboard input is a desktop-testing convenience,
+never a requirement). Design every screen for that grid first: one focused
+screen per job (see `tui/screens/`), full-width height-3 buttons, steppers and
+pickers instead of text inputs, and no horizontal overflow at 40 columns
+(`tests/test_tui_screens.py` enforces this).
 
 ## Conventions
 

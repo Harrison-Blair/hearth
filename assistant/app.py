@@ -20,11 +20,11 @@ from assistant.core.logging import setup_logging
 from assistant.core.pipeline import VoicePipeline
 from assistant.llm.ollama_provider import OllamaProvider
 from assistant.nlu.classifier_router import ClassifierRouter
+from assistant.nlu.command_router import CommandEntryRouter
 from assistant.nlu.keyphrase_router import KeyphraseRouter
 from assistant.scheduling.scheduler import ReminderScheduler
 from assistant.search.base import SearchProvider
-from assistant.search.ddgs_provider import DdgsSearch
-from assistant.search.tavily import TavilySearch
+from assistant.search.wikipedia import WikipediaSearch
 from assistant.skills.base import SkillRegistry
 from assistant.skills.clock import ClockSkill
 from assistant.skills.general import GeneralSkill
@@ -33,7 +33,7 @@ from assistant.skills.web_search import WebSearchSkill
 from assistant.storage.reminders import ReminderStore
 from assistant.stt.faster_whisper_stt import FasterWhisperSTT
 from assistant.tts.piper_tts import PiperTTS
-from assistant.wake.openwakeword_detector import OpenWakeWordDetector
+from assistant.wake.livekit_detector import LivekitWakeDetector
 
 log = logging.getLogger("assistant")
 
@@ -138,41 +138,36 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     keyphrases.add("list_reminders", "my reminders", "any reminders", "have reminders")
     keyphrases.add("web_search", "search the web", "search for", "look up", "look it up",
                    "google", "what's the latest", "latest on")
-    router = ClassifierRouter(llm, keyphrases, INTENTS)
-    # Keyless scraper is the guaranteed path; Tavily is an optional keyed accelerator
-    # (live answer box) used only when a key is configured, with ddgs as its fallback.
-    search: SearchProvider = DdgsSearch(
+    classifier = ClassifierRouter(llm, keyphrases, INTENTS)
+    search: SearchProvider = WikipediaSearch(
+        language=config.web_search.language,
         result_count=config.web_search.result_count,
         timeout=config.web_search.timeout,
-        region=config.web_search.region,
-        timelimit=config.web_search.timelimit,
         max_snippet_chars=config.web_search.max_snippet_chars,
     )
-    if config.web_search.api_key:
-        search = TavilySearch(
-            config.web_search.api_key,
-            endpoint=config.web_search.tavily_endpoint,
-            timeout=config.web_search.timeout,
-            max_snippet_chars=config.web_search.max_snippet_chars,
-            fallback=search,
-        )
-        log.info("Web search: Tavily (keyed) with ddgs fallback")
-    else:
-        log.info("Web search: ddgs (keyless); set web_search.api_key for live answers")
+    log.info("Web search: wikipedia (%s)", config.web_search.language)
     registry = SkillRegistry()
     registry.register(ClockSkill())
     registry.register(ReminderSkill(store, llm))
     registry.register(WebSearchSkill(search, llm, count=config.web_search.result_count))
     registry.register(GeneralSkill(llm, config.llm.system_prompt), default=True)
     _validate_routing(INTENTS, keyphrases, registry)
+    router = CommandEntryRouter(
+        config.nlu.command_keyphrase,
+        registry,
+        next_router=classifier,
+        aliases=config.nlu.command_aliases,
+    )
 
     # Startup chime.
     log.info("Playing startup chime")
     await out.play(chime(tts.sample_rate))
 
     # Voice in: wake -> record -> transcribe.
-    detector = OpenWakeWordDetector(
-        config.wake.model_refs(), config.wake.threshold
+    detector = LivekitWakeDetector(
+        config.wake.model_refs(),
+        config.wake.threshold,
+        score_interval=config.wake.score_interval,
     )
     stt = FasterWhisperSTT(
         config.stt.model,

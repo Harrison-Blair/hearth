@@ -342,3 +342,9 @@ async def test_refresh_bypasses_fresh_cache(monkeypatch, tmp_path):
     await discovery.search_registry("qwen")
     await discovery.search_registry("qwen", refresh=True)  # force re-scrape
     assert len(calls) == 2
+
+
+def test_stt_model_options_are_static_and_nonempty():
+    options = discovery.stt_model_options()
+    assert "distil-medium.en" in options
+    assert all(isinstance(o, str) for o in options)

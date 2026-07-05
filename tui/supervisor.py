@@ -1,6 +1,6 @@
 """Supervise the assistant daemon as a child process.
 
-The TUI never imports the daemon's native deps (sounddevice/whisper/openWakeWord/
+The TUI never imports the daemon's native deps (sounddevice/whisper/livekit-wakeword/
 piper); only the child does. Config is applied as ``ASSISTANT_*`` env overrides on
 the child's environment, so config.yaml is never rewritten. Commands (typed
 utterances, live volume) are written to the child's stdin (see core/control.py).
