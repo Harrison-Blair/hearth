@@ -6,6 +6,10 @@ without a restart:
 
     TEXT <utterance>           inject a typed command as if it were transcribed
     SET audio.output_volume V  change playback gain (mute = 0.0) immediately
+    SAY [rate|]<text>          speak <text> now (voice test), optional length_scale rate
+    LISTEN                     start a turn now, skipping the wake word (tap-to-listen)
+    CANCEL                     abandon the current capture (tap-to-cancel)
+    STOP                       cut off in-progress playback (barge-in on a reply)
 
 Running the daemon standalone in a terminal is unaffected: stdin simply blocks
 until EOF (Ctrl-D), and any stray input is ignored.
@@ -19,14 +23,18 @@ import sys
 
 from assistant.audio.sounddevice_io import SoundDeviceOut
 from assistant.core.pipeline import VoicePipeline
+from assistant.core.speech import Speaker
 
 log = logging.getLogger(__name__)
 
 
 class ControlChannel:
-    def __init__(self, pipeline: VoicePipeline, out: SoundDeviceOut) -> None:
+    def __init__(
+        self, pipeline: VoicePipeline, out: SoundDeviceOut, speaker: Speaker | None = None
+    ) -> None:
         self._pipeline = pipeline
         self._out = out
+        self._speaker = speaker
 
     async def run(self) -> None:
         """Read stdin line by line (off-thread) and dispatch until EOF."""
@@ -48,8 +56,32 @@ class ControlChannel:
             await self._pipeline.submit_text(rest)
         elif verb == "SET":
             self._set(rest)
+        elif verb == "SAY":
+            await self._say(rest)
+        elif verb == "LISTEN":
+            self._pipeline.request_listen()
+        elif verb == "CANCEL":
+            self._pipeline.cancel()
+        elif verb == "STOP":
+            self._out.stop()
         else:
             log.debug("control channel: ignoring unknown command %r", line)
+
+    async def _say(self, rest: str) -> None:
+        """Speak a test phrase now. `rate|text` sets a length_scale; a bare phrase
+        (or a non-numeric prefix) speaks at the configured default rate."""
+        if self._speaker is None:
+            log.debug("control channel: SAY ignored (no speaker wired)")
+            return
+        head, sep, tail = rest.partition("|")
+        rate: float | None = None
+        text = rest
+        if sep:
+            try:
+                rate, text = float(head), tail
+            except ValueError:
+                pass  # prefix isn't a rate; treat the whole line as text
+        await self._speaker.say(text.strip(), length_scale=rate)
 
     def _set(self, rest: str) -> None:
         key, _, value = rest.partition(" ")

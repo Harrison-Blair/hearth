@@ -1,4 +1,4 @@
-from assistant.core.events import Command, Intent
+from assistant.core.events import Command, Intent, Turn
 from assistant.skills.general import GeneralSkill
 
 
@@ -8,8 +8,8 @@ class FakeLLM:
         self.exc = exc
         self.calls = []
 
-    async def complete(self, prompt, *, system=None, json=False, label=""):
-        self.calls.append((prompt, system))
+    async def chat(self, messages, *, system=None, label=""):
+        self.calls.append((messages, system))
         if self.exc:
             raise self.exc
         return self.answer
@@ -25,7 +25,22 @@ async def test_returns_llm_answer():
     )
     assert result.speech == "Paris."
     assert result.success
-    assert llm.calls == [("capital of France", "be brief")]
+    # Empty history -> a single user message.
+    assert llm.calls == [([{"role": "user", "content": "capital of France"}], "be brief")]
+
+
+async def test_history_precedes_current_text():
+    llm = FakeLLM("1965.")
+    history = [Turn("user", "who wrote Dune"), Turn("assistant", "Frank Herbert.")]
+    await GeneralSkill(llm, "be brief").handle(
+        Command("when did he die", history=history), Intent("general")
+    )
+    messages, _ = llm.calls[0]
+    assert messages == [
+        {"role": "user", "content": "who wrote Dune"},
+        {"role": "assistant", "content": "Frank Herbert."},
+        {"role": "user", "content": "when did he die"},
+    ]
 
 
 async def test_empty_answer_is_unsuccessful():

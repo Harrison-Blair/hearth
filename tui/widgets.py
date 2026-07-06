@@ -2,8 +2,8 @@
 
 ``ScreenWidthRichLog`` is the width-aware, selectable log pane. ``Stepper`` and
 ``NavBar`` are the touch-first building blocks for the 320x480 portrait screens:
-a numeric field driven by −/+ buttons (no typing) and a height-3 top bar with a
-back button, title, and daemon/ollama status dots.
+a numeric field driven by −/+ buttons (typable with a keyboard on desktop) and a
+height-3 top bar with a back button, title, and daemon/ollama status dots.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from textual.containers import Horizontal
 from textual.message import Message
 from textual.selection import Selection
 from textual.strip import Strip
-from textual.widgets import Button, RichLog, Static
+from textual.widgets import Button, Input, RichLog, Static
 
 
 class ScreenWidthRichLog(RichLog):
@@ -142,13 +142,15 @@ class ScreenWidthRichLog(RichLog):
 
 
 class Stepper(Horizontal):
-    """Touch-first numeric field: ``[ − ][ value ][ + ]``, no typing required."""
+    """Touch-first numeric field: ``[ − ][ value ][ + ]``. The value box is also
+    a numeric Input so a keyboard (desktop testing) can type an exact value;
+    touch never needs it — the buttons remain the primary control."""
 
     DEFAULT_CSS = """
     Stepper { height: 3; }
     Stepper Button { width: 7; min-width: 7; }
     Stepper .stepper-value {
-        width: 1fr; height: 3; content-align: center middle; border: round $panel;
+        width: 1fr; height: 3; border: round $panel; padding: 0 1;
     }
     """
 
@@ -200,16 +202,36 @@ class Stepper(Horizontal):
 
     def compose(self):
         yield Button("−", classes="stepper-dec")
-        yield Static(self.value_str, classes="stepper-value")
+        yield Input(self.value_str, classes="stepper-value", restrict=r"-?[0-9]*\.?[0-9]*")
         yield Button("+", classes="stepper-inc")
 
     def _render_value(self) -> None:
-        self.query_one(".stepper-value", Static).update(self.value_str)
+        self.query_one(".stepper-value", Input).value = self.value_str
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
         delta = self.step_size if event.button.has_class("stepper-inc") else -self.step_size
-        new = self._clamp(self._value + delta)
+        self._commit(self._value + delta)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._commit_typed(event.value)
+
+    def on_input_blurred(self, event: Input.Blurred) -> None:
+        event.stop()
+        self._commit_typed(event.value)
+
+    def _commit_typed(self, raw: str) -> None:
+        try:
+            value = float(raw)
+        except ValueError:
+            self._render_value()  # unparseable ("", "-", "0."): restore the real value
+            return
+        self._commit(value)
+        self._render_value()  # normalize the text (clamping, int formatting)
+
+    def _commit(self, value: float) -> None:
+        new = self._clamp(value)
         if new == self._value:
             return
         self._value = new

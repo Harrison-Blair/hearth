@@ -11,6 +11,8 @@ from tui.screens.config import ConfigScreen
 from tui.screens.home import HomeScreen
 from tui.screens.logs import ChatModal, LogsScreen
 from tui.screens.models import InstalledScreen, ModelDetailScreen, ModelsScreen
+from tui.screens.now import NowScreen
+from tui.screens.voices import VoicesScreen
 from tui.supervisor import DaemonSupervisor
 from tui.widgets import Stepper
 
@@ -63,31 +65,44 @@ def _make_app(monkeypatch, daemon_lines=()):
         return []
 
     monkeypatch.setattr(discovery, "search_registry", _no_results)
+
+    async def _no_voices():
+        return []
+
+    monkeypatch.setattr(discovery, "piper_voice_catalog", _no_voices)
     return AssistantTUI(supervisor=FakeSupervisor(daemon_lines), ollama=FakeSupervisor())
+
+
+def _assert_fits_40_cols(screen, name):
+    for widget in screen.walk_children():
+        if not widget.display:
+            continue  # hidden log channels reflow when shown
+        assert widget.region.right <= 40, f"{name}: {widget!r} overflows"
+        if isinstance(widget, ScrollableContainer):
+            assert widget.max_scroll_x == 0, f"{name}: {widget!r} scrolls horizontally"
 
 
 async def test_no_screen_overflows_40_columns(monkeypatch):
     app = _make_app(monkeypatch)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
-        for name in ("home", "logs", "config", "models", "installed"):
-            if name != "home":
-                app.push_screen(name)
-                await pilot.pause()
-            for widget in app.screen.walk_children():
-                if not widget.display:
-                    continue  # hidden log channels reflow when shown
-                assert widget.region.right <= 40, f"{name}: {widget!r} overflows"
-                if isinstance(widget, ScrollableContainer):
-                    assert widget.max_scroll_x == 0, f"{name}: {widget!r} scrolls horizontally"
-            if name != "home":
-                app.pop_screen()
-                await pilot.pause()
+        _assert_fits_40_cols(app.screen, "now")  # the launch face
+        app.pop_screen()  # -> home (sits under Now)
+        await pilot.pause()
+        _assert_fits_40_cols(app.screen, "home")
+        for name in ("logs", "config", "models", "installed", "voices"):
+            app.push_screen(name)
+            await pilot.pause()
+            _assert_fits_40_cols(app.screen, name)
+            app.pop_screen()
+            await pilot.pause()
 
 
 async def test_home_nav_roundtrips(monkeypatch):
     app = _make_app(monkeypatch)
     async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.pop_screen()  # launch shows Now; Home is the ◀ destination under it
         await pilot.pause()
         assert isinstance(app.screen, HomeScreen)
         for button, screen_type in (
@@ -107,6 +122,8 @@ async def test_volume_buttons_send_control_commands(monkeypatch):
     app = _make_app(monkeypatch)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
+        app.pop_screen()  # Now -> Home (the volume controls live on Home)
+        await pilot.pause()
         start = app._volume
         app.supervisor.sent.clear()
         await pilot.click("#vol-up")
@@ -120,6 +137,8 @@ async def test_volume_buttons_send_control_commands(monkeypatch):
 async def test_mute_toggles_and_restores(monkeypatch):
     app = _make_app(monkeypatch)
     async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.pop_screen()  # Now -> Home (the mute control lives on Home)
         await pilot.pause()
         before = app._volume
         await pilot.click("#vol-mute")
@@ -223,6 +242,47 @@ async def test_picker_updates_select_field(monkeypatch):
         assert label == "DEBUG"
 
 
+async def test_picking_llm_model_persists_as_default(monkeypatch):
+    app = _make_app(monkeypatch)
+
+    def _no_wake(root=discovery.WAKE_MODEL_DIR, **_):
+        return []
+
+    monkeypatch.setattr(discovery, "wake_models", _no_wake)
+
+    async def _models_info(host=discovery.DEFAULT_HOST, **_):
+        return [
+            discovery.OllamaModel(
+                name="other:3b", size=0, parameter_size="", quantization="",
+                family="", modified_at="",
+            )
+        ]
+
+    monkeypatch.setattr(discovery, "ollama_models_info", _models_info)
+
+    async def _no_detail(host, name):
+        return None
+
+    monkeypatch.setattr(discovery, "ollama_model_detail", _no_detail)
+    written = {}
+    monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.push_screen("config")
+        await pilot.pause()
+        app._overrides["ASSISTANT_LLM__MODEL"] = "stale:1b"
+        await pilot.click("#field-llm_model")
+        await pilot.pause()
+        opts = app.screen.query_one("#picker-options", OptionList)
+        opts.highlighted = 0  # "other:3b"
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        assert written == {("llm", "model"): "other:3b"}
+        assert "ASSISTANT_LLM__MODEL" not in app._overrides
+        assert app.supervisor.restarts == 1
+
+
 async def test_wake_multiselect_flows_into_apply_as_json(monkeypatch):
     app = _make_app(monkeypatch)
 
@@ -244,6 +304,100 @@ async def test_wake_multiselect_flows_into_apply_as_json(monkeypatch):
         assert json.loads(app._overrides["ASSISTANT_WAKE__MODEL_PATHS"]) == [
             "models/wake/test.onnx"
         ]
+
+
+async def test_test_voice_button_sends_say(monkeypatch):
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.push_screen("config")
+        await pilot.pause()
+        app._config_screen.query_one("#field-tts_length_scale", Stepper).value = 1.2
+        app.supervisor.sent.clear()
+        await app._on_test_voice()
+        assert app.supervisor.sent == [
+            "SAY 1.2|hmm? Testing the voice. The weather today is sunny and mild."
+        ]
+
+
+async def test_picking_voice_persists_and_restarts(monkeypatch):
+    app = _make_app(monkeypatch)
+    written = {}
+    monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        # A different voice than the configured one persists + restarts.
+        await app._on_voice_picked("models/piper/en_US-amy-low.onnx")
+        assert written == {("tts", "model_path"): "models/piper/en_US-amy-low.onnx"}
+        assert app.supervisor.restarts == 1
+
+
+async def test_picking_same_voice_is_a_noop(monkeypatch):
+    app = _make_app(monkeypatch)
+    written = {}
+    monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        await app._on_voice_picked(app._config.tts.model_path)  # unchanged
+        assert written == {} and app.supervisor.restarts == 0
+
+
+async def test_ack_multiselect_flows_into_apply_as_json(monkeypatch):
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.push_screen("config")
+        await pilot.pause()
+        sel = app._config_screen.query_one("#field-tts_ack_phrases", SelectionList)
+        sel.deselect_all()
+        sel.select(sel.get_option_at_index(1))  # "uh huh?"
+        await pilot.pause()
+        await app._on_config_apply(app._config_screen.form_strings())
+        assert json.loads(app._overrides["ASSISTANT_TTS__ACK_PHRASES"]) == ["uh huh?"]
+
+
+async def test_voices_screen_lists_catalog_and_enables_download(monkeypatch):
+    app = _make_app(monkeypatch)
+    voices = [
+        discovery.RegistryVoice(
+            key="en_US-amy-low", quality="low", num_speakers=1, size_bytes=63_000_000,
+            onnx_path="en/en_US/amy/low/en_US-amy-low.onnx",
+            config_path="en/en_US/amy/low/en_US-amy-low.onnx.json",
+        )
+    ]
+
+    async def _catalog():
+        return voices
+
+    monkeypatch.setattr(discovery, "piper_voice_catalog", _catalog)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.push_screen("voices")
+        await pilot.pause()
+        opts = app._voices_screen.query_one("#voice-list", OptionList)
+        assert opts.option_count == 1
+        button = app._voices_screen.query_one("#voice-download", Button)
+        assert button.disabled  # nothing picked yet
+        opts.focus()
+        opts.highlighted = 0
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not button.disabled
+        assert app._voices_screen._selected.key == "en_US-amy-low"
+        assert "en_US-amy-low" in str(button.label)
+
+
+async def test_get_more_voices_button_opens_voices_screen(monkeypatch):
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.push_screen("config")
+        await pilot.pause()
+        app._config_screen.query_one("#voice-get", Button)  # exists on the config screen
+        app.push_screen("voices")  # the button's action
+        await pilot.pause()
+        assert isinstance(app.screen, VoicesScreen)
 
 
 async def test_model_detail_install_enqueues_pull(monkeypatch):
@@ -283,6 +437,77 @@ async def test_model_detail_install_enqueues_pull(monkeypatch):
         await pilot.pause()
         assert isinstance(app.screen, ModelsScreen)  # popped back to watch progress
         assert pulled == ["qwen2.5:3b"]
+
+
+async def test_now_is_launch_face(monkeypatch):
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, NowScreen)
+
+
+async def test_state_line_updates_now_screen(monkeypatch):
+    app = _make_app(monkeypatch, daemon_lines=['@@STATE {"state": "listening"}'])
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        indicator = app._now.query_one("#now-indicator", Static)
+        assert str(indicator.render()) == "Listening…"
+        assert indicator.has_class("state-listening")
+
+
+async def test_state_lines_not_written_to_log(monkeypatch):
+    app = _make_app(monkeypatch, daemon_lines=['@@STATE {"state": "thinking"}'])
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        assert app._now._state == "thinking"
+        assert all("@@STATE" not in text.plain for text, _ in app._pending["app"])
+
+
+async def test_transcript_and_reply_render(monkeypatch):
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app._on_state({"state": "thinking", "transcript": "what time is it"})
+        app._on_state({"state": "speaking", "text": "it is noon"})
+        await pilot.pause()
+        rendered = str(app._now.query_one("#now-transcript", Static).render())
+        assert "you said: what time is it" in rendered
+        assert "it is noon" in rendered
+
+
+async def test_no_speech_and_error_show_banner(monkeypatch):
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        banner = app._now.query_one("#now-banner", Static)
+        app._on_state({"state": "no_speech"})
+        await pilot.pause()
+        assert "Didn't catch that" in str(banner.render())
+        app._on_state({"state": "error", "message": "My brain's offline"})
+        await pilot.pause()
+        assert "My brain's offline" in str(banner.render())
+        # A normal turn clears the banner again.
+        app._on_state({"state": "listening"})
+        await pilot.pause()
+        assert str(banner.render()).strip() == ""
+
+
+async def test_context_button_sends_verb_per_state(monkeypatch):
+    for state, verb in (
+        ("idle", "LISTEN"),
+        ("listening", "CANCEL"),
+        ("thinking", "CANCEL"),
+        ("speaking", "STOP"),
+    ):
+        app = _make_app(monkeypatch)
+        async with app.run_test(size=SIZE) as pilot:
+            await pilot.pause()
+            app._on_state({"state": state})
+            await pilot.pause()
+            app.supervisor.sent.clear()
+            await pilot.click("#now-context")
+            await pilot.pause()
+            assert verb in app.supervisor.sent, f"{state} should send {verb}"
 
 
 async def test_installed_delete_calls_discovery(monkeypatch):

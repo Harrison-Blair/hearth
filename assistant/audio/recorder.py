@@ -34,20 +34,39 @@ class VadRecorder:
         self._max_ms = max_ms
         self._start_timeout_ms = start_timeout_ms
 
-    async def record(self, frames: AsyncIterator[bytes], prefix: bytes = b"") -> bytes:
+    async def record(
+        self,
+        frames: AsyncIterator[bytes],
+        prefix: bytes = b"",
+        start_timeout_ms: int | None = None,
+        on_level=None,
+        cancel_event=None,
+    ) -> bytes:
         """Consume frames until end-of-speech; return collected PCM bytes.
 
         ``prefix`` is pre-roll audio captured just before the wake event,
         prepended so a command spoken right after the wake word isn't clipped.
+        ``start_timeout_ms`` overrides the constructor default for this call (the
+        follow-up window uses a longer one than the initial capture).
+        ``on_level`` (if given) is called once per input frame with the frame's
+        int16 RMS, driving the live level meter.
+        ``cancel_event`` (if given and set) abandons the capture immediately,
+        returning empty so the turn ends without routing anything.
         """
         collected = bytearray(prefix)
         speech_started = False
         silence_ms = 0
         elapsed_ms = 0
+        start_timeout = self._start_timeout_ms if start_timeout_ms is None else start_timeout_ms
 
         async for frame in frames:
+            if cancel_event is not None and cancel_event.is_set():
+                log.debug("capture cancelled")
+                return b""
             collected += frame
             samples = np.frombuffer(frame, dtype=np.int16)
+            if on_level is not None and len(samples):
+                on_level(float(np.sqrt(np.mean(samples.astype(np.float32) ** 2))))
             for i in range(0, len(samples) - self._sub + 1, self._sub):
                 chunk = samples[i : i + self._sub].tobytes()
                 voiced = self._vad.is_speech(chunk, self._sample_rate)
@@ -61,7 +80,7 @@ class VadRecorder:
 
                 if speech_started and silence_ms >= self._silence_ms:
                     return bytes(collected)
-                if not speech_started and elapsed_ms >= self._start_timeout_ms:
+                if not speech_started and elapsed_ms >= start_timeout:
                     log.debug("no speech detected within start timeout")
                     return bytes(collected)
                 if elapsed_ms >= self._max_ms:

@@ -1,6 +1,7 @@
 from assistant.core.config import (
     AudioConfig,
     Config,
+    ConversationConfig,
     LlmConfig,
     SttConfig,
     WakeConfig,
@@ -10,7 +11,7 @@ from assistant.core.config import (
 
 def test_model_defaults():
     # Defaults live on the sub-models, independent of config.yaml.
-    assert WakeConfig().threshold == 0.5
+    assert WakeConfig().threshold == 0.66
     assert LlmConfig().provider == "ollama"
     assert WebSearchConfig().language == "en"
     assert WebSearchConfig().result_count == 3
@@ -41,9 +42,14 @@ def test_wake_model_paths_env_override(monkeypatch):
 
 def test_web_search_config_loads():
     cfg = Config()
+    assert cfg.web_search.providers == ["ddgs", "wikipedia"]
     assert cfg.web_search.language == "en"
+    assert cfg.web_search.region == "us-en"
     assert cfg.web_search.result_count == 3
+    assert cfg.web_search.max_results == 5
     assert cfg.web_search.max_snippet_chars == 500
+    assert cfg.web_search.max_rounds == 2
+    assert cfg.web_search.progress_updates is True
 
 
 def test_web_search_env_override(monkeypatch):
@@ -51,17 +57,40 @@ def test_web_search_env_override(monkeypatch):
     assert Config().web_search.result_count == 5
 
 
+def test_weather_env_override(monkeypatch):
+    monkeypatch.setenv("ASSISTANT_WEATHER__LATITUDE", "40.7")
+    assert Config().weather.latitude == 40.7
+
+
+def test_conversation_defaults():
+    assert ConversationConfig().enabled is True
+    assert ConversationConfig().followup_window_ms == 6000
+    assert ConversationConfig().max_history_turns == 12
+
+
+def test_conversation_config_loads():
+    cfg = Config()
+    assert cfg.conversation.enabled is True
+    assert cfg.conversation.followup_window_ms == 6000
+    assert cfg.conversation.max_history_turns == 12
+
+
+def test_conversation_env_override(monkeypatch):
+    monkeypatch.setenv("ASSISTANT_CONVERSATION__FOLLOWUP_WINDOW_MS", "2000")
+    assert Config().conversation.followup_window_ms == 2000
+
+
 def test_loads_yaml_and_overrides_defaults():
     # Config() reads config.yaml from the repo root (pytest cwd).
     cfg = Config()
-    assert cfg.stt.model == "distil-medium.en"
+    assert cfg.stt.model == "distil-small.en"
     assert cfg.stt.cpu_threads == 4  # pinned to the Pi 5's core count
     assert cfg.audio.sample_rate == 16000
     assert cfg.audio.normalize is True
-    assert cfg.wake.threshold == 0.5  # tuned for fewer missed wakes
-    assert cfg.recorder.silence_ms == 800
+    assert cfg.wake.threshold == 0.66  # manifest-optimal trained threshold
+    assert cfg.recorder.silence_ms == 1500
     assert cfg.stt.beam_size == 5
-    assert cfg.stt.vad_filter is True
+    assert cfg.stt.vad_filter is False  # recorder already endpoints; avoid double-VAD clipping
     assert cfg.stt.condition_on_previous_text is False
     assert cfg.llm.health_timeout == 5.0
 

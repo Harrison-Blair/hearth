@@ -22,9 +22,19 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
+_NO_ARGS = {"type": "object", "properties": {}}
+
+
 class ClockSkill(Skill):
     name = "clock"
     intents = {"time", "date"}
+    tool_specs = {
+        "time": {"description": "Get the current clock time.", "parameters": _NO_ARGS},
+        "date": {
+            "description": "Get today's date or the day of the week.",
+            "parameters": _NO_ARGS,
+        },
+    }
 
     def __init__(self, now: Callable[[], datetime] = datetime.now) -> None:
         self._now = now  # injectable for deterministic tests

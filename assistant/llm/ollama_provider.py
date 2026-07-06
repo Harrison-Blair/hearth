@@ -7,7 +7,8 @@ import logging
 
 import httpx
 
-from assistant.llm.base import LLMProvider
+from assistant.core.events import ToolCall
+from assistant.llm.base import ChatResponse, LLMProvider
 
 log = logging.getLogger(__name__)
 
@@ -23,11 +24,15 @@ class OllamaProvider(LLMProvider):
         host: str = "http://localhost:11434",
         timeout: float = 60.0,
         health_timeout: float = 5.0,
+        num_ctx: int = 8192,
+        think: bool = False,
     ) -> None:
         self._model = model
         self._host = host.rstrip("/")
         self._timeout = timeout
         self._health_timeout = health_timeout
+        self._num_ctx = num_ctx
+        self._think = think
         # One pooled client reused across every call (a voice turn makes 2+):
         # constructing a fresh client per request loses keep-alive entirely.
         self._client = httpx.AsyncClient(timeout=timeout)
@@ -38,11 +43,19 @@ class OllamaProvider(LLMProvider):
     async def complete(
         self, prompt: str, *, system: str | None = None, json: bool = False, label: str = ""
     ) -> str:
-        payload: dict = {"model": self._model, "prompt": prompt, "stream": False}
+        payload: dict = {
+            "model": self._model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"num_ctx": self._num_ctx},
+        }
         if system:
             payload["system"] = system
         if json:
             payload["format"] = "json"
+            # Thinking models emit their reasoning into the grammar-constrained
+            # output (e.g. a truncated {"thought": ...}), corrupting the JSON.
+            payload["think"] = False
 
         resp = await self._client.post(f"{self._host}/api/generate", json=payload)
         resp.raise_for_status()
@@ -54,6 +67,75 @@ class OllamaProvider(LLMProvider):
             log.info("[%s] system: %s", tag, _clip(system, 120))
         log.info("[%s] response: %s", tag, response)
         return response
+
+    async def chat(
+        self, messages: list[dict], *, system: str | None = None, label: str = ""
+    ) -> str:
+        msgs = messages
+        if system:
+            msgs = [{"role": "system", "content": system}, *messages]
+        payload = {
+            "model": self._model,
+            "messages": msgs,
+            "stream": False,
+            "think": self._think,
+            "options": {"num_ctx": self._num_ctx},
+        }
+
+        resp = await self._client.post(f"{self._host}/api/chat", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        response = data["message"]["content"].strip()
+        tag = label or "llm"
+        log.info("[%s] chat (%d msgs)", tag, len(msgs))
+        log.info("[%s] response: %s", tag, response)
+        return response
+
+    async def chat_tools(
+        self,
+        messages: list[dict],
+        *,
+        system: str | None = None,
+        tools: list[dict] | None = None,
+        label: str = "",
+    ) -> ChatResponse:
+        msgs = messages
+        if system:
+            msgs = [{"role": "system", "content": system}, *messages]
+        payload: dict = {
+            "model": self._model,
+            "messages": msgs,
+            "stream": False,
+            "think": self._think,
+            "options": {"num_ctx": self._num_ctx},
+        }
+        if tools:
+            payload["tools"] = tools
+
+        resp = await self._client.post(f"{self._host}/api/chat", json=payload)
+        resp.raise_for_status()
+        message = resp.json().get("message", {})
+        content = (message.get("content") or "").strip()
+        calls: list[ToolCall] = []
+        for tc in message.get("tool_calls") or []:
+            fn = tc.get("function", {})
+            name = fn.get("name")
+            if not name:
+                continue
+            args = fn.get("arguments")
+            if isinstance(args, str):
+                # Some models return the arguments as a JSON string, not an object.
+                try:
+                    args = _json.loads(args)
+                except _json.JSONDecodeError:
+                    args = {}
+            calls.append(ToolCall(name=name, arguments=args if isinstance(args, dict) else {}))
+        tag = label or "llm"
+        log.info(
+            "[%s] chat_tools (%d msgs, %d tools) -> %d call(s), content: %s",
+            tag, len(msgs), len(tools or []), len(calls), _clip(content, 120),
+        )
+        return ChatResponse(content=content, tool_calls=calls)
 
     async def health(self) -> bool:
         try:

@@ -1,5 +1,5 @@
 from textual.app import App, ComposeResult
-from textual.widgets import Static
+from textual.widgets import Input, Static
 
 from tui.widgets import NavBar, Stepper
 
@@ -52,7 +52,65 @@ async def test_stepper_setter_updates_display_silently():
         stepper.value = 0.7
         await pilot.pause()
         assert app.changes == []
-        assert str(app.query_one("#s .stepper-value", Static).render()) == "0.7"
+        assert app.query_one("#s .stepper-value", Input).value == "0.7"
+
+
+async def test_stepper_accepts_typed_value_on_enter():
+    app = _StepperApp(value=0.66, lo=0.0, hi=1.0, step=0.05)
+    async with app.run_test(size=(40, 30)) as pilot:
+        box = app.query_one("#s .stepper-value", Input)
+        box.focus()
+        box.value = "0.5"
+        await pilot.press("enter")
+        assert app.changes == [0.5]
+        assert app.query_one("#s", Stepper).value == 0.5
+
+
+async def test_stepper_typed_value_is_clamped_and_normalized():
+    app = _StepperApp(value=0.5, lo=0.0, hi=1.0, step=0.05)
+    async with app.run_test(size=(40, 30)) as pilot:
+        box = app.query_one("#s .stepper-value", Input)
+        box.focus()
+        box.value = "7"  # above hi: clamps to 1, display normalized
+        await pilot.press("enter")
+        assert app.changes == [1.0]
+        assert box.value == "1"
+
+
+async def test_stepper_unparseable_typed_value_reverts():
+    app = _StepperApp(value=0.5, lo=0.0, hi=1.0, step=0.05)
+    async with app.run_test(size=(40, 30)) as pilot:
+        box = app.query_one("#s .stepper-value", Input)
+        box.focus()
+        box.value = ""  # cleared, then abandoned
+        await pilot.press("enter")
+        assert app.changes == []
+        assert box.value == "0.5"
+
+
+async def test_stepper_typed_value_commits_on_blur():
+    app = _StepperApp(value=0.5, lo=0.0, hi=1.0, step=0.05)
+    async with app.run_test(size=(40, 30)) as pilot:
+        box = app.query_one("#s .stepper-value", Input)
+        box.focus()
+        await pilot.pause()  # focus must land before blurring can fire
+        box.value = "0.8"
+        app.set_focus(None)  # leave the field without pressing enter
+        await pilot.pause()
+        assert app.changes == [0.8]
+        assert app.query_one("#s", Stepper).value == 0.8
+
+
+async def test_stepper_buttons_still_step_after_typing():
+    app = _StepperApp(value=0.5, lo=0.0, hi=1.0, step=0.05)
+    async with app.run_test(size=(40, 30)) as pilot:
+        box = app.query_one("#s .stepper-value", Input)
+        box.focus()
+        box.value = "0.7"
+        await pilot.click("#s .stepper-inc")  # blur commits 0.7, then the press steps
+        await pilot.pause(0.5)
+        assert app.query_one("#s", Stepper).value == 0.75
+        assert app.changes == [0.7, 0.75]
 
 
 class _NavApp(App):

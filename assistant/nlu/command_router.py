@@ -1,8 +1,9 @@
-"""First-tier intent router for explicit tool invocation.
+"""Intent router for explicit tool invocation, the head of the fast path.
 
-When a transcript starts with the configured keyphrase (e.g. "tool"), the
-next token is parsed as a tool/intent name and the remainder as arguments,
-bypassing the LLM classifier and keyphrase substring matcher.
+When a transcript starts with the configured keyphrase (e.g. "tool"), the next
+token is parsed as a tool/intent name and the remainder as arguments, dispatching
+straight to that skill without the tool-calling loop. Anything else delegates to
+the next router in the fast-path chain (the keyphrase matcher).
 """
 
 from __future__ import annotations

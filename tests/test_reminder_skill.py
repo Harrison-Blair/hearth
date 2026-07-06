@@ -128,15 +128,46 @@ async def test_manage_empty_store():
     store.close()
 
 
-async def test_bulk_cancel_is_deterministic_no_llm():
+async def test_bulk_cancel_confirms_before_deleting():
     store = _managed_store()
     skill, llm = _manage(store)
     res = await skill.handle(
         Command("cancel all my reminders"), Intent("manage_reminders")
     )
-    assert res.speech == "Okay, I've cancelled all 2 of your reminders."
+    assert res.expects_reply
+    assert res.speech == "That will cancel all 2 reminders. Should I go ahead?"
     assert llm.calls == []  # bulk cancel never touches the LLM
+    assert len(store.pending(NOW.timestamp())) == 2  # nothing deleted yet
+    store.close()
+
+
+async def test_bulk_cancel_reply_affirmative_deletes():
+    store = _managed_store()
+    skill, _ = _manage(store)
+    await skill.handle(Command("cancel all my reminders"), Intent("manage_reminders"))
+    res = await skill.handle_reply(Command("yes go ahead"))
+    assert res.speech == "Okay, I've cancelled all 2 of your reminders."
     assert store.pending(NOW.timestamp()) == []
+    store.close()
+
+
+async def test_bulk_cancel_reply_negative_aborts():
+    store = _managed_store()
+    skill, _ = _manage(store)
+    await skill.handle(Command("cancel all my reminders"), Intent("manage_reminders"))
+    res = await skill.handle_reply(Command("no leave them"))
+    assert res.speech == "Okay, I'll leave them."
+    assert len(store.pending(NOW.timestamp())) == 2
+    store.close()
+
+
+async def test_bulk_cancel_reply_empty_aborts():
+    store = _managed_store()
+    skill, _ = _manage(store)
+    await skill.handle(Command("cancel all my reminders"), Intent("manage_reminders"))
+    res = await skill.handle_reply(Command(""))
+    assert res.speech == "Okay, I'll leave them."
+    assert len(store.pending(NOW.timestamp())) == 2
     store.close()
 
 

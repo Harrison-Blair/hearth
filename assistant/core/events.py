@@ -18,10 +18,28 @@ class WakeEvent:
 
 
 @dataclass
+class Turn:
+    """One message in a conversation's history."""
+
+    role: str  # "user" or "assistant"
+    content: str
+
+
+@dataclass
 class Command:
     """A transcribed user utterance to be routed and handled."""
 
     text: str
+    spoken: bool = True
+    history: list[Turn] = field(default_factory=list)
+
+
+@dataclass
+class ToolCall:
+    """A tool the model asked to run, with its parsed arguments."""
+
+    name: str
+    arguments: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -31,7 +49,6 @@ class Intent:
     type: str
     slots: dict = field(default_factory=dict)
     raw_text: str = ""
-    confidence: float = 1.0
 
 
 @dataclass
@@ -41,3 +58,4 @@ class SkillResult:
     speech: str
     data: dict | None = None
     success: bool = True
+    expects_reply: bool = False

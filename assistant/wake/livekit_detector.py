@@ -33,6 +33,7 @@ class LivekitWakeDetector(WakeDetector):
         model_refs: list[str],
         threshold: float,
         score_interval: int = 1,
+        trigger_frames: int = 1,
         model: object | None = None,
     ) -> None:
         if model is None:
@@ -42,13 +43,19 @@ class LivekitWakeDetector(WakeDetector):
         self._model = model
         self._threshold = threshold
         self._score_interval = score_interval
+        # Require this many *consecutive* scored frames over threshold before
+        # firing, so a single noisy frame spiking past threshold can't wake us.
+        # 1 = the original single-frame trigger.
+        self._trigger_frames = max(1, trigger_frames)
+        self._consec = 0
         self._buf = bytearray()
         self._frames_full = 0
         log.info(
-            "Wake detector ready: models=%s threshold=%.2f interval=%d",
+            "Wake detector ready: models=%s threshold=%.2f interval=%d trigger_frames=%d",
             model_refs,
             threshold,
             score_interval,
+            self._trigger_frames,
         )
 
     def process(self, frame: bytes) -> WakeEvent | None:
@@ -64,11 +71,19 @@ class LivekitWakeDetector(WakeDetector):
         self._frames_full += 1
         samples = np.frombuffer(bytes(self._buf), dtype=np.int16)
         scores = self._model.predict(samples)
-        for name, score in scores.items():
-            if float(score) >= self._threshold:
-                return WakeEvent(name=name, score=float(score))
-        return None
+        hit = next(
+            ((name, float(s)) for name, s in scores.items() if float(s) >= self._threshold),
+            None,
+        )
+        if hit is None:
+            self._consec = 0  # streak broken; a later hit must build up again
+            return None
+        self._consec += 1
+        if self._consec < self._trigger_frames:
+            return None
+        return WakeEvent(name=hit[0], score=hit[1])
 
     def reset(self) -> None:
         self._buf.clear()
         self._frames_full = 0
+        self._consec = 0

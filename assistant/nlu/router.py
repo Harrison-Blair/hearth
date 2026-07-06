@@ -1,9 +1,9 @@
 """Intent router interface.
 
-The concrete two-tier router is implemented: ``KeyphraseRouter`` (cheap substring
-match) and ``ClassifierRouter`` (LLM picks one label, degrading to the keyphrase
-tier offline) both subclass this ABC. ``Intent`` itself lives in core.events so
-skills can import it freely.
+Used by the orchestrator's LLM-free fast path: ``CommandEntryRouter`` (explicit
+"tool X" invocation) and ``KeyphraseRouter`` (cheap substring match) both subclass
+this ABC and chain together. ``Intent`` itself lives in core.events so skills can
+import it freely.
 """
 
 from __future__ import annotations

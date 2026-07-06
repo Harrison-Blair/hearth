@@ -10,7 +10,9 @@ from tui.screens.config import ConfigScreen
 from tui.screens.home import HomeScreen
 from tui.screens.logs import LogsScreen
 from tui.screens.models import InstalledScreen, ModelDetailScreen, ModelsScreen
+from tui.screens.now import NowScreen
 from tui.screens.picker import PickerScreen
+from tui.screens.voices import VoicesScreen
 
 __all__ = [
     "ConfigScreen",
@@ -19,5 +21,7 @@ __all__ = [
     "LogsScreen",
     "ModelDetailScreen",
     "ModelsScreen",
+    "NowScreen",
     "PickerScreen",
+    "VoicesScreen",
 ]

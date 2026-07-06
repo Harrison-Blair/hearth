@@ -80,6 +80,29 @@ def test_score_interval_skips_frames():
     assert len(model.calls) == 3
 
 
+def test_trigger_frames_requires_consecutive_hits():
+    # With trigger_frames=2, a single scored frame over threshold is not enough;
+    # the next scored frame (also over threshold) fires it.
+    model = FakeWakeWordModel(score=0.9)
+    det = LivekitWakeDetector(["m.onnx"], threshold=0.5, trigger_frames=2, model=model)
+    events = feed(det, range(FRAMES_TO_FILL))  # window fills; 1st scored frame = 1 hit
+    assert events[-1] is None
+    assert det.process(frame(99)) is not None  # 2nd consecutive hit fires
+
+
+def test_trigger_frames_streak_resets_on_miss():
+    # A miss between two hits breaks the streak, so trigger_frames=2 never fires
+    # until two hits land back-to-back.
+    model = FakeWakeWordModel(score=0.9)
+    det = LivekitWakeDetector(["m.onnx"], threshold=0.5, trigger_frames=2, model=model)
+    feed(det, range(FRAMES_TO_FILL))  # 1 hit
+    model.score = 0.1
+    assert det.process(frame(50)) is None  # miss resets the streak
+    model.score = 0.9
+    assert det.process(frame(51)) is None  # streak = 1 again
+    assert det.process(frame(52)) is not None  # streak = 2 -> fires
+
+
 def test_window_is_the_most_recent_samples():
     model = FakeWakeWordModel(score=0.0)
     det = LivekitWakeDetector(["m.onnx"], threshold=0.5, model=model)

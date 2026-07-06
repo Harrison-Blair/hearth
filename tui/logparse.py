@@ -7,6 +7,7 @@ The daemon logs with ``"%(asctime)s %(levelname)-7s %(name)s: %(message)s"``
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -15,6 +16,11 @@ _LINE = re.compile(r"^(\d{2}:\d{2}:\d{2})\s+([A-Z]+)\s+([\w.]+):\s(.*)$")
 
 # Logger prefix whose lines also surface in the dedicated LLM view.
 _LLM_PREFIX = "assistant.llm"
+
+# Sentinel prefix for the daemon's state feed (assistant/core/state.py). We parse
+# it inline rather than importing the daemon module — the tui may only depend on
+# assistant.core.config and assistant.wake.registry (see CLAUDE.md).
+_STATE_MARKER = "@@STATE "
 
 
 @dataclass
@@ -38,6 +44,18 @@ def parse(line: str) -> LogLine:
         return LogLine(None, None, None, line, line)
     ts, level, logger, message = m.groups()
     return LogLine(ts, level, logger, message, line)
+
+
+def parse_state(line: str) -> dict | None:
+    """A ``@@STATE {json}`` feed line as its payload dict, else None (a log line)."""
+    line = line.rstrip("\n")
+    if not line.startswith(_STATE_MARKER):
+        return None
+    try:
+        payload = json.loads(line[len(_STATE_MARKER):])
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def dedup_key(line: LogLine) -> str:

@@ -23,7 +23,7 @@ vad = ["webrtcvad", "setuptools<81"]  # webrtcvad imports pkg_resources (removed
 llm = ["httpx"]  # async HTTP client for the Ollama provider
 nlu = ["dateparser"]
 scheduling = ["apscheduler"]
-search = ["httpx"]  # httpx for the Wikipedia API
+search = ["httpx", "ddgs"]  # httpx for the Wikipedia API, ddgs for DuckDuckGo
 # Monitor TUI: supervises the daemon as a child process. Deliberately NOT in
 # `all` — the Pi may run the TUI separately, and it imports no native deps.
 # textual pinned to 8.2.x: collapse.py and the log widgets poke RichLog

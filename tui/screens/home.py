@@ -25,6 +25,8 @@ class HomeScreen(Screen):
         with VerticalScroll():
             yield Static(id="home-status")
             with Horizontal():
+                yield Button("Now", id="nav-now")
+            with Horizontal():
                 yield Button("Logs", id="nav-logs")
             with Horizontal():
                 yield Button("Config", id="nav-config")
@@ -40,6 +42,10 @@ class HomeScreen(Screen):
                 yield Button("−", id="vol-down")
                 yield Static("", id="vol-value")
                 yield Button("+", id="vol-up")
+
+    @on(Button.Pressed, "#nav-now")
+    def _nav_now(self) -> None:
+        self.app.push_screen("now")
 
     @on(Button.Pressed, "#nav-logs")
     def _nav_logs(self) -> None:

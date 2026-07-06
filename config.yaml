@@ -8,47 +8,84 @@ audio:
   normalize: true
   normalize_target_peak: 0.97
   normalize_rms_floor: 200.0
+  min_transcribe_rms: 0.0
 recorder:
   aggressiveness: 2
-  silence_ms: 800
+  silence_ms: 1500
   max_ms: 10000
   start_timeout_ms: 5000
   preroll_frames: 6
 wake:
   model_paths:
-    - models/wake/calcifer.onnx
-  threshold: 0.66  # calcifer's eval-optimal point: 91.0% recall @ 0.04 false-accepts/hr
+  - models/wake/calcifer.onnx
+  threshold: 0.66
   score_interval: 1
+  trigger_frames: 1
 stt:
-  model: distil-medium.en
+  model: distil-small.en
   device: cpu
   compute_type: int8
   cpu_threads: 4
   language: en
   beam_size: 5
-  vad_filter: true
+  vad_filter: false
   condition_on_previous_text: false
-  initial_prompt: Calcifer. Set a reminder, what time is it, search the web.
+  initial_prompt: ''
 llm:
   provider: ollama
-  model: qwen2.5:3b-instruct
+  model: qwen3:14b
   host: http://localhost:11434
   timeout: 60.0
   health_timeout: 5.0
+  num_ctx: 8192
+  think: false
   serve_cmd:
   - ollama
   - serve
+agent:
+  tool_mode: auto
+  max_tool_rounds: 3
+  fast_path: true
+  turn_timeout_s: 20.0
 tts:
   voice: en_US-lessac-medium
   model_path: models/piper/en_US-lessac-medium.onnx
+  length_scale: 1.0
+  ack_phrases:
+    - hmm?
+    - uh huh?
+    - hmm hmm?
 storage:
   db_path: assistant.db
 scheduling:
   poll_seconds: 1.0
 web_search:
+  providers:
+  - ddgs
+  - wikipedia
   language: en
+  region: us-en
   result_count: 3
+  max_results: 5
   timeout: 10.0
   max_snippet_chars: 500
+  max_rounds: 2
+  progress_updates: true
+weather:
+  latitude: 33.749
+  longitude: -84.38798
+  location_name: Atlanta
+  timezone: auto
+  temperature_unit: fahrenheit
+  wind_speed_unit: mph
+  precipitation_unit: inch
+  forecast_days: 16
+  timeout: 10.0
+  forecast_endpoint: https://api.open-meteo.com/v1/forecast
+  geocoding_endpoint: https://geocoding-api.open-meteo.com/v1/search
+conversation:
+  enabled: true
+  followup_window_ms: 6000
+  max_history_turns: 12
 logging:
   level: INFO

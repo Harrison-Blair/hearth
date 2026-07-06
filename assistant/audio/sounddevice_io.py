@@ -32,10 +32,28 @@ class SoundDeviceIn(AudioIn):
         self._sample_rate = sample_rate
         self._block_size = block_size
         self._channels = channels
+        self._queue: asyncio.Queue[bytes] | None = None
+
+    def drain(self) -> None:
+        """Discard frames buffered while an earcon/TTS played, so their echo isn't
+        recorded as part of the next command."""
+        queue = self._queue
+        if queue is None:
+            return
+        dropped = 0
+        while not queue.empty():
+            try:
+                queue.get_nowait()
+                dropped += 1
+            except asyncio.QueueEmpty:
+                break
+        if dropped:
+            log.debug("drained %d buffered input frame(s)", dropped)
 
     async def stream(self) -> AsyncIterator[bytes]:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self._queue = queue
 
         def callback(indata, frames, time_info, status):  # PortAudio thread
             if status:
@@ -73,6 +91,14 @@ class SoundDeviceOut(AudioOut):
         """Adjust playback gain live (used by the control channel for mute/volume)."""
         self._volume = max(0.0, volume)
         log.info("Output volume set to %.2f", self._volume)
+
+    def stop(self) -> None:
+        """Abort in-progress playback for barge-in; the blocked ``sd.wait()`` in
+        ``_play`` then returns and the current utterance is cut short."""
+        try:
+            sd.stop()
+        except Exception as exc:  # noqa: BLE001 - stop must never raise into the caller
+            log.debug("audio stop failed: %s", exc)
 
     async def play(self, audio: bytes) -> None:
         await asyncio.to_thread(self._play, audio)

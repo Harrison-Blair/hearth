@@ -40,8 +40,10 @@ class ConfigScreen(Screen):
     ConfigScreen Horizontal { height: 3; }
     /* Expand to fit the options; cap and scroll the rest. */
     ConfigScreen #field-wake_model_paths { height: auto; max-height: 10; border: round $panel; }
+    ConfigScreen #field-tts_ack_phrases { height: auto; max-height: 6; border: round $panel; }
     ConfigScreen #wake-phrases { height: auto; color: $text-muted; }
     ConfigScreen #wake-clean-smoke { width: 1fr; margin-top: 1; }
+    ConfigScreen #voice-test, ConfigScreen #voice-get { width: 1fr; }
     ConfigScreen #model-detail { height: auto; color: $text-muted; margin-top: 1; }
     ConfigScreen #config-actions { dock: bottom; height: 3; }
     ConfigScreen #config-actions Button { width: 1fr; }
@@ -65,13 +67,26 @@ class ConfigScreen(Screen):
             yield Button("Apply", id="config-apply")
             yield Button("Reset", id="config-reset", variant="warning")
 
+    WAKE_KEY = ("wake", "model_paths")
+    VOICE_KEY = ("tts", "model_path")
+
     def _field_widgets(self, field: Field, cfg: Config) -> ComposeResult:
         wid = field_id(field)
         if field.kind == "multiselect":
-            # Options and selection are filled in on mount/resume (discovered live).
-            yield SelectionList(id=wid)
-            yield Static(id="wake-phrases")
-            yield Button("Clean smoke-test models", id="wake-clean-smoke", variant="warning")
+            if field.key == self.WAKE_KEY:
+                # Wake models are discovered live: options/selection filled on resume.
+                yield SelectionList(id=wid)
+                yield Static(id="wake-phrases")
+                yield Button("Clean smoke-test models", id="wake-clean-smoke", variant="warning")
+            else:
+                # Static-option multiselect (e.g. ack sounds): populate inline,
+                # pre-checking whatever the effective config holds.
+                checked = set(discovery.current_value_list(cfg, field.key))
+                options = field.options() if field.options else []
+                yield SelectionList(
+                    *(SelectionOption(label, value, value in checked) for label, value in options),
+                    id=wid,
+                )
             return
         current = discovery.current_value(cfg, field.key)
         if field.kind == "number":
@@ -82,6 +97,10 @@ class ConfigScreen(Screen):
         self._select_values[field.key] = current
         with Horizontal():
             yield Button(current or "(pick…)", id=wid, classes="select-field")
+        if field.key == self.VOICE_KEY:
+            with Horizontal():
+                yield Button("Test voice", id="voice-test", variant="primary")
+                yield Button("Get more voices", id="voice-get")
 
     def _on_screen_resume(self, event: events.ScreenResume) -> None:
         self.app._refresh_status()  # freshly mounted NavBar dots need a first paint
@@ -108,8 +127,13 @@ class ConfigScreen(Screen):
             key: coerce(self._field_by_key(key), raw)
             for key, raw in self.form_strings().items()
         }
-        values[("wake", "model_paths")] = list(self.selected_wake_models())
+        for field in FIELDS:
+            if field.kind == "multiselect":
+                values[field.key] = self.selected_multiselect(field)
         return values
+
+    def selected_multiselect(self, field: Field) -> list[str]:
+        return list(self.query_one(f"#{field_id(field)}", SelectionList).selected)
 
     def selected_wake_models(self) -> list[str]:
         return list(self.query_one("#field-wake_model_paths", SelectionList).selected)
@@ -119,10 +143,13 @@ class ConfigScreen(Screen):
         return next(f for f in FIELDS if f.key == key)
 
     def set_from_config(self, cfg: Config) -> None:
-        """Re-seed every single-valued control (Reset button; multiselect is
-        repopulated separately since its options are discovered)."""
+        """Re-seed every single-valued control (Reset button). The wake multiselect
+        is repopulated separately (its options are discovered); static-option
+        multiselects are re-checked here."""
         for field in FIELDS:
             if field.kind == "multiselect":
+                if field.key != self.WAKE_KEY:
+                    self._reseed_static_multiselect(field, cfg)
                 continue
             current = discovery.current_value(cfg, field.key)
             if field.kind == "number":
@@ -130,6 +157,13 @@ class ConfigScreen(Screen):
             else:
                 self._select_values[field.key] = current
                 self.query_one(f"#{field_id(field)}", Button).label = current or "(pick…)"
+
+    def _reseed_static_multiselect(self, field: Field, cfg: Config) -> None:
+        sel = self.query_one(f"#{field_id(field)}", SelectionList)
+        wanted = set(discovery.current_value_list(cfg, field.key))
+        sel.deselect_all()
+        for value in wanted:
+            sel.select(value)
 
     def set_volume(self, value: float) -> None:
         """Keep the volume stepper in sync with the live volume controls on Home."""
@@ -161,6 +195,16 @@ class ConfigScreen(Screen):
     def _on_clean_smoke(self) -> None:
         self.app._clean_smoke_models()
 
+    # ---- voice test / download ------------------------------------------------
+
+    @on(Button.Pressed, "#voice-test")
+    async def _on_voice_test(self) -> None:
+        await self.app._on_test_voice()
+
+    @on(Button.Pressed, "#voice-get")
+    def _on_voice_get(self) -> None:
+        self.app.push_screen("voices")
+
     # ---- select fields (picker) -----------------------------------------------
 
     @on(Button.Pressed, ".select-field")
@@ -179,6 +223,11 @@ class ConfigScreen(Screen):
                 self.app.run_worker(
                     self.app._show_model_detail(value), group="model-detail", exclusive=True
                 )
+                self.app.run_worker(self.app._on_model_picked(value), group="model-default")
+            elif field.key == self.VOICE_KEY:
+                # Persist + restart so the daemon reloads at the new voice's sample
+                # rate (a bare rate/ack tweak is live-testable, a model swap is not).
+                self.app.run_worker(self.app._on_voice_picked(value), group="voice")
 
         self.app.push_screen(
             PickerScreen(field.label, options, self._select_values.get(field.key, "")),

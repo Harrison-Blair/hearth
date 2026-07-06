@@ -28,9 +28,41 @@ def _local_now() -> datetime:
     return datetime.now().astimezone()
 
 
+_TEXT_ARG = {
+    "type": "object",
+    "properties": {"text": {"type": "string", "description": "the request, verbatim"}},
+    "required": ["text"],
+}
+_NO_ARGS = {"type": "object", "properties": {}}
+
+
 class ReminderSkill(Skill):
     name = "reminder"
     intents = {"reminder", "timer", "list_reminders", "manage_reminders"}
+    tool_specs = {
+        "timer": {
+            "description": "Start a countdown timer for a relative duration (e.g. 5 minutes).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "duration": {"type": "string", "description": "e.g. '5 minutes', '30 seconds'"}
+                },
+                "required": ["duration"],
+            },
+        },
+        "reminder": {
+            "description": "Create a reminder for a future time or after a delay.",
+            "parameters": _TEXT_ARG,
+        },
+        "list_reminders": {
+            "description": "Read back the user's pending reminders and timers.",
+            "parameters": _NO_ARGS,
+        },
+        "manage_reminders": {
+            "description": "Cancel, reschedule, or rename an existing reminder or timer.",
+            "parameters": _TEXT_ARG,
+        },
+    }
 
     def __init__(
         self,
@@ -50,6 +82,18 @@ class ReminderSkill(Skill):
         if intent.type == "manage_reminders":
             return await self._handle_manage(cmd.text)
         return await self._handle_reminder(cmd.text)
+
+    _AFFIRMATIONS = ("yes", "yeah", "yep", "confirm", "do it", "go ahead", "sure")
+
+    async def handle_reply(self, cmd: Command) -> SkillResult:
+        """Confirm the pending bulk-cancel. A cancelled/silent reply arrives as an
+        empty transcript, so anything not clearly affirmative aborts."""
+        lowered = cmd.text.lower()
+        if not any(word in lowered for word in self._AFFIRMATIONS):
+            return SkillResult("Okay, I'll leave them.")
+        n = self._store.delete_pending(self._now().timestamp())
+        noun = "reminder" if n == 1 else "reminders"
+        return SkillResult(f"Okay, I've cancelled all {n} of your {noun}.")
 
     def _handle_list(self) -> SkillResult:
         now_ts = self._now().timestamp()
@@ -123,9 +167,12 @@ class ReminderSkill(Skill):
             return SkillResult("You don't have any reminders to cancel or change.")
 
         if self._is_bulk_cancel(text):
-            n = self._store.delete_pending(now_ts)
+            n = len(pending)
             noun = "reminder" if n == 1 else "reminders"
-            return SkillResult(f"Okay, I've cancelled all {n} of your {noun}.")
+            return SkillResult(
+                f"That will cancel all {n} {noun}. Should I go ahead?",
+                expects_reply=True,
+            )
 
         action = await parse_management(
             text, [self._describe(r, now_ts) for r in pending], self._llm, now

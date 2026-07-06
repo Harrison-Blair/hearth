@@ -15,18 +15,20 @@ audio:
   normalize: true              # peak-normalize the utterance before STT
   normalize_target_peak: 0.97  # target peak as fraction of full scale
   normalize_rms_floor: 200.0   # skip normalize below this int16 RMS (noise gate)
+  min_transcribe_rms: 0.0      # >0 skips STT on near-silent captures (anti-hallucination); tune via capture logs
 
 recorder:
   aggressiveness: 2         # WebRTC VAD sensitivity, 0 (lax) - 3 (strict)
-  silence_ms: 800           # trailing silence that ends an utterance
+  silence_ms: 1500          # trailing silence that ends an utterance
   max_ms: 10000             # hard cap on utterance length
-  start_timeout_ms: 3000    # give up if no speech starts after wake
+  start_timeout_ms: 5000    # give up if no speech starts after wake
   preroll_frames: 6         # ~0.5s kept before wake to recover a clipped command
 
 wake:
   model_path: "models/wake/calcifer.onnx"   # trained "Calcifer" model
-  threshold: 0.5              # set from the manifest's optimal threshold after training
+  threshold: 0.66             # set from the manifest's optimal threshold after training
   score_interval: 1           # score every Nth 80ms frame; raise to 2-4 on the Pi to cut CPU
+  trigger_frames: 1           # consecutive over-threshold frames to fire; raise to 2 to debounce noise
 
 stt:
   model: "distil-small.en"   # Pi-tuned: distil-whisper, big accuracy win over base.en at int8
@@ -34,8 +36,10 @@ stt:
   cpu_threads: 4             # 0 = ctranslate2 auto; pin to the Pi 5's core count
   language: "en"
   beam_size: 1            # 1 = greedy decode; higher = slower but more accurate
-  # Optional vocabulary/spelling bias toward the wake word and command terms.
-  initial_prompt: "Penguin. Set a reminder, what time is it, search the web."
+  vad_filter: false       # recorder already endpoints; a 2nd VAD re-clips and drops leading words
+  # Optional vocabulary/spelling bias. Empty by default: a strong prompt biases
+  # free-form transcription toward the listed phrasings.
+  initial_prompt: ""
 
 llm:
   provider: "ollama"
@@ -43,11 +47,27 @@ llm:
   host: "http://localhost:11434"
   timeout: 60.0
   health_timeout: 5.0     # shorter timeout for the startup health check
+  num_ctx: 8192           # context window passed to Ollama (options.num_ctx)
+  think: false            # keep thinking-model reasoning off on chat paths (voice latency)
   serve_cmd: ["ollama", "serve"]   # command the TUI runs to (re)start the LLM server
+
+agent:
+  tool_mode: "auto"       # native | json | auto: native Ollama tool-calling, JSON fallback
+  max_tool_rounds: 3      # cap on tool-call rounds before the model must answer directly
+  fast_path: true         # LLM-free keyphrase/command shortcut for cheap frequent commands
+  turn_timeout_s: 20.0    # whole-turn budget; on expiry, answer from general knowledge
 
 tts:
   voice: "en_US-lessac-medium"
   model_path: "models/piper/en_US-lessac-medium.onnx"
+  # Piper speaking rate (length_scale): >1 slower, <1 faster.
+  length_scale: 1.0
+  # Wake-acknowledgement pool; one phrase is chosen at random per wake. Keep to
+  # espeak-friendly interjections so Piper speaks a natural cue.
+  ack_phrases:
+    - "hmm?"
+    - "uh huh?"
+    - "hmm hmm?"
 
 storage:
   db_path: "assistant.db"
@@ -56,10 +76,33 @@ scheduling:
   poll_seconds: 1.0       # how often the scheduler checks for due reminders
 
 web_search:
+  providers: [ddgs, wikipedia] # fan-out set; order = merge priority
   language: "en"          # Wikipedia language variant
-  result_count: 3
+  region: "us-en"         # DuckDuckGo region
+  result_count: 3         # results fetched per provider
+  max_results: 5          # merged results cap fed to the LLM
   timeout: 10.0
   max_snippet_chars: 500  # truncate each result body
+  max_rounds: 2           # agentic search rounds before giving up
+  progress_updates: true  # speak "searching..." style updates mid-turn
+
+weather:
+  latitude: 33.749                    # home location (Atlanta, GA)
+  longitude: -84.38798
+  location_name: "Atlanta"            # spoken label for "here"
+  timezone: "auto"                    # IANA tz or "auto" (resolve from coordinates)
+  temperature_unit: "fahrenheit"      # fahrenheit | celsius
+  wind_speed_unit: "mph"              # mph | kmh | ms | kn
+  precipitation_unit: "inch"          # inch | mm
+  forecast_days: 16                   # days of daily outlook (Open-Meteo max is 16)
+  timeout: 10.0
+  forecast_endpoint: "https://api.open-meteo.com/v1/forecast"
+  geocoding_endpoint: "https://geocoding-api.open-meteo.com/v1/search"
+
+conversation:
+  enabled: true             # keep listening for follow-ups after the assistant speaks
+  followup_window_ms: 6000  # silence after which a conversation closes
+  max_history_turns: 12     # messages kept in-session (user + assistant each 1)
 
 logging:
   level: "INFO"

@@ -35,7 +35,7 @@ from tui import configfile, discovery
 from tui.collapse import CollapsingWriter
 from tui.config_schema import FIELDS, Field, changed_fields, overrides_for
 from tui.logcolor import colorize_line, colorize_message
-from tui.logparse import dedup_key, parse
+from tui.logparse import dedup_key, parse, parse_state
 from tui.screens import (
     ConfigScreen,
     HomeScreen,
@@ -43,6 +43,8 @@ from tui.screens import (
     LogsScreen,
     ModelDetailScreen,
     ModelsScreen,
+    NowScreen,
+    VoicesScreen,
 )
 from tui.supervisor import DaemonSupervisor, free_ollama_port
 from tui.widgets import NavBar, ScreenWidthRichLog, Stepper  # noqa: F401 - re-exported
@@ -99,6 +101,7 @@ class AssistantTUI(App):
         # Models: registry browsing + a sequential pull queue.
         self._search_results: list[discovery.RegistryModel] = []
         self._installed: list[discovery.OllamaModel] = []
+        self._voice_catalog: list[discovery.RegistryVoice] = []
         self._pull_queue: list[str] = []
         self._pulling = False
         self._last_query = _default_query(self._config.llm.model)
@@ -113,16 +116,22 @@ class AssistantTUI(App):
 
     async def on_mount(self) -> None:
         self._home = HomeScreen()
+        self._now = NowScreen()
         self._logs_screen = LogsScreen()
         self._config_screen = ConfigScreen()
         self._models_screen = ModelsScreen()
         self._installed_screen = InstalledScreen()
+        self._voices_screen = VoicesScreen()
         self.install_screen(self._home, name="home")
+        self.install_screen(self._now, name="now")
         self.install_screen(self._logs_screen, name="logs")
         self.install_screen(self._config_screen, name="config")
         self.install_screen(self._models_screen, name="models")
         self.install_screen(self._installed_screen, name="installed")
+        self.install_screen(self._voices_screen, name="voices")
+        # Now is the default face; Home sits under it as the ◀ settings/status hub.
         await self.push_screen("home")
+        await self.push_screen("now")
         self._refresh_status()
         self.run_worker(self._startup(), group="startup")
         self.run_worker(self._health_loop(), group="health")
@@ -187,6 +196,10 @@ class AssistantTUI(App):
 
     async def _pump(self) -> None:
         async for line in self.supervisor.lines():
+            payload = parse_state(line)
+            if payload is not None:
+                self._on_state(payload)
+                continue
             parsed = parse(line)
             key = dedup_key(parsed)
             self._log("app", colorize_line(parsed.raw), key)
@@ -195,6 +208,22 @@ class AssistantTUI(App):
         # stdout EOF: the child exited.
         if self._state != "restarting":
             self._set_state("stopped")
+
+    def _on_state(self, payload: dict) -> None:
+        """Drive the Now screen from a daemon state-feed line."""
+        if not self._now.is_attached:  # not mounted yet — nothing to update
+            return
+        state = payload.get("state")
+        if state:
+            self._now.set_state(state)
+        if "transcript" in payload:
+            self._now.set_transcript(payload["transcript"])
+        if "text" in payload:
+            self._now.set_reply(payload["text"])
+        if payload.get("message") and state in ("no_speech", "error"):
+            self._now.set_banner(payload["message"])
+        if "level" in payload:
+            self._now.set_level(payload["level"])
 
     async def _on_start(self) -> None:
         if not self.supervisor.running:
@@ -278,7 +307,7 @@ class AssistantTUI(App):
         return pairs
 
     async def _refresh_wake_options(self, cfg=None) -> None:
-        wake_field = next(f for f in FIELDS if f.kind == "multiselect")
+        wake_field = next(f for f in FIELDS if f.key == ("wake", "model_paths"))
         options = await self._select_options(wake_field)
         self._config_screen.populate_wake_models(cfg or self._config, options)
 
@@ -319,6 +348,53 @@ class AssistantTUI(App):
         caps = ", ".join(info.capabilities) if info.capabilities else "—"
         detail.update(f"{name}: {' · '.join(parts)}  |  capabilities: {caps}")
 
+    async def _on_model_picked(self, value: str) -> None:
+        """Picking an LLM model makes it the new default immediately: persist to
+        config.yaml (and drop any env override that would shadow it), then restart."""
+        if value == self._config.llm.model and "ASSISTANT_LLM__MODEL" not in self._overrides:
+            return
+        configfile.write_fields(configfile.CONFIG_FILE, {("llm", "model"): value})
+        self._overrides.pop("ASSISTANT_LLM__MODEL", None)
+        self._log("app", f"LLM model set to {value} — saved as default, restarting…")
+        await self._restart()
+
+    async def _on_voice_picked(self, value: str) -> None:
+        """Picking a voice persists it and restarts: the daemon reloads Piper at the
+        new voice's sample rate (a bare rate/ack tweak is live, a model swap isn't)."""
+        if value == self._config.tts.model_path and "ASSISTANT_TTS__MODEL_PATH" not in self._overrides:
+            return
+        configfile.write_fields(configfile.CONFIG_FILE, {("tts", "model_path"): value})
+        self._overrides.pop("ASSISTANT_TTS__MODEL_PATH", None)
+        self._log("app", f"Voice set to {os.path.basename(value)} — saved, restarting…")
+        await self._restart()
+
+    async def _on_test_voice(self) -> None:
+        """Speak a sample line through the running daemon at the currently-selected
+        rate — a live preview over the control channel, no restart."""
+        try:
+            rate = self._config_screen.query_one("#field-tts_length_scale", Stepper).value_str
+        except Exception:  # noqa: BLE001 - config screen not mounted yet
+            rate = ""
+        sample = "hmm? Testing the voice. The weather today is sunny and mild."
+        await self.supervisor.send(f"SAY {rate}|{sample}" if rate else f"SAY {sample}")
+        self._log("app", "Testing voice…")
+
+    async def _load_voice_catalog(self) -> None:
+        self._voice_catalog = await discovery.piper_voice_catalog()
+        if self._voices_screen.is_attached:
+            self._voices_screen.render_catalog(self._voice_catalog)
+
+    async def _do_voice_download(self, voice: discovery.RegistryVoice) -> None:
+        try:
+            async for p in discovery.download_voice(voice):
+                self._voices_screen.set_download_status(p.status, p.percent)
+        except Exception as exc:  # noqa: BLE001 - a download failure must not crash the TUI
+            self._voices_screen.set_download_status(f"download failed: {exc}", None)
+            self._log("app", f"Voice download failed: {exc}")
+            return
+        self._log("app", f"Downloaded voice {voice.key} — now selectable in Config.")
+        await self._load_voice_catalog()  # refresh the ✓ installed marks
+
     async def _on_config_save(self, values: dict[tuple[str, ...], object]) -> None:
         configfile.write_fields(configfile.CONFIG_FILE, values)
         self._log("app", f"Saved {configfile.CONFIG_FILE} — restarting…")
@@ -335,12 +411,17 @@ class AssistantTUI(App):
         await self._restart()
 
     def _collect_multiselect_override(self) -> None:
-        # wake.model_paths rides an env var as a JSON list (Config parses it back).
-        wake_field = next(f for f in FIELDS if f.kind == "multiselect")
-        selected = self._config_screen.selected_wake_models()
-        if set(selected) == set(self._config.wake.model_refs()):
-            return  # unchanged from the effective config
-        self._overrides[wake_field.env] = json.dumps(selected)
+        # A multiselect rides an env var as a JSON list (Config parses it back).
+        for field in FIELDS:
+            if field.kind != "multiselect":
+                continue
+            selected = self._config_screen.selected_multiselect(field)
+            if field.key == ("wake", "model_paths"):
+                current = self._config.wake.model_refs()
+            else:
+                current = discovery.current_value_list(self._config, field.key)
+            if set(selected) != set(current):
+                self._overrides[field.env] = json.dumps(selected)
 
     async def _on_config_reset(self) -> None:
         data = configfile.read(configfile.DEFAULT_CONFIG_FILE)
@@ -476,7 +557,7 @@ class AssistantTUI(App):
         except Exception:  # noqa: BLE001 - home not mounted yet
             pass
         daemon_up = self._state == "running"
-        for screen in (self._config_screen, self._models_screen, self._installed_screen):
+        for screen in (self._now, self._config_screen, self._models_screen, self._installed_screen):
             if screen.is_attached:
                 screen.query_one(NavBar).set_dots(daemon_up, self._ollama_up)
 

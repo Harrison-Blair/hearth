@@ -1,8 +1,8 @@
 """Fast keyphrase intent router.
 
-Tier one of the planned two-tier router: a cheap substring match against
-registered keyphrases, falling back to a default intent. The LLM-classifier
-tier lands once there are enough skills for keyphrases to be ambiguous.
+The orchestrator's LLM-free fast path: a cheap substring match against registered
+keyphrases for common commands, falling back to a default intent. A default (no
+match) hands the turn to the orchestrator's tool-calling loop.
 """
 
 from __future__ import annotations

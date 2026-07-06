@@ -1,29 +1,54 @@
+from collections import deque
+
 from assistant.core.arbiter import AudioArbiter
-from assistant.core.events import SkillResult, WakeEvent
+from assistant.core.events import Command, Intent, SkillResult, Turn, WakeEvent
 from assistant.core.pipeline import VoicePipeline
-from assistant.nlu.keyphrase_router import KeyphraseRouter
-from assistant.skills.base import Skill, SkillRegistry
+from assistant.skills.base import Skill
 
 FRAME = bytes(2560)
+
+
+class DirectOrchestrator:
+    """Stand-in for the real Orchestrator: routes every turn to the one skill, so
+    the pipeline tests exercise the wake/conversation loop, not tool routing (which
+    has its own tests). Mirrors the (result, skill) contract the pipeline relies on."""
+
+    def __init__(self, skill):
+        self._skill = skill
+
+    async def handle(self, text, history, *, spoken):
+        result = await self._skill.handle(
+            Command(text, spoken=spoken, history=history),
+            Intent(type="general", raw_text=text),
+        )
+        return result, self._skill
 
 
 class FakeAudioIn:
     def __init__(self, n):
         self._n = n
+        self.drains = 0
 
     async def stream(self):
         for _ in range(self._n):
             yield FRAME
 
+    def drain(self):
+        self.drains += 1
+
 
 class FakeDetector:
-    def __init__(self):
-        self.fired = False
+    def __init__(self, fires=1):
+        self._remaining = fires
         self.resets = 0
 
+    @property
+    def fired(self):
+        return self._remaining <= 0
+
     def process(self, frame):
-        if not self.fired:
-            self.fired = True
+        if self._remaining > 0:
+            self._remaining -= 1
             return WakeEvent("test", 0.9)
         return None
 
@@ -34,20 +59,32 @@ class FakeDetector:
 class FakeRecorder:
     def __init__(self):
         self.prefixes = []
+        self.start_timeouts = []
 
-    async def record(self, frames, prefix=b""):
+    async def record(self, frames, prefix=b"", start_timeout_ms=None, on_level=None,
+                     cancel_event=None):
         self.prefixes.append(prefix)
-        await frames.__anext__()  # consume one frame, like a real capture
+        self.start_timeouts.append(start_timeout_ms)
+        try:
+            await frames.__anext__()  # consume one frame, like a real capture
+        except StopAsyncIteration:
+            pass
         return b"\x00\x00"
 
 
 class FakeSTT:
-    def __init__(self, transcript="what time is it"):
+    """Constant transcript, or a scripted list where "" marks silence and the
+    queue yields "" once exhausted."""
+
+    def __init__(self, transcript="what time is it", transcripts=None):
         self.calls = []
         self._transcript = transcript
+        self._queue = deque(transcripts) if transcripts is not None else None
 
     async def transcribe(self, audio):
         self.calls.append(audio)
+        if self._queue is not None:
+            return self._queue.popleft() if self._queue else ""
         return self._transcript
 
 
@@ -63,12 +100,23 @@ class FakeSkill(Skill):
     name = "fake"
     intents = {"general"}
 
-    def __init__(self):
+    def __init__(self, speech="it is noon", expects_reply=False):
         self.handled = []
+        self.histories = []
+        self.spokens = []
+        self.replies = []
+        self._speech = speech
+        self._expects_reply = expects_reply
 
     async def handle(self, cmd, intent):
         self.handled.append((cmd.text, intent.type))
-        return SkillResult(speech="it is noon")
+        self.histories.append(cmd.history)
+        self.spokens.append(cmd.spoken)
+        return SkillResult(speech=self._speech, expects_reply=self._expects_reply)
+
+    async def handle_reply(self, cmd):
+        self.replies.append(cmd.text)
+        return SkillResult(speech="reply handled")
 
 
 class FakeTTS:
@@ -83,20 +131,33 @@ class FakeTTS:
 class FakeOut:
     def __init__(self):
         self.played = []
+        self.stops = 0
 
     async def play(self, audio):
         self.played.append(audio)
 
+    def stop(self):
+        self.stops += 1
+
 
 def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
-              no_speech_earcon=b"", wake_earcon=b""):
-    registry = SkillRegistry()
-    registry.register(skill, default=True)
+              recorder=None, no_speech_earcon=b"", wake_earcon=b"", wake_earcons=None,
+              end_earcon=b"", conversation_enabled=False, followup_window_ms=6000,
+              max_history_turns=12, min_transcribe_rms=0.0, state_emitter=None):
+    # Tests pass a single wake_earcon for convenience; the pipeline takes a pool.
+    if wake_earcons is None:
+        wake_earcons = [wake_earcon] if wake_earcon else []
     return VoicePipeline(
-        audio_in, detector, FakeRecorder(), stt or FakeSTT(),
-        KeyphraseRouter(), registry, tts, out, arbiter,
+        audio_in, detector, recorder or FakeRecorder(), stt or FakeSTT(),
+        DirectOrchestrator(skill), tts, out, arbiter,
         no_speech_earcon=no_speech_earcon,
-        wake_earcon=wake_earcon,
+        wake_earcons=wake_earcons,
+        end_earcon=end_earcon,
+        min_transcribe_rms=min_transcribe_rms,
+        conversation_enabled=conversation_enabled,
+        followup_window_ms=followup_window_ms,
+        max_history_turns=max_history_turns,
+        state_emitter=state_emitter,
     )
 
 
@@ -113,6 +174,157 @@ async def test_wake_routes_and_speaks_reply():
     assert tts.spoke == ["it is noon"]                        # spoke the reply
     assert out.played == [b"AUDIO"]                           # played the audio
     assert detector.resets == 1                               # reset after handling
+
+
+async def test_speak_chunks_multi_sentence_reply():
+    # A multi-sentence reply is synthesized and played sentence by sentence, so the
+    # first audio starts before the whole reply is synthesized.
+    skill = FakeSkill(speech="It is noon. The sun is out.")
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(FakeAudioIn(3), FakeDetector(), skill, tts, out, AudioArbiter())
+
+    await pipeline.run()
+
+    assert tts.spoke == ["It is noon.", "The sun is out."]
+    assert out.played == [b"AUDIO", b"AUDIO"]
+
+
+async def test_speak_single_sentence_plays_once():
+    skill = FakeSkill(speech="It is noon.")
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(FakeAudioIn(3), FakeDetector(), skill, tts, out, AudioArbiter())
+
+    await pipeline.run()
+
+    assert tts.spoke == ["It is noon."]
+    assert out.played == [b"AUDIO"]
+
+
+class BusyThenFreeIn:
+    """Yields one frame while the arbiter is busy, then frees it and yields more.
+
+    Exercises the busy->free edge: the pipeline must drop the detector's window on
+    the way into busy so pre-announcement audio can't splice into a phantom wake.
+    """
+
+    def __init__(self, arbiter, tail=2):
+        self._arbiter = arbiter
+        self._tail = tail
+
+    async def stream(self):
+        await self._arbiter._lock.acquire()  # busy
+        yield FRAME  # pipeline sees busy -> should reset the detector once
+        self._arbiter._lock.release()  # free again
+        for _ in range(self._tail):
+            yield FRAME
+
+    def drain(self):
+        pass
+
+
+async def test_detector_reset_on_busy_edge():
+    detector = FakeDetector()
+    skill = FakeSkill()
+    arbiter = AudioArbiter()
+    pipeline = _pipeline(BusyThenFreeIn(arbiter), detector, skill, FakeTTS(), FakeOut(), arbiter)
+
+    await pipeline.run()
+
+    # One reset on the busy edge + one after the turn completes.
+    assert detector.resets == 2
+    assert skill.handled == [("what time is it", "general")]  # woke normally after busy
+
+
+class RecordingEmitter:
+    def __init__(self):
+        self.states = []
+        self.fields = []
+        self.levels = []
+
+    def state(self, name, **fields):
+        self.states.append(name)
+        self.fields.append(fields)
+
+    def level(self, rms):
+        self.levels.append(rms)
+
+
+async def test_state_feed_emits_turn_sequence():
+    # A normal turn walks idle -> listening -> thinking -> speaking -> idle so the
+    # TUI can mirror whose turn it is. The transcript rides the post-STT thinking.
+    emitter = RecordingEmitter()
+    skill = FakeSkill()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        state_emitter=emitter,
+    )
+
+    await pipeline.run()
+
+    assert emitter.states == [
+        "idle", "listening", "thinking", "thinking", "speaking", "idle",
+    ]
+    # The second thinking carries what was heard, for the "you said: ..." line.
+    assert emitter.fields[3] == {"transcript": "what time is it"}
+
+
+async def test_state_feed_reports_no_speech():
+    emitter = RecordingEmitter()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), FakeSkill(), FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=FakeSTT(transcript=""), state_emitter=emitter,
+    )
+
+    await pipeline.run()
+
+    # The empty initial capture triggers one mic reopen (a second listening/
+    # thinking pair) before giving up on no_speech.
+    assert emitter.states == [
+        "idle", "listening", "thinking", "listening", "thinking", "no_speech", "idle",
+    ]
+
+
+async def test_manual_listen_starts_turn_without_wake():
+    # tap-to-listen: request_listen() makes the loop enter a turn even though the
+    # detector never fires — the escape hatch when the wake word is missed.
+    detector = FakeDetector(fires=0)  # never wakes on its own
+    skill = FakeSkill()
+    pipeline = _pipeline(FakeAudioIn(3), detector, skill, FakeTTS(), FakeOut(), AudioArbiter())
+    pipeline.request_listen()
+
+    await pipeline.run()
+
+    assert skill.handled == [("what time is it", "general")]  # ran without a wake word
+
+
+async def test_cancel_stops_playback():
+    # tap-to-cancel / barge-in: cancel() aborts any playback immediately.
+    out = FakeOut()
+    pipeline = _pipeline(FakeAudioIn(0), FakeDetector(), FakeSkill(), FakeTTS(), out, AudioArbiter())
+
+    pipeline.cancel()
+
+    assert out.stops == 1
+
+
+async def test_low_rms_capture_skips_stt():
+    # A near-silent capture (FakeRecorder returns zeroed PCM) must not reach
+    # whisper, which hallucinates text on silence; it takes the no-speech path.
+    skill = FakeSkill()
+    stt = FakeSTT(transcript="phantom words")
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, FakeTTS(), out, AudioArbiter(),
+        stt=stt, no_speech_earcon=b"BEEP", min_transcribe_rms=50.0,
+    )
+
+    await pipeline.run()
+
+    assert stt.calls == []          # whisper never called on the silent capture
+    assert skill.handled == []      # nothing routed
+    assert out.played == [b"BEEP"]  # no-speech earcon instead
 
 
 async def test_busy_arbiter_skips_wake_detection():
@@ -147,6 +359,51 @@ async def test_wake_plays_ding_before_reply():
     await pipeline.run()
 
     assert out.played == [b"DING", b"AUDIO"]  # ding first, then the spoken reply
+
+
+async def test_wake_cue_picked_from_pool():
+    # With a pool of acknowledgements, the wake cue is one of them (chosen at random).
+    pool = [b"ACK1", b"ACK2", b"ACK3"]
+    skill = FakeSkill()
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, FakeTTS(), out, AudioArbiter(),
+        wake_earcons=pool,
+    )
+
+    await pipeline.run()
+
+    assert out.played[0] in pool          # the mic-open cue is from the pool
+    assert out.played[-1] == b"AUDIO"     # reply still spoken
+
+
+async def test_end_earcon_plays_at_mic_close():
+    # The mic-open cue plays on wake, the mic-close cue the instant recording ends
+    # (before the reply), so the listening window is audibly bracketed.
+    skill = FakeSkill()
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, FakeTTS(), out, AudioArbiter(),
+        wake_earcon=b"ACK", end_earcon=b"END",
+    )
+
+    await pipeline.run()
+
+    assert out.played == [b"ACK", b"END", b"AUDIO"]  # open, close, then the reply
+
+
+async def test_input_drained_after_wake_cue():
+    # After playing the spoken ack, buffered mic frames (its echo) are dropped
+    # before recording so the ack isn't transcribed into the command.
+    audio_in = FakeAudioIn(3)
+    pipeline = _pipeline(
+        audio_in, FakeDetector(), FakeSkill(), FakeTTS(), FakeOut(), AudioArbiter(),
+        wake_earcon=b"ACK",
+    )
+
+    await pipeline.run()
+
+    assert audio_in.drains == 1  # drained once, after the ack, before recording
 
 
 async def test_wake_without_earcon_plays_no_ding():
@@ -262,3 +519,205 @@ async def test_skill_exception_is_spoken_and_loop_survives():
     assert tts.spoke == ["Sorry, something went wrong."]
     assert out.played == [b"AUDIO"]
     assert detector.resets == 1  # turn completed; loop kept going
+
+
+async def test_empty_initial_capture_retries_once_then_routes():
+    # A beat-too-slow first attempt reopens the mic once; the retry's transcript
+    # runs the normal turn, and the recorder is called exactly twice.
+    detector = FakeDetector()
+    skill = FakeSkill()
+    recorder = FakeRecorder()
+    stt = FakeSTT(transcripts=["", "what time is it"])
+    pipeline = _pipeline(
+        FakeAudioIn(3), detector, skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, recorder=recorder,
+    )
+
+    await pipeline.run()
+
+    assert skill.handled == [("what time is it", "general")]  # retry routed
+    assert len(recorder.start_timeouts) == 2                  # initial + one retry
+    assert recorder.start_timeouts == [None, 6000]            # retry uses the window
+
+
+async def test_empty_initial_capture_retries_only_once():
+    # Both attempts silent: exactly one retry (recorder called twice), then the
+    # no-speech path — no third attempt, no routing.
+    detector = FakeDetector()
+    skill = FakeSkill()
+    recorder = FakeRecorder()
+    emitter = RecordingEmitter()
+    stt = FakeSTT(transcripts=["", ""])
+    pipeline = _pipeline(
+        FakeAudioIn(3), detector, skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, recorder=recorder, no_speech_earcon=b"BEEP", state_emitter=emitter,
+    )
+
+    await pipeline.run()
+
+    assert skill.handled == []                       # nothing routed
+    assert len(recorder.start_timeouts) == 2         # initial + one retry, no third
+    assert "no_speech" in emitter.states
+
+
+async def test_orchestration_failure_emits_error_state():
+    emitter = RecordingEmitter()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), RaisingSkill(), FakeTTS(), FakeOut(), AudioArbiter(),
+        state_emitter=emitter,
+    )
+
+    await pipeline.run()
+
+    assert "error" in emitter.states
+    assert "message" in emitter.fields[emitter.states.index("error")]
+
+
+class ReplyLoopSkill(FakeSkill):
+    """A skill whose reply itself asks for another reply (to test one-round-only)."""
+
+    async def handle_reply(self, cmd):
+        self.replies.append(cmd.text)
+        return SkillResult(speech="still there?", expects_reply=True)
+
+
+async def test_followup_captured_without_wake():
+    # After the first answer, a follow-up is recorded and handled without a new
+    # wake word, using the follow-up window as the record start timeout.
+    detector = FakeDetector(fires=1)
+    skill = FakeSkill()
+    recorder = FakeRecorder()
+    stt = FakeSTT(transcripts=["what time is it", "and the date"])
+    pipeline = _pipeline(
+        FakeAudioIn(6), detector, skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, recorder=recorder, conversation_enabled=True, followup_window_ms=6000,
+    )
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["what time is it", "and the date"]
+    assert detector.resets == 1                     # one wake, one conversation
+    assert recorder.start_timeouts[0] is None       # initial capture: no override
+    assert recorder.start_timeouts[1:] == [6000, 6000]  # follow-ups use the window
+
+
+async def test_silence_ends_conversation_and_new_wake_is_fresh():
+    detector = FakeDetector(fires=2)
+    skill = FakeSkill()
+    stt = FakeSTT(transcripts=["first question", "", "second question", ""])
+    pipeline = _pipeline(
+        FakeAudioIn(10), detector, skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True,
+    )
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["first question", "second question"]
+    assert detector.resets == 2      # two separate conversations
+    assert skill.histories[0] == []  # first conversation starts empty
+    assert skill.histories[1] == []  # second wake does not carry turn 1
+
+
+async def test_second_turn_carries_history():
+    skill = FakeSkill(speech="it is noon")
+    stt = FakeSTT(transcripts=["what time is it", "and tomorrow", ""])
+    pipeline = _pipeline(
+        FakeAudioIn(8), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True,
+    )
+
+    await pipeline.run()
+
+    assert skill.histories[0] == []
+    assert skill.histories[1] == [
+        Turn("user", "what time is it"),
+        Turn("assistant", "it is noon"),
+    ]
+
+
+async def test_history_cap_respected():
+    skill = FakeSkill(speech="ok")
+    stt = FakeSTT(transcripts=["one", "two", "three", ""])
+    pipeline = _pipeline(
+        FakeAudioIn(10), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True, max_history_turns=2,
+    )
+
+    await pipeline.run()
+
+    # Turn 3 sees only the last two messages: turn 2's user + assistant.
+    assert skill.histories[2] == [Turn("user", "two"), Turn("assistant", "ok")]
+
+
+async def test_expects_reply_routes_followup_to_handle_reply():
+    skill = FakeSkill(speech="confirm?", expects_reply=True)
+    stt = FakeSTT(transcripts=["turn off for 20 minutes", "confirm"])
+    tts = FakeTTS()
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=False,  # reply round runs even when disabled
+    )
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["turn off for 20 minutes"]  # routed once
+    assert skill.replies == ["confirm"]                # follow-up went to handle_reply
+    assert tts.spoke == ["confirm?", "reply handled"]  # prompt then reply outcome
+
+
+async def test_reply_is_one_round_only():
+    skill = ReplyLoopSkill(speech="confirm?", expects_reply=True)
+    stt = FakeSTT(transcripts=["turn off for 20 minutes", "confirm", "again"])
+    pipeline = _pipeline(
+        FakeAudioIn(8), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=False,
+    )
+
+    await pipeline.run()
+
+    assert skill.replies == ["confirm"]  # the reply's expects_reply is ignored
+
+
+async def test_silence_during_pending_reply_cancels():
+    skill = FakeSkill(speech="confirm?", expects_reply=True)
+    stt = FakeSTT(transcripts=["turn off for 20 minutes", ""])
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True,
+    )
+
+    await pipeline.run()
+
+    assert skill.replies == [""]  # silence delivered to the pending skill as cancel
+
+
+async def test_submit_text_carries_history_and_never_replies():
+    skill = FakeSkill(speech="Frank Herbert.", expects_reply=True)
+    pipeline = _pipeline(
+        FakeAudioIn(0), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        conversation_enabled=True,
+    )
+
+    await pipeline.submit_text("who wrote Dune")
+    await pipeline.submit_text("when did he die")
+
+    assert skill.histories[0] == []
+    assert skill.histories[1] == [
+        Turn("user", "who wrote Dune"),
+        Turn("assistant", "Frank Herbert."),
+    ]
+    assert skill.spokens == [False, False]  # typed path is not spoken
+    assert skill.replies == []              # typed expects_reply opens no reply round
+
+
+async def test_conversation_disabled_records_once_per_wake():
+    recorder = FakeRecorder()
+    skill = FakeSkill()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        recorder=recorder, conversation_enabled=False,
+    )
+
+    await pipeline.run()
+
+    assert recorder.start_timeouts == [None]  # only the initial capture, no follow-up

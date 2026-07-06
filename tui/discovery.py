@@ -26,6 +26,11 @@ log = logging.getLogger(__name__)
 
 DEFAULT_HOST = "http://localhost:11434"
 WAKE_MODEL_DIR = "models/wake"
+PIPER_VOICE_DIR = "models/piper"
+# Official Piper voice catalog + file host (HuggingFace). resolve/main/<path>
+# redirects to a CDN, so downloads must follow redirects.
+PIPER_VOICES_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/voices.json"
+PIPER_DL_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
 
 # Public model registry. Scraped (no official search API); isolated here so a markup
 # change degrades to empty results rather than crashing the TUI.
@@ -364,6 +369,98 @@ def clean_smoke_models(root: str = WAKE_MODEL_DIR) -> list[str]:
     return removed
 
 
+def voice_options(root: str = PIPER_VOICE_DIR, **_: object) -> list[tuple[str, str]]:
+    """(name, path) for each installed Piper voice, e.g. models/piper/*.onnx.
+    The basename (minus .onnx) labels the picker; the path is the stored value."""
+    return [
+        (os.path.splitext(os.path.basename(p))[0], p)
+        for p in sorted(glob.glob(os.path.join(root, "*.onnx")))
+    ]
+
+
+@dataclass(frozen=True)
+class RegistryVoice:
+    """One downloadable Piper voice from the catalog."""
+
+    key: str
+    quality: str
+    num_speakers: int
+    size_bytes: int
+    onnx_path: str  # repo path of the .onnx (under PIPER_DL_BASE)
+    config_path: str  # repo path of the matching .onnx.json
+    installed: bool = False
+
+
+async def piper_voice_catalog() -> list[RegistryVoice]:
+    """English Piper voices from the official catalog (cached), sorted by key and
+    flagged as installed when already in models/piper/. Empty on any fetch error."""
+    data = _cache_get(PIPER_VOICES_URL)
+    if data is None:
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                resp = await client.get(PIPER_VOICES_URL)
+                resp.raise_for_status()
+                data = resp.json()
+        except (httpx.HTTPError, _json.JSONDecodeError) as exc:
+            log.warning("Piper voice catalog fetch failed: %s", exc)
+            return []
+        _cache_put(PIPER_VOICES_URL, data)
+    have = {os.path.basename(p) for p in glob.glob(os.path.join(PIPER_VOICE_DIR, "*.onnx"))}
+    voices: list[RegistryVoice] = []
+    for key, meta in data.items():
+        if not meta.get("language", {}).get("code", "").startswith("en"):
+            continue
+        files = meta.get("files", {})
+        onnx = next((f for f in files if f.endswith(".onnx")), None)
+        config = next((f for f in files if f.endswith(".onnx.json")), None)
+        if not onnx or not config:
+            continue
+        size = files[onnx].get("size_bytes", 0) + files[config].get("size_bytes", 0)
+        voices.append(
+            RegistryVoice(
+                key=key,
+                quality=meta.get("quality", ""),
+                num_speakers=meta.get("num_speakers", 1),
+                size_bytes=size,
+                onnx_path=onnx,
+                config_path=config,
+                installed=os.path.basename(onnx) in have,
+            )
+        )
+    return sorted(voices, key=lambda v: v.key)
+
+
+async def download_voice(voice: RegistryVoice) -> AsyncIterator[PullProgress]:
+    """Stream a voice's .onnx + .onnx.json into models/piper/, yielding combined
+    progress. Writes to a .part temp then renames, so a failed download leaves no
+    half-file that the picker would list."""
+    os.makedirs(PIPER_VOICE_DIR, exist_ok=True)
+    done = 0
+    async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
+        for repo_path in (voice.onnx_path, voice.config_path):
+            dest = os.path.join(PIPER_VOICE_DIR, os.path.basename(repo_path))
+            tmp = dest + ".part"
+            async with client.stream("GET", PIPER_DL_BASE + repo_path) as resp:
+                resp.raise_for_status()
+                with open(tmp, "wb") as fh:
+                    async for chunk in resp.aiter_bytes():
+                        fh.write(chunk)
+                        done += len(chunk)
+                        yield PullProgress(
+                            status=f"downloading {voice.key}", completed=done, total=voice.size_bytes
+                        )
+            os.replace(tmp, dest)
+    yield PullProgress(status=f"installed {voice.key}", completed=voice.size_bytes,
+                       total=voice.size_bytes)
+
+
+def ack_choices(**_: object) -> list[tuple[str, str]]:
+    """Curated wake-acknowledgement phrases for the random pool. Kept to
+    espeak-friendly interjections so Piper speaks a natural cue rather than
+    spelling the letters. (label, phrase) — the phrase is both label and value."""
+    return [(p, p) for p in ("hmm?", "uh huh?", "hmm hmm?", "yeah?")]
+
+
 def log_levels(**_: object) -> list[str]:
     return ["DEBUG", "INFO", "WARNING", "ERROR"]
 
@@ -405,3 +502,11 @@ def current_value(config: Config, key: tuple[str, ...]) -> str:
     for part in key:
         obj = getattr(obj, part)
     return "" if obj is None else str(obj)
+
+
+def current_value_list(config: Config, key: tuple[str, ...]) -> list:
+    """Walk a dotted key expected to hold a list (e.g. tts.ack_phrases)."""
+    obj: object = config
+    for part in key:
+        obj = getattr(obj, part)
+    return list(obj) if obj else []
