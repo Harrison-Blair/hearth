@@ -32,7 +32,11 @@ def write_fields(path: str, values: dict[tuple[str, ...], object]) -> None:
     for key, value in values.items():
         node = data
         for part in key[:-1]:
-            node = node.setdefault(part, {})
+            child = node.get(part)
+            if not isinstance(child, dict):
+                child = {}
+                node[part] = child
+            node = child
         node[key[-1]] = value
     with open(path, "w") as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)

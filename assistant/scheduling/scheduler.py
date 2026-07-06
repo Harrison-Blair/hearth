@@ -35,6 +35,7 @@ class ReminderScheduler:
         arbiter: AudioArbiter,
         *,
         poll_seconds: float = 1.0,
+        max_attempts: int = 3,
         now: Callable[[], float] = time.time,
     ) -> None:
         self._store = store
@@ -42,7 +43,12 @@ class ReminderScheduler:
         self._audio_out = audio_out
         self._arbiter = arbiter
         self._poll_seconds = poll_seconds
+        self._max_attempts = max_attempts
         self._now = now
+        # Per-reminder failure counter: a transient audio error retries on the next
+        # poll instead of losing the reminder, but only up to _max_attempts so an
+        # un-speakable one can't loop forever.
+        self._attempts: dict[int, int] = {}
         # The first poll returns the whole backlog that came due while we were off;
         # coalesce it into one announcement. Steady-state polls fire one at a time.
         self._first_poll = True
@@ -60,16 +66,21 @@ class ReminderScheduler:
             await asyncio.sleep(self._poll_seconds)
 
     async def _fire(self, reminder) -> None:
-        # Delete in `finally` so a failed announcement still clears the row: a due
-        # reminder left in the store is returned by every poll, an unkillable loop.
         try:
             log.info("Reminder due: %r", reminder.speech)
             async with self._arbiter.hold("reminder"):
                 await self._audio_out.play(await self._tts.synthesize(reminder.speech))
         except Exception as exc:  # noqa: BLE001 - one failure must not kill the loop
             log.error("Failed to fire reminder %s: %s", reminder.id, exc)
-        finally:
+            self._attempts[reminder.id] = self._attempts.get(reminder.id, 0) + 1
+            # Retry on the next poll until we've exhausted the budget; only then drop
+            # the row, so a permanently un-speakable reminder can't loop forever.
+            if self._attempts[reminder.id] >= self._max_attempts:
+                self._store.delete(reminder.id)
+                del self._attempts[reminder.id]
+        else:
             self._store.delete(reminder.id)
+            self._attempts.pop(reminder.id, None)
 
     async def _fire_summary(self, due) -> None:
         try:
@@ -78,7 +89,9 @@ class ReminderScheduler:
             async with self._arbiter.hold("reminder"):
                 await self._audio_out.play(await self._tts.synthesize(text))
         except Exception as exc:  # noqa: BLE001 - one failure must not kill the loop
+            # Don't delete: _first_poll flips to False, so the backlog is re-fired
+            # individually via _fire (which carries per-id retry) on the next poll.
             log.error("Failed to announce catch-up summary: %s", exc)
-        finally:
+        else:
             for reminder in due:
                 self._store.delete(reminder.id)

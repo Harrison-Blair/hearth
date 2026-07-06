@@ -1,5 +1,8 @@
 """Unit tests for the daemon-side ControlChannel line protocol (stdin verbs)."""
 
+import asyncio
+
+from assistant.core.arbiter import AudioArbiter
 from assistant.core.control import ControlChannel
 
 
@@ -41,7 +44,7 @@ class FakeSpeaker:
 
 def _channel():
     p, out, speaker = FakePipeline(), FakeOut(), FakeSpeaker()
-    return ControlChannel(p, out, speaker), p, out
+    return ControlChannel(p, out, speaker, AudioArbiter()), p, out
 
 
 async def test_text_verb_submits_command():
@@ -107,3 +110,18 @@ async def test_unknown_verb_is_ignored():
     ch, p, out = _channel()
     await ch.dispatch("FLOOP nonsense")  # no raise
     assert p.texts == [] and p.listens == 0 and p.cancels == 0 and out.stops == 0
+
+
+async def test_say_waits_for_arbiter_before_speaking():
+    # SAY must hold the AudioArbiter so a voice test cannot play over an
+    # in-progress pipeline reply. While another holder owns the arbiter, the
+    # speaker must not be called.
+    arbiter = AudioArbiter()
+    speaker = FakeSpeaker()
+    ch = ControlChannel(FakePipeline(), FakeOut(), speaker, arbiter)
+    async with arbiter.hold("pipeline"):
+        say = asyncio.create_task(ch.dispatch("SAY hello"))
+        await asyncio.sleep(0)  # let the task run up to the arbiter
+        assert speaker.said == []  # blocked: reply still owns the audio device
+    await say
+    assert speaker.said == [("hello", None)]  # spoke once the hold released

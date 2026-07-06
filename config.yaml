@@ -50,11 +50,12 @@ agent:
 tts:
   voice: en_US-lessac-medium
   model_path: models/piper/en_US-lessac-medium.onnx
-  length_scale: 1.0
+  length_scale: 1
   ack_phrases:
-    - hmm?
-    - uh huh?
-    - hmm hmm?
+  - hmm?
+  - uh huh?
+  - hmm hmm?
+  - yeah?
 storage:
   db_path: assistant.db
 scheduling:
@@ -87,5 +88,20 @@ conversation:
   enabled: true
   followup_window_ms: 6000
   max_history_turns: 12
+  followup_cue_enabled: true
+  followup_cue_timeout_s: 4.0
+  signoff_enabled: true
+  signoff_timeout_s: 4.0
+  end_phrases:
+  - goodbye
+  - bye
+  - that's all
+  - that is all
+  - i'm done
+  - i am done
+  - we're done
+  - we are done
+  - nevermind
+  - never mind
 logging:
   level: INFO

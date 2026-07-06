@@ -19,9 +19,10 @@ from assistant.audio.processing import normalize_peak
 from assistant.audio.recorder import VadRecorder
 from assistant.core.arbiter import AudioArbiter
 from assistant.core.conversation import Conversation
-from assistant.core.events import Command, WakeEvent
+from assistant.core.events import Command, Turn, WakeEvent
 from assistant.core.orchestrator import Orchestrator
 from assistant.core.state import NullStateEmitter
+from assistant.llm.base import LLMProvider
 from assistant.stt.base import SpeechToText
 from assistant.tts.base import TextToSpeech
 from assistant.wake.base import WakeDetector
@@ -60,6 +61,14 @@ class VoicePipeline:
         conversation_enabled: bool = True,
         followup_window_ms: int = 6000,
         max_history_turns: int = 12,
+        llm: LLMProvider | None = None,
+        followup_cue_enabled: bool = False,
+        followup_cue_timeout_s: float = 4.0,
+        followup_cue_prompt: str = "",
+        signoff_enabled: bool = False,
+        signoff_timeout_s: float = 4.0,
+        signoff_prompt: str = "",
+        end_phrases: list[str] | None = None,
         state_emitter=None,
     ) -> None:
         self._audio_in = audio_in
@@ -97,6 +106,21 @@ class VoicePipeline:
         self._conversation_enabled = conversation_enabled
         self._followup_window_ms = followup_window_ms
         self._max_history_turns = max_history_turns
+        # Context-aware spoken cues, generated live from the conversation history.
+        # Both need an LLM; without one (tests / no-LLM deploy) they no-op. The
+        # follow-up cue replaces the nonsensical repeated wake ack at a follow-up
+        # mic-open; the sign-off gives an explicitly-ended conversation a spoken
+        # close. Both degrade to silence on LLM timeout/failure, so the offline
+        # path is unchanged.
+        self._llm = llm
+        self._followup_cue_enabled = followup_cue_enabled
+        self._followup_cue_timeout_s = followup_cue_timeout_s
+        self._followup_cue_prompt = followup_cue_prompt
+        self._signoff_enabled = signoff_enabled
+        self._signoff_timeout_s = signoff_timeout_s
+        self._signoff_prompt = signoff_prompt
+        # Normalized set of utterances that explicitly close a conversation.
+        self._end_phrases = [self._normalize_text(p) for p in (end_phrases or [])]
         # One rolling history for the typed (TUI chat) session, so daemon-lifetime
         # typed turns carry context. Disabled -> each typed turn is stateless.
         self._typed_conversation = Conversation(max_history_turns)
@@ -144,25 +168,30 @@ class VoicePipeline:
             preroll.append(frame)
             event = self._detector.process(frame)
             if event is None:
-                if self._listen_event.is_set():
-                    self._listen_event.clear()
-                    log.info("Manual listen requested (tap-to-listen)")
-                    event = WakeEvent(name="manual", score=1.0)
-                else:
+                if not self._listen_event.is_set():
                     continue
+                log.info("Manual listen requested (tap-to-listen)")
+                event = WakeEvent(name="manual", score=1.0)
             else:
                 log.info("Wake word detected: %s (%.2f)", event.name, event.score)
+            self._listen_event.clear()  # consumed either way; a real wake clears a racing tap
             # Own the audio device for the whole turn so a reminder can't play
             # over the capture or our reply; it waits until we release.
             async with self._arbiter.hold("pipeline"):
-                pcm = await self._listen(frames, prefix=b"".join(preroll))
+                pcm = await self._listen(
+                    frames, prefix=b"".join(preroll), open_cue=self._pick_wake_ack()
+                )
                 preroll.clear()
                 transcript = await self._capture_to_text(pcm)
                 if not transcript:
                     # A beat too slow to start: reopen the mic exactly once, using
                     # the follow-up window, so the user can just repeat without
                     # re-waking. One retry only, never a loop.
-                    pcm = await self._listen(frames, start_timeout_ms=self._followup_window_ms)
+                    pcm = await self._listen(
+                        frames,
+                        start_timeout_ms=self._followup_window_ms,
+                        open_cue=self._pick_wake_ack(),
+                    )
                     transcript = await self._capture_to_text(pcm)
                 if transcript:
                     log.info("Heard: %r", transcript)
@@ -206,38 +235,77 @@ class VoicePipeline:
         conv = Conversation(self._max_history_turns)
         reply_skill = None
         while True:
+            # A context-aware follow-up cue, generated while the reply is spoken so
+            # it's ready by the time the follow-up mic opens (no added mic latency).
+            cue_task: asyncio.Task | None = None
+
+            def start_cue(result, transcript=transcript):
+                nonlocal cue_task
+                if self._followup_cue_enabled and self._llm is not None and result.speech:
+                    turns = conv.history() + [
+                        Turn("user", transcript),
+                        Turn("assistant", result.speech),
+                    ]
+                    cue_task = asyncio.create_task(self._make_cue(turns))
+
             if reply_skill is not None:
-                result = await self._dispatch_reply(reply_skill, transcript, conv)
+                result = await self._dispatch_reply(
+                    reply_skill, transcript, conv, on_reply=start_cue
+                )
                 reply_skill = None
                 if result is not None and result.expects_reply:
                     log.warning("Reply result set expects_reply; ignored (one round only)")
             else:
-                result, skill = await self._handle(transcript, conv, spoken=True)
+                result, skill = await self._handle(
+                    transcript, conv, spoken=True, on_reply=start_cue
+                )
                 if result is not None and result.expects_reply and skill is not None:
                     reply_skill = skill
             if reply_skill is None and not self._conversation_enabled:
+                self._drop_cue(cue_task)
                 return
-            transcript = await self._capture_followup(frames)
+            open_cue = await self._collect_cue(cue_task)
+            transcript = await self._capture_followup(frames, open_cue=open_cue)
             if not transcript:
+                # Silence closes the conversation quietly — the descending tone at
+                # mic-close already signalled the end; no spoken farewell.
                 if reply_skill is not None:
                     # Silence during a pending reply: deliver it as a cancel.
                     await self._dispatch_reply(reply_skill, "", conv)
                 return
+            if reply_skill is None and self._is_end_phrase(transcript):
+                # The user explicitly ended the conversation ("goodbye" / "I'm
+                # done"): speak a context-aware farewell instead of routing it.
+                await self._maybe_signoff(conv)
+                return
+            # A follow-up walks through _listen (listening -> thinking) with no
+            # transcript; re-emit thinking with the heard text so the TUI's "you
+            # said" line fills for follow-ups too, not just the first turn.
+            self._state_emitter.state("thinking", transcript=transcript)
 
-    async def _capture_followup(self, frames):
-        pcm = await self._listen(frames, start_timeout_ms=self._followup_window_ms)
+    async def _capture_followup(self, frames, open_cue: bytes | None = None):
+        pcm = await self._listen(
+            frames, start_timeout_ms=self._followup_window_ms, open_cue=open_cue
+        )
         return await self._capture_to_text(pcm)
 
-    async def _listen(self, frames, *, prefix: bytes = b"", start_timeout_ms=None) -> bytes:
-        """One listening window: play the mic-open cue (a random acknowledgement),
-        drop its echo, record until end-of-speech, then play the mic-closed cue.
-        Returns raw PCM.
+    def _pick_wake_ack(self) -> bytes | None:
+        """A random pre-cached wake acknowledgement ("hmm?"), or None if the pool
+        is empty (e.g. tests)."""
+        return random.choice(self._wake_earcons) if self._wake_earcons else None
 
-        The open cue doubles as the follow-up "mic open" prompt. Draining after it
-        keeps the cue's own speaker bleed out of the recording."""
+    async def _listen(
+        self, frames, *, prefix: bytes = b"", start_timeout_ms=None, open_cue: bytes | None = None
+    ) -> bytes:
+        """One listening window: play the caller's mic-open cue, drop its echo,
+        record until end-of-speech, then play the mic-closed cue. Returns raw PCM.
+
+        The caller chooses the open cue (a wake ack on first wake, a context-aware
+        cue on a follow-up, or None). Draining after it keeps the cue's own speaker
+        bleed out of the recording."""
         self._cancel_event.clear()  # a cancel only abandons the turn it arrives in
-        if self._wake_earcons:
-            await self._play(random.choice(self._wake_earcons))
+        if open_cue:
+            await self._play(open_cue)
         self._audio_in.drain()
         self._state_emitter.state("listening")
         pcm = await self._recorder.record(
@@ -267,7 +335,7 @@ class VoicePipeline:
             pcm = normalize_peak(pcm, self._normalize_target_peak, self._normalize_rms_floor)
         return await self._stt.transcribe(pcm)
 
-    async def _handle(self, transcript, conv, *, spoken):
+    async def _handle(self, transcript, conv, *, spoken, on_reply=None):
         try:
             result, skill = await self._orchestrator.handle(
                 transcript, conv.history(), spoken=spoken
@@ -282,13 +350,15 @@ class VoicePipeline:
             await self._speak("Sorry, I can't help with that yet.")
             return None, None
         log.info("Reply: %r", result.speech)
+        if on_reply is not None:
+            on_reply(result)  # kick off cue generation to overlap with playback
         await self._speak(result.speech)
         conv.add("user", transcript)
         if result.speech:
             conv.add("assistant", result.speech)
         return result, skill
 
-    async def _dispatch_reply(self, skill, transcript, conv):
+    async def _dispatch_reply(self, skill, transcript, conv, on_reply=None):
         log.info("Routing reply to skill %r", skill.name)
         try:
             result = await skill.handle_reply(Command(transcript, history=conv.history()))
@@ -297,12 +367,94 @@ class VoicePipeline:
             await self._speak("Sorry, something went wrong.")
             return None
         log.info("Reply: %r", result.speech)
+        if on_reply is not None:
+            on_reply(result)  # kick off cue generation to overlap with playback
         await self._speak(result.speech)
         if transcript:
             conv.add("user", transcript)
         if result.speech:
             conv.add("assistant", result.speech)
         return result
+
+    async def _make_cue(self, history: list[Turn]) -> bytes | None:
+        """Generate and synthesize a short context-aware follow-up cue. Returns the
+        cue PCM, or None on empty output / any LLM or TTS failure (silent reopen)."""
+        try:
+            text = await self._llm.complete(
+                self._render_history(history), system=self._followup_cue_prompt, label="cue"
+            )
+        except Exception as exc:  # noqa: BLE001 - LLM failure must degrade to a silent reopen
+            log.warning("Follow-up cue generation failed: %s", exc)
+            return None
+        text = text.strip()
+        if not text:
+            return None
+        try:
+            return await self._tts.synthesize(text)
+        except Exception as exc:  # noqa: BLE001 - synth failure must degrade to a silent reopen
+            log.warning("Follow-up cue synthesis failed: %s", exc)
+            return None
+
+    async def _collect_cue(self, cue_task) -> bytes | None:
+        """Await the pending cue up to its budget so it never delays mic-open;
+        drop it (silent reopen) if it isn't ready in time."""
+        if cue_task is None:
+            return None
+        try:
+            return await asyncio.wait_for(cue_task, self._followup_cue_timeout_s)
+        except TimeoutError:
+            log.info(
+                "Follow-up cue not ready in %.1fs; opening mic silently",
+                self._followup_cue_timeout_s,
+            )
+            cue_task.cancel()
+            return None
+        except Exception as exc:  # noqa: BLE001 - never block the loop on the cue
+            log.warning("Follow-up cue failed: %s", exc)
+            return None
+
+    @staticmethod
+    def _drop_cue(cue_task) -> None:
+        if cue_task is not None:
+            cue_task.cancel()
+
+    async def _maybe_signoff(self, conv) -> None:
+        """Speak a short context-aware farewell when the user explicitly ends the
+        conversation. No-op (silent) without an LLM or on timeout/failure."""
+        if not (self._signoff_enabled and self._llm is not None):
+            return
+        try:
+            text = await asyncio.wait_for(
+                self._llm.complete(
+                    self._render_history(conv.history()),
+                    system=self._signoff_prompt,
+                    label="signoff",
+                ),
+                self._signoff_timeout_s,
+            )
+        except TimeoutError:
+            log.info("Sign-off not ready in %.1fs; ending silently", self._signoff_timeout_s)
+            return
+        except Exception as exc:  # noqa: BLE001 - never block the ending on the LLM
+            log.warning("Sign-off generation failed: %s", exc)
+            return
+        text = text.strip()
+        if text:
+            await self._speak(text)
+
+    @staticmethod
+    def _render_history(history: list[Turn]) -> str:
+        return "\n".join(f"{t.role.capitalize()}: {t.content}" for t in history)
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Lowercase and strip to alphanumerics + single spaces, so end-phrase
+        matching ignores punctuation and casing from the transcript."""
+        return " ".join("".join(c if c.isalnum() else " " for c in text.lower()).split())
+
+    def _is_end_phrase(self, transcript: str) -> bool:
+        norm = self._normalize_text(transcript)
+        return any(phrase in norm for phrase in self._end_phrases)
 
     async def _speak(self, text: str) -> None:
         # Synthesize and play sentence by sentence so the first audio starts before

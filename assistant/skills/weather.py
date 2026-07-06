@@ -19,15 +19,10 @@ from typing import Callable
 
 from assistant.core.events import Command, Intent, SkillResult
 from assistant.llm.base import LLMProvider
-from assistant.skills.base import Skill
+from assistant.skills.base import Skill, local_now
 from assistant.weather.base import Forecast, WeatherProvider
 
 log = logging.getLogger(__name__)
-
-
-def _local_now() -> datetime:
-    return datetime.now().astimezone()
-
 
 _MAX_LOCATION_CHARS = 60  # a location is echoed into a geocoding query and speech: cap it
 
@@ -77,7 +72,7 @@ class WeatherSkill(Skill):
         home_lat: float,
         home_lon: float,
         home_name: str,
-        now: Callable[[], datetime] = _local_now,
+        now: Callable[[], datetime] = local_now,
     ) -> None:
         self._weather = weather
         self._llm = llm

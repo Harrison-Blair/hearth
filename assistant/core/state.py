@@ -9,6 +9,9 @@ the reverse) and needs no new transport.
 Each line is ``@@STATE {json}\\n`` where the JSON carries at least ``state`` and,
 for the live level meter, a ``level`` (int16 RMS). The feed is best-effort: a
 write failure must never break a turn, so every emit swallows its errors.
+
+The reader side (parsing these lines back into payloads) lives in the TUI,
+``tui/logparse.py``, to keep the ``tui`` -> ``assistant`` dependency one-directional.
 """
 
 from __future__ import annotations
@@ -56,16 +59,3 @@ class NullStateEmitter:
 
     def level(self, rms: float) -> None:
         pass
-
-
-def parse(line: str) -> dict | None:
-    """Parse a ``@@STATE {json}`` line into its payload, or None if it isn't one.
-
-    Shared with the TUI so the wire format lives in exactly one place."""
-    if not line.startswith(MARKER):
-        return None
-    try:
-        payload = json.loads(line[len(MARKER):])
-    except (ValueError, TypeError):
-        return None
-    return payload if isinstance(payload, dict) else None

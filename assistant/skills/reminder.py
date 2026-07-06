@@ -20,13 +20,8 @@ from assistant.nlu.timespec import (
     parse_management,
     resolve_time,
 )
-from assistant.skills.base import Skill
+from assistant.skills.base import Skill, local_now
 from assistant.storage.reminders import Reminder, ReminderStore
-
-
-def _local_now() -> datetime:
-    return datetime.now().astimezone()
-
 
 _TEXT_ARG = {
     "type": "object",
@@ -68,7 +63,7 @@ class ReminderSkill(Skill):
         self,
         store: ReminderStore,
         llm: LLMProvider,
-        now: Callable[[], datetime] = _local_now,
+        now: Callable[[], datetime] = local_now,
     ) -> None:
         self._store = store
         self._llm = llm
@@ -76,7 +71,7 @@ class ReminderSkill(Skill):
 
     async def handle(self, cmd: Command, intent: Intent) -> SkillResult:
         if intent.type == "timer":
-            return self._handle_timer(cmd.text)
+            return self._handle_timer(intent.slots.get("duration") or cmd.text)
         if intent.type == "list_reminders":
             return self._handle_list()
         if intent.type == "manage_reminders":

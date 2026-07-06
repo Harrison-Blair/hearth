@@ -52,11 +52,47 @@ async def test_fires_due_deletes_and_skips_future():
     store.close()
 
 
-async def test_failed_announcement_still_deletes_no_refire():
-    # If play raises, the reminder must still be removed: a row left in the store
-    # is returned by every poll, an unkillable re-fire loop.
+async def test_transient_failure_retries_then_speaks():
+    # A transient TTS error must not lose the reminder: it survives the failed poll
+    # and is spoken (then deleted) on the retry.
     store = ReminderStore(":memory:")
-    store.add(50.0, "boom", created_at=0.0)
+    store.add(50.0, "boom-once", created_at=0.0)
+
+    class FlakyTTS:
+        def __init__(self):
+            self.calls = 0
+            self.spoke = []
+
+        async def synthesize(self, text):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("tts busy")
+            self.spoke.append(text)
+            return text.encode()
+
+    tts, out = FlakyTTS(), FakeOut()
+    sched = ReminderScheduler(
+        store, tts, out, AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0
+    )
+
+    # First poll: synthesize raises -> the row survives for a retry.
+    await sched._fire(store.due(now=100.0)[0])
+    assert store.due(now=100.0) != []
+    assert out.played == []
+
+    # Second poll: synthesize succeeds -> spoken and deleted.
+    await sched._fire(store.due(now=100.0)[0])
+    assert tts.spoke == ["boom-once"]
+    assert out.played == [b"boom-once"]
+    assert store.due(now=100.0) == []
+    store.close()
+
+
+async def test_permanent_failure_deleted_after_max_attempts():
+    # An un-speakable reminder is dropped after exactly max_attempts polls, not
+    # before (so it can't loop forever, but transient failures still get retries).
+    store = ReminderStore(":memory:")
+    store.add(50.0, "always-boom", created_at=0.0)
     tts = FakeTTS()
 
     class BoomOut:
@@ -64,18 +100,15 @@ async def test_failed_announcement_still_deletes_no_refire():
             raise RuntimeError("audio device gone")
 
     sched = ReminderScheduler(
-        store, tts, BoomOut(), AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0
+        store, tts, BoomOut(), AudioArbiter(), poll_seconds=0.01, max_attempts=3, now=lambda: 100.0
     )
 
-    task = asyncio.create_task(sched.run())
-    await _run_until(lambda: store.due(now=100.0) == [])
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    for _ in range(2):
+        await sched._fire(store.due(now=100.0)[0])
+        assert store.due(now=100.0) != []  # still present before the budget is spent
 
-    assert store.due(now=100.0) == []  # deleted despite the playback failure
+    await sched._fire(store.due(now=100.0)[0])  # third attempt reaches max_attempts
+    assert store.due(now=100.0) == []
     store.close()
 
 

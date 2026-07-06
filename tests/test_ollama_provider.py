@@ -25,6 +25,7 @@ async def test_complete_sends_prompt_and_strips_response(monkeypatch):
             "stream": False,
             "options": {"num_ctx": 8192},
             "system": "sys",
+            "think": False,
         }
         return httpx.Response(200, json={"response": "  hello there  "})
 
@@ -43,13 +44,13 @@ async def test_complete_json_flag_sets_format_and_disables_thinking(monkeypatch)
     assert await OllamaProvider("m").complete("hi", json=True) == "{}"
 
 
-async def test_complete_non_json_omits_think(monkeypatch):
+async def test_complete_non_json_honors_think(monkeypatch):
     def handler(request):
-        assert "think" not in json.loads(request.content)
+        assert json.loads(request.content)["think"] is True
         return httpx.Response(200, json={"response": "ok"})
 
     _patch_transport(monkeypatch, handler)
-    assert await OllamaProvider("m").complete("hi") == "ok"
+    assert await OllamaProvider("m", think=True).complete("hi") == "ok"
 
 
 async def test_complete_logs_labeled_trace(monkeypatch, caplog):

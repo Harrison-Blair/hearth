@@ -140,10 +140,30 @@ class FakeOut:
         self.stops += 1
 
 
+class FakeLLM:
+    """Records completions and returns a fixed text (or raises), so the cue and
+    sign-off paths can be exercised without a real model. Each call logs
+    (prompt, system, label)."""
+
+    def __init__(self, text="take care", raises=False):
+        self.calls = []
+        self._text = text
+        self._raises = raises
+
+    async def complete(self, prompt, *, system=None, json=False, label=""):
+        self.calls.append((prompt, system, label))
+        if self._raises:
+            raise RuntimeError("llm down")
+        return self._text
+
+
 def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
               recorder=None, no_speech_earcon=b"", wake_earcon=b"", wake_earcons=None,
               end_earcon=b"", conversation_enabled=False, followup_window_ms=6000,
-              max_history_turns=12, min_transcribe_rms=0.0, state_emitter=None):
+              max_history_turns=12, min_transcribe_rms=0.0, state_emitter=None,
+              llm=None, followup_cue_enabled=False, followup_cue_prompt="cue",
+              followup_cue_timeout_s=4.0, signoff_enabled=False, signoff_prompt="bye",
+              signoff_timeout_s=4.0, end_phrases=None):
     # Tests pass a single wake_earcon for convenience; the pipeline takes a pool.
     if wake_earcons is None:
         wake_earcons = [wake_earcon] if wake_earcon else []
@@ -157,6 +177,14 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
         conversation_enabled=conversation_enabled,
         followup_window_ms=followup_window_ms,
         max_history_turns=max_history_turns,
+        llm=llm,
+        followup_cue_enabled=followup_cue_enabled,
+        followup_cue_timeout_s=followup_cue_timeout_s,
+        followup_cue_prompt=followup_cue_prompt,
+        signoff_enabled=signoff_enabled,
+        signoff_timeout_s=signoff_timeout_s,
+        signoff_prompt=signoff_prompt,
+        end_phrases=end_phrases,
         state_emitter=state_emitter,
     )
 
@@ -710,6 +738,41 @@ async def test_submit_text_carries_history_and_never_replies():
     assert skill.replies == []              # typed expects_reply opens no reply round
 
 
+async def test_racing_tap_cleared_by_real_wake():
+    # A tap-to-listen flag set while a real wake fires must be consumed by that
+    # wake, not leak into a spurious extra turn on a later silent frame.
+    detector = FakeDetector(fires=1)  # wakes on the first frame
+    skill = FakeSkill()
+    pipeline = _pipeline(FakeAudioIn(3), detector, skill, FakeTTS(), FakeOut(), AudioArbiter())
+    pipeline.request_listen()  # racing tap set before the wake
+
+    await pipeline.run()
+
+    assert skill.handled == [("what time is it", "general")]  # exactly one turn
+    assert not pipeline._listen_event.is_set()                # tap consumed by the wake
+
+
+async def test_followup_thinking_carries_transcript():
+    # Each follow-up re-emits thinking with its transcript, so the TUI's "you said"
+    # line fills for follow-ups, not just the first turn.
+    emitter = RecordingEmitter()
+    skill = FakeSkill()
+    stt = FakeSTT(transcripts=["what time is it", "and the date", ""])
+    pipeline = _pipeline(
+        FakeAudioIn(8), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True, state_emitter=emitter,
+    )
+
+    await pipeline.run()
+
+    thinking_transcripts = [
+        f.get("transcript")
+        for s, f in zip(emitter.states, emitter.fields)
+        if s == "thinking" and "transcript" in f
+    ]
+    assert thinking_transcripts == ["what time is it", "and the date"]
+
+
 async def test_conversation_disabled_records_once_per_wake():
     recorder = FakeRecorder()
     skill = FakeSkill()
@@ -721,3 +784,118 @@ async def test_conversation_disabled_records_once_per_wake():
     await pipeline.run()
 
     assert recorder.start_timeouts == [None]  # only the initial capture, no follow-up
+
+
+async def test_followup_does_not_replay_wake_ack():
+    # The wake ack ("hmm?") plays only on the first wake. A follow-up mic-open no
+    # longer replays it (which read as acknowledging nothing after an answer).
+    skill = FakeSkill()
+    stt = FakeSTT(transcripts=["what time is it", "and the date", ""])
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(8), FakeDetector(), skill, FakeTTS(), out, AudioArbiter(),
+        stt=stt, conversation_enabled=True, wake_earcon=b"ACK",
+    )  # follow-up cue disabled -> the follow-up mic opens silently
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["what time is it", "and the date"]
+    assert out.played.count(b"ACK") == 1  # only the first wake, never the follow-ups
+
+
+async def test_followup_cue_generated_and_spoken_when_enabled():
+    # With a cue LLM, the follow-up mic-open speaks a context-aware cue instead of
+    # the wake ack. The cue is generated (label "cue") and synthesized.
+    skill = FakeSkill(speech="it is noon")
+    stt = FakeSTT(transcripts=["what time is it", ""])
+    tts = FakeTTS()
+    llm = FakeLLM("anything else")
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True, llm=llm,
+        followup_cue_enabled=True,
+    )
+
+    await pipeline.run()
+
+    assert "anything else" in tts.spoke                         # cue synthesized
+    assert any(label == "cue" for (_, _, label) in llm.calls)   # via the cue path
+
+
+async def test_followup_cue_degrades_on_llm_failure():
+    # A cue LLM that raises must not break the loop: the follow-up mic just opens
+    # silently and the conversation continues.
+    skill = FakeSkill()
+    stt = FakeSTT(transcripts=["what time is it", "and the date", ""])
+    out = FakeOut()
+    llm = FakeLLM(raises=True)
+    pipeline = _pipeline(
+        FakeAudioIn(8), FakeDetector(), skill, FakeTTS(), out, AudioArbiter(),
+        stt=stt, conversation_enabled=True, llm=llm,
+        followup_cue_enabled=True, wake_earcon=b"ACK",
+    )
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["what time is it", "and the date"]
+    assert out.played.count(b"ACK") == 1  # still no ack replayed on the follow-up
+
+
+async def test_signoff_on_explicit_end_phrase():
+    # Saying an end phrase ("goodbye") closes the conversation with a context-aware
+    # farewell, and the phrase itself is not routed to a skill.
+    skill = FakeSkill(speech="it is noon")
+    stt = FakeSTT(transcripts=["what time is it", "goodbye"])
+    tts = FakeTTS()
+    llm = FakeLLM("take care")
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True, llm=llm,
+        signoff_enabled=True, end_phrases=["goodbye"],
+    )
+
+    await pipeline.run()
+
+    assert skill.handled == [("what time is it", "general")]      # "goodbye" not routed
+    assert "take care" in tts.spoke                               # farewell spoken
+    assert any(label == "signoff" for (_, _, label) in llm.calls)
+
+
+async def test_no_signoff_on_silence():
+    # A conversation that ends on silence closes quietly: the descending tone plays
+    # but no farewell is generated or spoken.
+    skill = FakeSkill()
+    stt = FakeSTT(transcripts=["what time is it", ""])
+    tts = FakeTTS()
+    out = FakeOut()
+    llm = FakeLLM("take care")
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, tts, out, AudioArbiter(),
+        stt=stt, conversation_enabled=True, llm=llm,
+        signoff_enabled=True, end_phrases=["goodbye"], end_earcon=b"END",
+    )
+
+    await pipeline.run()
+
+    assert "take care" not in tts.spoke  # silence ends quietly, no farewell
+    assert llm.calls == []               # sign-off never generated
+    assert b"END" in out.played          # the descending tone still marks the end
+
+
+async def test_signoff_degrades_on_llm_failure():
+    # An end phrase with a failing sign-off LLM still closes cleanly: the phrase is
+    # not routed and no farewell is spoken.
+    skill = FakeSkill(speech="it is noon")
+    stt = FakeSTT(transcripts=["what time is it", "goodbye"])
+    tts = FakeTTS()
+    llm = FakeLLM(raises=True)
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True, llm=llm,
+        signoff_enabled=True, end_phrases=["goodbye"],
+    )
+
+    await pipeline.run()
+
+    assert skill.handled == [("what time is it", "general")]  # "goodbye" not routed
+    assert tts.spoke == ["it is noon"]                        # only the reply, no farewell

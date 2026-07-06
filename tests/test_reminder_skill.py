@@ -44,6 +44,18 @@ async def test_timer_sets_and_confirms():
     assert due == NOW.timestamp() + 300
 
 
+async def test_timer_uses_duration_slot_when_text_lacks_it():
+    store = FakeStore()
+    res = await _skill(store).handle(
+        Command("set a five-minute timer going"),
+        Intent(type="timer", slots={"duration": "5 minutes"}),
+    )
+    assert res.success
+    due, speech, _ = store.added[0]
+    assert speech == "Your timer is done."
+    assert due == NOW.timestamp() + 300
+
+
 async def test_timer_failure_when_no_duration():
     store = FakeStore()
     res = await _skill(store).handle(Command("set a timer"), Intent("timer"))

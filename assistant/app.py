@@ -267,6 +267,14 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         conversation_enabled=config.conversation.enabled,
         followup_window_ms=config.conversation.followup_window_ms,
         max_history_turns=config.conversation.max_history_turns,
+        llm=llm,
+        followup_cue_enabled=config.conversation.followup_cue_enabled,
+        followup_cue_timeout_s=config.conversation.followup_cue_timeout_s,
+        followup_cue_prompt=config.conversation.followup_cue_prompt,
+        signoff_enabled=config.conversation.signoff_enabled,
+        signoff_timeout_s=config.conversation.signoff_timeout_s,
+        signoff_prompt=config.conversation.signoff_prompt,
+        end_phrases=config.conversation.end_phrases,
         # State feed to the monitor TUI, which reads our stdout. Suppressed on an
         # interactive terminal (standalone), where it would just be log noise.
         state_emitter=NullStateEmitter() if sys.stdout.isatty() else StateEmitter(),
@@ -276,7 +284,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     )
     # Optional control channel: line commands on stdin (typed commands, live
     # volume) from the monitor TUI when the daemon runs as its child.
-    control = ControlChannel(pipeline, out, Speaker(tts, out))
+    control = ControlChannel(pipeline, out, Speaker(tts, out), arbiter)
 
     # Pipeline (wake -> reply), scheduler (proactive reminders), and control
     # channel share the one event loop, audio output, and arbiter; all run until

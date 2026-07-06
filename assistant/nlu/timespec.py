@@ -28,11 +28,14 @@ _UNIT_SECONDS = {
     "hour": 3600, "hr": 3600, "minute": 60, "min": 60, "second": 1, "sec": 1,
 }
 
+_ONES = "|".join(sorted((w for w, n in _WORD_NUMBERS.items() if n < 10), key=len, reverse=True))
 _NUM = r"\d+|" + "|".join(sorted(_WORD_NUMBERS, key=len, reverse=True))
 _UNIT = "|".join(sorted(_UNIT_SECONDS, key=len, reverse=True))
 # Optionally consume a leading "in/for/after" so it's stripped from the message too.
+# A tens word may be followed (space- or hyphen-joined) by a ones word — "twenty
+# five", "forty-five" — which _match_seconds sums.
 _DURATION_RE = re.compile(
-    rf"(?:\b(?:in|for|after)\s+)?({_NUM})\s+({_UNIT})s?\b", re.IGNORECASE
+    rf"(?:\b(?:in|for|after)\s+)?({_NUM})(?:[ -]({_ONES}))?\s+({_UNIT})s?\b", re.IGNORECASE
 )
 
 # A clock time anywhere in the request ("at 6 pm", "9:30", "8 o'clock", "noon").
@@ -107,8 +110,10 @@ def _coerce_index(value) -> int | None:
 
 
 def _match_seconds(match: re.Match) -> float:
-    count_tok, unit = match.group(1).lower(), match.group(2).lower()
+    count_tok, ones_tok, unit = match.group(1).lower(), match.group(2), match.group(3).lower()
     count = int(count_tok) if count_tok.isdigit() else _WORD_NUMBERS[count_tok]
+    if ones_tok:
+        count += _WORD_NUMBERS[ones_tok.lower()]
     return float(count * _UNIT_SECONDS[unit])
 
 

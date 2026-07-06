@@ -33,6 +33,16 @@ def test_parse_duration_digits_words_and_misses():
     assert parse_duration("what time is it") is None
 
 
+def test_parse_duration_compound_word_numbers():
+    assert parse_duration("twenty five minutes") == 1500.0
+    assert parse_duration("thirty two seconds") == 32.0
+    assert parse_duration("forty-five minutes") == 2700.0
+    # single-word and bare-digit paths stay intact
+    assert parse_duration("five minutes") == 300.0
+    assert parse_duration("in 30 seconds") == 30.0
+    assert parse_duration("2 hours") == 7200.0
+
+
 def test_humanize():
     assert humanize(30) == "in 30 seconds"
     assert humanize(60) == "in 1 minute"

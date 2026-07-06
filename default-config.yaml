@@ -103,6 +103,21 @@ conversation:
   enabled: true             # keep listening for follow-ups after the assistant speaks
   followup_window_ms: 6000  # silence after which a conversation closes
   max_history_turns: 12     # messages kept in-session (user + assistant each 1)
+  followup_cue_enabled: true   # speak a context-aware cue when the mic reopens for a follow-up
+  followup_cue_timeout_s: 4.0  # cue must be ready by mic-open or it's dropped (silent reopen)
+  signoff_enabled: true        # speak a context-aware farewell when the user explicitly ends the conversation
+  signoff_timeout_s: 4.0       # on LLM miss the ending stays silent
+  end_phrases:                 # follow-up utterances that close the conversation (triggers the farewell)
+  - goodbye
+  - bye
+  - that's all
+  - that is all
+  - i'm done
+  - i am done
+  - we're done
+  - we are done
+  - nevermind
+  - never mind
 
 logging:
   level: "INFO"

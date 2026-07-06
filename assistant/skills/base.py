@@ -7,8 +7,13 @@ Intent.type -> Skill via the registry and never hard-codes skill names.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from assistant.core.events import Command, Intent, SkillResult
+
+
+def local_now() -> datetime:
+    return datetime.now().astimezone()
 
 # Fallback tool schema for an intent a skill declares no explicit spec for: a
 # single free-text argument carrying the user's request verbatim.

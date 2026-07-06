@@ -163,6 +163,48 @@ class ConversationConfig(BaseModel):
     enabled: bool = True  # keep listening for follow-ups after the assistant speaks
     followup_window_ms: int = 6000  # silence after which a conversation closes
     max_history_turns: int = 12  # messages kept in-session (user + assistant each 1)
+    # When the mic reopens for a follow-up, speak a short cue generated from the
+    # conversation so far (e.g. "anything else?") instead of replaying the wake
+    # ack. Generated while the reply is spoken so it adds no mic-open latency;
+    # falls back to a silent reopen (the close tone still marks mic state) if the
+    # LLM misses the budget or is offline.
+    followup_cue_enabled: bool = True
+    followup_cue_timeout_s: float = 4.0  # cue must be ready by mic-open or it's dropped
+    followup_cue_prompt: str = (
+        "You are re-opening the microphone to hear a possible follow-up after "
+        "answering. Reply with at most three everyday words inviting more, or an "
+        "empty reply if nothing fits. Plain spoken words only: no punctuation "
+        "except a final question mark, no emoji, no abbreviations, no letters read aloud."
+    )
+    # When the user explicitly ends the conversation (an end phrase below, e.g.
+    # "goodbye" / "I'm done"), speak a short, context-aware farewell instead of
+    # closing wordlessly. A conversation that ends on plain silence still closes
+    # with just the descending tone — no farewell. Silent fallback on LLM
+    # timeout/failure keeps the offline-first behavior.
+    signoff_enabled: bool = True
+    signoff_timeout_s: float = 4.0  # tight budget; on miss the ending stays silent
+    signoff_prompt: str = (
+        "You are ending a short spoken conversation because the user said goodbye. "
+        "Reply with a brief, warm farewell of at most four everyday words. Plain "
+        "spoken words only: no punctuation except a final period, no emoji, no "
+        "abbreviations, no letters or symbols read aloud. Examples: Talk soon. "
+        "Anytime. Take care."
+    )
+    # Follow-up utterances that explicitly close the conversation (matched as a
+    # normalized substring). A match triggers the farewell above and ends the turn
+    # without routing to a skill.
+    end_phrases: list[str] = [
+        "goodbye",
+        "bye",
+        "that's all",
+        "that is all",
+        "i'm done",
+        "i am done",
+        "we're done",
+        "we are done",
+        "nevermind",
+        "never mind",
+    ]
 
 
 class LoggingConfig(BaseModel):

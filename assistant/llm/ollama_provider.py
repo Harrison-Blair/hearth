@@ -51,11 +51,12 @@ class OllamaProvider(LLMProvider):
         }
         if system:
             payload["system"] = system
+        # Thinking models emit their reasoning into the grammar-constrained JSON
+        # output (corrupting it) and prepend a spoken <think> block on the plain
+        # path, so force think off for JSON and honor self._think otherwise.
+        payload["think"] = False if json else self._think
         if json:
             payload["format"] = "json"
-            # Thinking models emit their reasoning into the grammar-constrained
-            # output (e.g. a truncated {"thought": ...}), corrupting the JSON.
-            payload["think"] = False
 
         resp = await self._client.post(f"{self._host}/api/generate", json=payload)
         resp.raise_for_status()

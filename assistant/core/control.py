@@ -22,6 +22,7 @@ import logging
 import sys
 
 from assistant.audio.sounddevice_io import SoundDeviceOut
+from assistant.core.arbiter import AudioArbiter
 from assistant.core.pipeline import VoicePipeline
 from assistant.core.speech import Speaker
 
@@ -30,11 +31,16 @@ log = logging.getLogger(__name__)
 
 class ControlChannel:
     def __init__(
-        self, pipeline: VoicePipeline, out: SoundDeviceOut, speaker: Speaker | None = None
+        self,
+        pipeline: VoicePipeline,
+        out: SoundDeviceOut,
+        speaker: Speaker | None = None,
+        arbiter: AudioArbiter | None = None,
     ) -> None:
         self._pipeline = pipeline
         self._out = out
         self._speaker = speaker
+        self._arbiter = arbiter
 
     async def run(self) -> None:
         """Read stdin line by line (off-thread) and dispatch until EOF."""
@@ -81,7 +87,8 @@ class ControlChannel:
                 rate, text = float(head), tail
             except ValueError:
                 pass  # prefix isn't a rate; treat the whole line as text
-        await self._speaker.say(text.strip(), length_scale=rate)
+        async with self._arbiter.hold("say"):
+            await self._speaker.say(text.strip(), length_scale=rate)
 
     def _set(self, rest: str) -> None:
         key, _, value = rest.partition(" ")
