@@ -3,7 +3,7 @@
 import json
 
 from textual.containers import ScrollableContainer
-from textual.widgets import Button, OptionList, SelectionList, Static
+from textual.widgets import Button, OptionList, SelectionList, Static, Switch
 
 from tui import configfile, discovery
 from tui.app import AssistantTUI
@@ -215,6 +215,48 @@ async def test_save_writes_coerced_values(monkeypatch, tmp_path):
         await pilot.pause()
         assert written[("recorder", "silence_ms")] == 800  # int, not "800"
         assert isinstance(written[("wake", "model_paths")], list)
+
+
+async def test_ack_delay_stepper_flows_into_apply(monkeypatch):
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.push_screen("config")
+        await pilot.pause()
+        app._config_screen.query_one("#field-tts_ack_delay_s", Stepper).value = 0.5
+        await app._on_config_apply(app._config_screen.form_strings())
+        assert app._overrides["ASSISTANT_TTS__ACK_DELAY_S"] == "0.5"
+
+
+async def test_signoff_pause_saved_as_float(monkeypatch):
+    app = _make_app(monkeypatch)
+    written = {}
+    monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.push_screen("config")
+        await pilot.pause()
+        app._config_screen.query_one("#field-conversation_signoff_pause_s", Stepper).value = 0.7
+        await pilot.click("#config-save")
+        await pilot.pause()
+        assert written[("conversation", "signoff_pause_s")] == 0.7
+        assert isinstance(written[("conversation", "signoff_pause_s")], float)
+
+
+async def test_signoff_toggle_flows_into_values_and_apply(monkeypatch):
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.push_screen("config")
+        await pilot.pause()
+        screen = app._config_screen
+        switch = screen.query_one("#field-conversation_signoff_enabled", Switch)
+        assert switch.value is True  # default ON
+        switch.value = False
+        # form_values coerces the toggle to a real bool (not the truthy string "False")
+        assert screen.form_values()[("conversation", "signoff_enabled")] is False
+        await app._on_config_apply(screen.form_strings())
+        assert app._overrides["ASSISTANT_CONVERSATION__SIGNOFF_ENABLED"] == "False"
 
 
 async def test_picker_updates_select_field(monkeypatch):

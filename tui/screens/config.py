@@ -15,7 +15,7 @@ from textual import events, on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Label, SelectionList, Static
+from textual.widgets import Button, Label, SelectionList, Static, Switch
 from textual.widgets.selection_list import Selection as SelectionOption
 
 from assistant.wake import registry
@@ -30,6 +30,11 @@ if TYPE_CHECKING:
 
 def field_id(field: Field) -> str:
     return "field-" + "_".join(field.key)
+
+
+def _truthy(value: object) -> bool:
+    """Parse a stringified config value into a bool for a toggle widget."""
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
 
 
 class ConfigScreen(Screen):
@@ -94,6 +99,9 @@ class ConfigScreen(Screen):
                 float(current or 0), lo=field.lo, hi=field.hi, step=field.step, id=wid
             )
             return
+        if field.kind == "toggle":
+            yield Switch(value=_truthy(current), id=wid)
+            return
         self._select_values[field.key] = current
         with Horizontal():
             yield Button(current or "(pick…)", id=wid, classes="select-field")
@@ -117,6 +125,10 @@ class ConfigScreen(Screen):
                 continue
             if field.kind == "number":
                 out[field.key] = self.query_one(f"#{field_id(field)}", Stepper).value_str
+            elif field.kind == "toggle":
+                # str(bool) matches how current_value stringifies, so an unchanged
+                # toggle diffs equal; pydantic parses "True"/"False" fine.
+                out[field.key] = str(self.query_one(f"#{field_id(field)}", Switch).value)
             elif value := self._select_values.get(field.key, ""):
                 out[field.key] = value
         return out
@@ -154,6 +166,8 @@ class ConfigScreen(Screen):
             current = discovery.current_value(cfg, field.key)
             if field.kind == "number":
                 self.query_one(f"#{field_id(field)}", Stepper).value = float(current or 0)
+            elif field.kind == "toggle":
+                self.query_one(f"#{field_id(field)}", Switch).value = _truthy(current)
             else:
                 self._select_values[field.key] = current
                 self.query_one(f"#{field_id(field)}", Button).label = current or "(pick…)"

@@ -67,8 +67,10 @@ class VoicePipeline:
         followup_cue_prompt: str = "",
         signoff_enabled: bool = False,
         signoff_timeout_s: float = 4.0,
+        signoff_pause_s: float = 0.0,
         signoff_prompt: str = "",
         end_phrases: list[str] | None = None,
+        ack_delay_s: float = 0.0,
         state_emitter=None,
     ) -> None:
         self._audio_in = audio_in
@@ -118,9 +120,12 @@ class VoicePipeline:
         self._followup_cue_prompt = followup_cue_prompt
         self._signoff_enabled = signoff_enabled
         self._signoff_timeout_s = signoff_timeout_s
+        self._signoff_pause_s = signoff_pause_s
         self._signoff_prompt = signoff_prompt
         # Normalized set of utterances that explicitly close a conversation.
         self._end_phrases = [self._normalize_text(p) for p in (end_phrases or [])]
+        # Beat of silence before the wake ack plays, so "hmm?" isn't instant.
+        self._ack_delay_s = ack_delay_s
         # One rolling history for the typed (TUI chat) session, so daemon-lifetime
         # typed turns carry context. Disabled -> each typed turn is stateless.
         self._typed_conversation = Conversation(max_history_turns)
@@ -179,7 +184,10 @@ class VoicePipeline:
             # over the capture or our reply; it waits until we release.
             async with self._arbiter.hold("pipeline"):
                 pcm = await self._listen(
-                    frames, prefix=b"".join(preroll), open_cue=self._pick_wake_ack()
+                    frames,
+                    prefix=b"".join(preroll),
+                    open_cue=self._pick_wake_ack(),
+                    open_delay_s=self._ack_delay_s,
                 )
                 preroll.clear()
                 transcript = await self._capture_to_text(pcm)
@@ -191,6 +199,7 @@ class VoicePipeline:
                         frames,
                         start_timeout_ms=self._followup_window_ms,
                         open_cue=self._pick_wake_ack(),
+                        open_delay_s=self._ack_delay_s,
                     )
                     transcript = await self._capture_to_text(pcm)
                 if transcript:
@@ -295,16 +304,25 @@ class VoicePipeline:
         return random.choice(self._wake_earcons) if self._wake_earcons else None
 
     async def _listen(
-        self, frames, *, prefix: bytes = b"", start_timeout_ms=None, open_cue: bytes | None = None
+        self,
+        frames,
+        *,
+        prefix: bytes = b"",
+        start_timeout_ms=None,
+        open_cue: bytes | None = None,
+        open_delay_s: float = 0.0,
     ) -> bytes:
         """One listening window: play the caller's mic-open cue, drop its echo,
         record until end-of-speech, then play the mic-closed cue. Returns raw PCM.
 
         The caller chooses the open cue (a wake ack on first wake, a context-aware
-        cue on a follow-up, or None). Draining after it keeps the cue's own speaker
-        bleed out of the recording."""
+        cue on a follow-up, or None) and an optional delay before it (a beat before
+        the wake ack). Draining after it keeps the cue's own speaker bleed out of
+        the recording."""
         self._cancel_event.clear()  # a cancel only abandons the turn it arrives in
         if open_cue:
+            if open_delay_s:
+                await asyncio.sleep(open_delay_s)
             await self._play(open_cue)
         self._audio_in.drain()
         self._state_emitter.state("listening")
@@ -440,6 +458,8 @@ class VoicePipeline:
             return
         text = text.strip()
         if text:
+            if self._signoff_pause_s:
+                await asyncio.sleep(self._signoff_pause_s)  # a breath before the farewell
             await self._speak(text)
 
     @staticmethod

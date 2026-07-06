@@ -273,8 +273,10 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         followup_cue_prompt=config.conversation.followup_cue_prompt,
         signoff_enabled=config.conversation.signoff_enabled,
         signoff_timeout_s=config.conversation.signoff_timeout_s,
+        signoff_pause_s=config.conversation.signoff_pause_s,
         signoff_prompt=config.conversation.signoff_prompt,
         end_phrases=config.conversation.end_phrases,
+        ack_delay_s=config.tts.ack_delay_s,
         # State feed to the monitor TUI, which reads our stdout. Suppressed on an
         # interactive terminal (standalone), where it would just be log noise.
         state_emitter=NullStateEmitter() if sys.stdout.isatty() else StateEmitter(),

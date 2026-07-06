@@ -68,6 +68,7 @@ tts:
     - "hmm?"
     - "uh huh?"
     - "hmm hmm?"
+  ack_delay_s: 0.3               # beat of silence before the wake ack plays; 0 = instant
 
 storage:
   db_path: "assistant.db"
@@ -107,6 +108,7 @@ conversation:
   followup_cue_timeout_s: 4.0  # cue must be ready by mic-open or it's dropped (silent reopen)
   signoff_enabled: true        # speak a context-aware farewell when the user explicitly ends the conversation
   signoff_timeout_s: 4.0       # on LLM miss the ending stays silent
+  signoff_pause_s: 0.5         # silent "breath" before the farewell is spoken; 0 = off
   end_phrases:                 # follow-up utterances that close the conversation (triggers the farewell)
   - goodbye
   - bye

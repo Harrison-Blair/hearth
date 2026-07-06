@@ -123,6 +123,8 @@ class TtsConfig(BaseModel):
     # to espeak-friendly interjections so Piper says a natural cue rather than
     # spelling the letters (e.g. "Mm-hm" -> "em-em-aitch-em").
     ack_phrases: list[str] = ["hmm?", "uh huh?", "hmm hmm?"]
+    # Beat of silence before the wake ack plays, so "hmm?" isn't instant/robotic. 0 = off.
+    ack_delay_s: float = 0.3
 
 
 class StorageConfig(BaseModel):
@@ -183,6 +185,7 @@ class ConversationConfig(BaseModel):
     # timeout/failure keeps the offline-first behavior.
     signoff_enabled: bool = True
     signoff_timeout_s: float = 4.0  # tight budget; on miss the ending stays silent
+    signoff_pause_s: float = 0.5  # silent "breath" before the farewell is spoken; 0 = off
     signoff_prompt: str = (
         "You are ending a short spoken conversation because the user said goodbye. "
         "Reply with a brief, warm farewell of at most four everyday words. Plain "

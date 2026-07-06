@@ -20,7 +20,7 @@ from tui import discovery
 class Field:
     key: tuple[str, ...]
     label: str
-    kind: str  # "select" | "multiselect" | "text" | "number"
+    kind: str  # "select" | "multiselect" | "text" | "number" | "toggle"
     # None for free text/number; for selects, a provider with signature
     # (host=..., **_) -> list[str] | Awaitable[list[str]] (see discovery).
     options: Callable | None = None
@@ -43,6 +43,10 @@ def coerce(field: Field, raw: object) -> object:
             return int(str(raw))
         except ValueError:
             return float(str(raw))
+    if field.kind == "toggle":
+        # raw is a stringified bool ("True"/"False") — parse it, since bool("False")
+        # is truthy. Stored as a real YAML bool.
+        return str(raw).strip().lower() in ("true", "1", "yes", "on")
     return raw
 
 
@@ -79,4 +83,8 @@ FIELDS: list[Field] = [
     Field(("audio", "output_volume"), "Output volume", "number", lo=0.0, hi=1.0, step=0.05),
     Field(("recorder", "silence_ms"), "Silence (ms)", "number", lo=100, hi=3000, step=100),
     Field(("recorder", "aggressiveness"), "VAD aggressiveness", "number", lo=0, hi=3, step=1),
+    Field(("tts", "ack_delay_s"), "Ack delay (s)", "number", lo=0.0, hi=1.0, step=0.05),
+    Field(("conversation", "followup_cue_enabled"), "Follow-up cue", "toggle"),
+    Field(("conversation", "signoff_enabled"), "Sign-off", "toggle"),
+    Field(("conversation", "signoff_pause_s"), "Sign-off pause (s)", "number", lo=0.0, hi=2.0, step=0.1),
 ]

@@ -22,7 +22,7 @@ wake:
   score_interval: 1
   trigger_frames: 1
 stt:
-  model: distil-small.en
+  model: large-v3
   device: cpu
   compute_type: int8
   cpu_threads: 4
@@ -56,6 +56,7 @@ tts:
   - uh huh?
   - hmm hmm?
   - yeah?
+  ack_delay_s: 0.75
 storage:
   db_path: assistant.db
 scheduling:
@@ -92,6 +93,7 @@ conversation:
   followup_cue_timeout_s: 4.0
   signoff_enabled: true
   signoff_timeout_s: 4.0
+  signoff_pause_s: 0.5
   end_phrases:
   - goodbye
   - bye

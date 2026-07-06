@@ -163,7 +163,8 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
               max_history_turns=12, min_transcribe_rms=0.0, state_emitter=None,
               llm=None, followup_cue_enabled=False, followup_cue_prompt="cue",
               followup_cue_timeout_s=4.0, signoff_enabled=False, signoff_prompt="bye",
-              signoff_timeout_s=4.0, end_phrases=None):
+              signoff_timeout_s=4.0, signoff_pause_s=0.0, end_phrases=None,
+              ack_delay_s=0.0):
     # Tests pass a single wake_earcon for convenience; the pipeline takes a pool.
     if wake_earcons is None:
         wake_earcons = [wake_earcon] if wake_earcon else []
@@ -183,8 +184,10 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
         followup_cue_prompt=followup_cue_prompt,
         signoff_enabled=signoff_enabled,
         signoff_timeout_s=signoff_timeout_s,
+        signoff_pause_s=signoff_pause_s,
         signoff_prompt=signoff_prompt,
         end_phrases=end_phrases,
+        ack_delay_s=ack_delay_s,
         state_emitter=state_emitter,
     )
 
@@ -899,3 +902,65 @@ async def test_signoff_degrades_on_llm_failure():
 
     assert skill.handled == [("what time is it", "general")]  # "goodbye" not routed
     assert tts.spoke == ["it is noon"]                        # only the reply, no farewell
+
+
+async def test_wake_ack_delay_precedes_ack(monkeypatch):
+    # A configured ack delay inserts a beat of silence before the wake ack plays,
+    # so "hmm?" isn't instant. The ack still plays.
+    sleeps = []
+
+    async def _fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("assistant.core.pipeline.asyncio.sleep", _fake_sleep)
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), FakeSkill(), FakeTTS(), out, AudioArbiter(),
+        wake_earcon=b"ACK", ack_delay_s=0.3,
+    )
+
+    await pipeline.run()
+
+    assert 0.3 in sleeps          # the beat before the ack
+    assert b"ACK" in out.played   # the ack still plays after the beat
+
+
+async def test_no_wake_ack_delay_by_default(monkeypatch):
+    # With the default 0.0 delay, no sleep is inserted (existing turns stay instant).
+    sleeps = []
+
+    async def _fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("assistant.core.pipeline.asyncio.sleep", _fake_sleep)
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), FakeSkill(), FakeTTS(), FakeOut(), AudioArbiter(),
+        wake_earcon=b"ACK",  # ack_delay_s defaults to 0.0
+    )
+
+    await pipeline.run()
+
+    assert sleeps == []
+
+
+async def test_signoff_pause_precedes_farewell(monkeypatch):
+    # A breath (pause) is inserted right before the farewell is spoken.
+    sleeps = []
+
+    async def _fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("assistant.core.pipeline.asyncio.sleep", _fake_sleep)
+    tts = FakeTTS()
+    llm = FakeLLM("take care")
+    stt = FakeSTT(transcripts=["what time is it", "goodbye"])
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), FakeSkill(speech="it is noon"), tts, FakeOut(),
+        AudioArbiter(), stt=stt, conversation_enabled=True, llm=llm,
+        signoff_enabled=True, end_phrases=["goodbye"], signoff_pause_s=0.5,
+    )
+
+    await pipeline.run()
+
+    assert 0.5 in sleeps            # the breath before the farewell
+    assert "take care" in tts.spoke  # farewell still spoken

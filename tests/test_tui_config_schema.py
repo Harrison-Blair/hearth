@@ -45,8 +45,8 @@ def test_schema_ships_expected_fields():
 
 
 def test_no_free_text_fields_remain():
-    # Touch-only target: every field must be a stepper, picker, or checkbox list.
-    assert all(f.kind in ("select", "multiselect", "number") for f in FIELDS)
+    # Touch-only target: every field must be a stepper, picker, checkbox list, or toggle.
+    assert all(f.kind in ("select", "multiselect", "number", "toggle") for f in FIELDS)
 
 
 def test_number_fields_carry_stepper_bounds():
