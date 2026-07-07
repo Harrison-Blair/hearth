@@ -2,7 +2,7 @@
 id: FTHR-008
 title: "Revoice scheduler + calendar-watcher announcements"
 plumage: PLM-003
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-005]
 authored: 2026-07-07T19:24:46Z
