@@ -1,6 +1,10 @@
 """Persona layer: composition helpers, terminal-only injection, and isolation
 of the tool-decision / JSON-structured paths."""
 
+import random
+
+import pytest
+
 from assistant.core import persona
 from assistant.core.config import Config, PersonaConfig
 from assistant.core.events import Command, Intent, SkillResult, ToolCall
@@ -41,6 +45,15 @@ def test_with_persona_appends_after_the_base():
     assert composed.startswith("BASE")
     assert composed.endswith(seg)
     assert seg in composed
+
+
+def test_persona_v2_drops_the_theatrics_rule_for_deterministic_replies():
+    # v1's "Routine or deterministic commands: drop the theatrics, just confirm"
+    # rule is gone; v2 keeps the voice on deterministic replies instead.
+    for strength in ("terse", "expansive"):
+        text = persona.persona_segment(strength)
+        assert "drop the theatrics" not in text
+        assert "flavored beat" in text
 
 
 # --- GeneralSkill: persona rides the final reply --------------------------
@@ -285,3 +298,50 @@ def test_persona_env_overrides(monkeypatch):
     cfg = Config()
     assert cfg.persona.enabled is False  # override switches the default off
     assert cfg.persona.strength == "expansive"
+
+
+# --- canned() template registry --------------------------------------------
+
+_CANNED_PLAIN = {
+    "error_generic": "Sorry, something went wrong.",
+    "cant_help": "Sorry, I can't help with that yet.",
+    "llm_offline": "Sorry, I couldn't reach my language model.",
+    "no_answer": "Sorry, I don't have an answer for that.",
+    "unexpected_reply": "Sorry, I wasn't expecting a reply.",
+    "update_signoff": "Restarting now.",
+}
+
+
+@pytest.mark.parametrize("key, plain", _CANNED_PLAIN.items())
+def test_canned_disabled_returns_exact_current_plain_string(key, plain):
+    assert persona.canned(key, enabled=False) == plain
+
+
+@pytest.mark.parametrize("key", _CANNED_PLAIN)
+def test_canned_enabled_returns_one_of_the_variants(key):
+    variants = persona._CANNED[key][1]
+    assert 2 <= len(variants) <= 3
+    line = persona.canned(key, enabled=True, rng=random.Random(0))
+    assert line in variants
+
+
+@pytest.mark.parametrize("key", _CANNED_PLAIN)
+def test_canned_rotation_is_deterministic_under_a_seeded_rng(key):
+    a = persona.canned(key, enabled=True, rng=random.Random(1))
+    b = persona.canned(key, enabled=True, rng=random.Random(1))
+    assert a == b
+
+
+@pytest.mark.parametrize("key", _CANNED_PLAIN)
+def test_canned_rotation_covers_all_variants_across_draws(key):
+    variants = persona._CANNED[key][1]
+    rng = random.Random(42)
+    drawn = {persona.canned(key, enabled=True, rng=rng) for _ in range(50)}
+    assert drawn == set(variants)
+
+
+def test_canned_unknown_key_raises_key_error():
+    with pytest.raises(KeyError):
+        persona.canned("no_such_key", enabled=False)
+    with pytest.raises(KeyError):
+        persona.canned("no_such_key", enabled=True, rng=random.Random(0))
