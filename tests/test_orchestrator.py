@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from assistant.core import persona
 from assistant.core.events import SkillResult, ToolCall, Turn
 from assistant.core.orchestrator import Orchestrator
 from assistant.llm.base import ChatResponse
@@ -378,3 +379,52 @@ async def test_routing_guidance_rides_tool_decision_calls_only():
     assert _ROUTING_GUIDANCE.strip() in llm.systems[0]
     # GeneralSkill keeps the un-augmented prompt.
     assert "web_search" not in GeneralSkill(llm, "BASE")._system
+
+
+async def test_tool_decision_request_is_persona_free_native_and_json():
+    # FTHR-009 (PLM-003 FC-9a) hardening: persona is scoped to spoken replies
+    # only (core/persona.py); it must never ride the tool-decision request
+    # (system + messages + tool schemas), in EITHER tool_mode path. Asserted
+    # against the persona block *content* imported from persona.py, not a
+    # copied string, so a future persona v3 keeps this test honest.
+    persona_terse = persona.persona_segment("terse")
+    persona_expansive = persona.persona_segment("expansive")
+
+    class RecordingLLM(ScriptedLLM):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.tool_calls_seen = []
+            self.complete_calls_seen = []
+
+        async def chat_tools(self, messages, *, system=None, tools=None, label=""):
+            self.tool_calls_seen.append((system, messages, tools))
+            return await super().chat_tools(messages, system=system, tools=tools, label=label)
+
+        async def complete(self, prompt, *, system=None, json=False, label=""):  # noqa: A002
+            self.complete_calls_seen.append((system, prompt))
+            return await super().complete(prompt, system=system, json=json, label=label)
+
+    reg = _registry(EchoSkill(), default=FallbackSkill())
+
+    # Native tool-calling path.
+    native_llm = RecordingLLM(tool_responses=[ChatResponse(content="fine")])
+    await _orch(native_llm, reg, tool_mode="native", persona_suffix=persona_terse).handle(
+        "hi", [], spoken=True
+    )
+    system, messages, tools = native_llm.tool_calls_seen[0]
+    # str(), not json.dumps(): persona text carries raw quotes that json.dumps
+    # would backslash-escape, which would mask the substring on a real leak.
+    blob = str(system) + str(messages) + str(tools)
+    assert persona_terse not in blob
+    assert persona_expansive not in blob
+
+    # JSON-coerced path (native forced to fail, same pattern as
+    # test_native_failure_falls_back_to_json_tool_selection).
+    json_llm = RecordingLLM(chat_tools_raises=True, complete_responses=['{"answer": "fine"}'])
+    await _orch(json_llm, reg, tool_mode="auto", persona_suffix=persona_terse).handle(
+        "hi", [], spoken=True
+    )
+    system, prompt = json_llm.complete_calls_seen[0]
+    blob = str(system) + str(prompt)
+    assert persona_terse not in blob
+    assert persona_expansive not in blob
