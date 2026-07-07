@@ -1,6 +1,6 @@
 # FTHR-003 evidence
 
-## AC-1: tests observed failing before implementation, passing after
+## AC-1
 
 ### Pre-implementation: `tests/test_tavily_provider.py` (new file, provider does not exist yet)
 
@@ -95,7 +95,7 @@ routing + defaulting; routed-failure fallback + notice; no-key keyless-only sile
 injection neutralization of the Tavily answer block; config env override) were
 observed failing above and now pass. AC-1 satisfied.
 
-## AC-2: factual query end-to-end through WebSearchSkill produces a sourced spoken answer
+## AC-2
 
 `tests/test_web_search_skill.py::test_stubbed_tavily_response_end_to_end_produces_sourced_answer`
 wires the real `TavilySearch` provider (httpx `MockTransport`, no network/keys) as the
@@ -115,7 +115,7 @@ Command: `pytest tests/test_web_search_skill.py -q -k stubbed_tavily_response_en
 Also covered by `test_factual_query_type_routes_to_the_factual_provider` (routing itself)
 and the four routing tests above it. AC-2 satisfied.
 
-## AC-3: routed-provider failure -> notice + same-round keyless answer; no keys -> keyless-only + boot warning
+## AC-3
 
 `test_routed_provider_failure_speaks_notice_and_falls_back_to_keyless` and
 `test_routed_provider_missing_key_case_also_falls_back_with_notice`: a failing/raising
@@ -141,7 +141,7 @@ via `log.warning` whenever `routes` ends up empty (mirrors the existing
 inspection elsewhere in the codebase; no dedicated app.py wiring test exists for the
 *keyless-provider* boot warning either — same precedent). AC-3 satisfied.
 
-## AC-4: injection content in Tavily answer/snippets neutralized before the assess prompt
+## AC-4
 
 `test_tavily_answer_block_injection_is_neutralized_in_assess_prompt`: a `SearchResult`
 shaped like a Tavily answer block (`source="tavily", title="answer"`) carrying an
@@ -163,7 +163,7 @@ Command: `pytest tests/test_web_search_skill.py -q -k tavily_answer_block_inject
 AC-4 satisfied (defense mechanism is the pre-existing `_neutralize`/fencing code,
 untouched by this feather, applied to one more `SearchResult` source).
 
-## AC-5: no key in any committed file; lint + full suite pass with no network
+## AC-5
 
 - `git grep` / manual review of the diff: `tavily_api_key`/`exa_api_key` are `""` in
   both `config.yaml` and `default-config.yaml`; the only non-empty key values in the
