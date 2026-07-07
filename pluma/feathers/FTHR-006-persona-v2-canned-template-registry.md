@@ -2,7 +2,7 @@
 id: FTHR-006
 title: "Persona v2 + canned() template registry"
 plumage: PLM-003
-status: pipping
+status: fledged
 priority: P1
 depends_on: []
 oversight: merge
