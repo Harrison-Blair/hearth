@@ -36,6 +36,7 @@ from assistant.scheduling.calendar_watcher import CalendarWatcher
 from assistant.scheduling.scheduler import ReminderScheduler
 from assistant.search.base import SearchProvider
 from assistant.search.ddgs_provider import DdgsSearch
+from assistant.search.exa import ExaSearch
 from assistant.search.multi import MultiSearch
 from assistant.search.tavily import TavilySearch
 from assistant.search.wikipedia import WikipediaSearch
@@ -60,9 +61,9 @@ log = logging.getLogger("assistant")
 
 def _build_search(cfg: WebSearchConfig) -> tuple[SearchProvider, dict[str, SearchProvider]]:
     """Construct the keyless provider fan-out (unchanged) plus the routed
-    keyed-provider map: query_type -> AI-first provider (Tavily now, Exa via
-    FTHR-004). A route is present only when its API key is configured; an
-    empty map means keyless-only behavior, identical to today."""
+    keyed-provider map: query_type -> AI-first provider (Tavily for "factual",
+    Exa for "semantic"). A route is present only when its API key is configured;
+    an empty map means keyless-only behavior, identical to today."""
     factories = {
         "wikipedia": lambda: WikipediaSearch(
             language=cfg.language,
@@ -101,10 +102,16 @@ def _build_search(cfg: WebSearchConfig) -> tuple[SearchProvider, dict[str, Searc
             timeout=cfg.timeout,
             max_snippet_chars=cfg.max_snippet_chars,
         )
+    if cfg.exa_api_key:
+        routes["semantic"] = ExaSearch(
+            api_key=cfg.exa_api_key,
+            timeout=cfg.timeout,
+            max_snippet_chars=cfg.max_snippet_chars,
+        )
     if not routes:
         log.warning(
-            "No web search API keys configured (tavily_api_key empty); using "
-            "keyless search only"
+            "No web search API keys configured (tavily_api_key/exa_api_key empty); "
+            "using keyless search only"
         )
     return keyless, routes
 

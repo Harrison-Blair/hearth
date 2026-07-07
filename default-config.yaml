@@ -120,7 +120,7 @@ web_search:
   progress_updates: true  # speak "searching..." style updates mid-turn
   tavily_api_key: ""      # set via ASSISTANT_WEB_SEARCH__TAVILY_API_KEY, not here
   tavily_endpoint: "https://api.tavily.com/search"
-  exa_api_key: ""         # reserved for FTHR-004, set via env var, not here
+  exa_api_key: ""         # set via ASSISTANT_WEB_SEARCH__EXA_API_KEY, not here
 
 weather:
   latitude: 33.749                    # home location (Atlanta, GA)
