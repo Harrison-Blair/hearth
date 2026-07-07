@@ -88,18 +88,18 @@ Implementation order fixed: (1) write tests; (2) confirm they FAIL against uncha
 code for the expected reason; (3) implement until green.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and
+- [x] AC-1: The tests listed above were observed failing before implementation and
       pass after.
-- [ ] AC-2: The repointed Zen wire + retry/guard suites pass unchanged against
+- [x] AC-2: The repointed Zen wire + retry/guard suites pass unchanged against
       `OpenAICompatibleProvider`; `provider: opencode-zen` builds the same provider,
       endpoint, retry, and health behavior as before (PLM-004 AC-2, FC-4).
-- [ ] AC-3: The `GATEWAYS` table resolves `openrouter` → the OpenRouter base URL and
+- [x] AC-3: The `GATEWAYS` table resolves `openrouter` → the OpenRouter base URL and
       `opencode-zen` → the Zen base URL; `_build_one_llm` treats a blank `base_url`
       as the table default and an explicit `base_url` as an override
       (PLM-004 AC-3, FC-6).
-- [ ] AC-4: `provider: openrouter` with a key builds an `OpenAICompatibleProvider`
+- [x] AC-4: `provider: openrouter` with a key builds an `OpenAICompatibleProvider`
       targeting OpenRouter; the generic provider sends any configured model verbatim,
       includes `tools`/`response_format` on the calls that need them, and merges
       `extra_headers` onto auth (PLM-004 FC-1, FC-2, FC-3, generic FC-8).
-- [ ] AC-5: `ruff check assistant tests` and the full suite pass with no network
+- [x] AC-5: `ruff check assistant tests` and the full suite pass with no network
       (remote stubbed via httpx MockTransport).
