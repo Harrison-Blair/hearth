@@ -2,7 +2,7 @@
 id: FTHR-005
 title: "Tracer: Revoicer seam — voiced flag, pipeline choke point, config, wiring"
 plumage: PLM-003
-status: pipping
+status: fledged
 priority: P1
 depends_on: []
 authored: 2026-07-07T17:57:07Z
