@@ -25,6 +25,7 @@ from assistant.core.logging import setup_logging
 from assistant.core import persona
 from assistant.core.orchestrator import Orchestrator
 from assistant.core.pipeline import VoicePipeline
+from assistant.core.selfupdate import restart_in_place
 from assistant.core.speech import Speaker
 from assistant.core.standdown import StandDown
 from assistant.core.state import NullStateEmitter, StateEmitter
@@ -47,6 +48,7 @@ from assistant.skills.general import GeneralSkill
 from assistant.skills.reminder import ReminderSkill
 from assistant.skills.stand_down import StandDownSkill
 from assistant.skills.timer import TimerSkill
+from assistant.skills.update import UpdateSkill
 from assistant.skills.weather import WeatherSkill
 from assistant.skills.web_search import WebSearchSkill
 from assistant.storage.calendar_state import CalendarStateStore
@@ -269,6 +271,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     registry.register(ReminderSkill(store, llm))
     registry.register(TimerSkill(store))
     registry.register(StandDownSkill(standdown))
+    registry.register(UpdateSkill())
     registry.register(WebSearchSkill(
         search,
         llm,
@@ -452,6 +455,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         barge_in_threshold=config.barge_in.threshold,
         barge_in_trigger_frames=config.barge_in.trigger_frames,
         barge_in_announcements=config.barge_in.announcements,
+        restart_in_place=restart_in_place,
     )
     scheduler = ReminderScheduler(
         store, tts, out, arbiter, poll_seconds=config.scheduling.poll_seconds,

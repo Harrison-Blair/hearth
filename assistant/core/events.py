@@ -59,3 +59,4 @@ class SkillResult:
     data: dict | None = None
     success: bool = True
     expects_reply: bool = False
+    restart: bool = False
