@@ -71,12 +71,12 @@ against unchanged code for the expected reason; (3) implement until they
 pass.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before
+- [x] AC-1: The tests listed above were observed failing before
       implementation and pass after.
-- [ ] AC-2: v2 blocks replace v1 with the deterministic-replies-in-voice
+- [x] AC-2: v2 blocks replace v1 with the deterministic-replies-in-voice
       guidance; no `_CALCIFER_V1_*` name survives (PLM-003 FC-1).
-- [ ] AC-3: Every registry key has 2–3 in-character variants, seedable
+- [x] AC-3: Every registry key has 2–3 in-character variants, seedable
       rotation, and a persona-disabled fallback byte-identical to the
       current literal (PLM-003 FC-7, AC-5 groundwork).
-- [ ] AC-4: `ruff check assistant tests` and the full suite pass; no file
+- [x] AC-4: `ruff check assistant tests` and the full suite pass; no file
       outside `persona.py`/`test_persona.py` is modified.
