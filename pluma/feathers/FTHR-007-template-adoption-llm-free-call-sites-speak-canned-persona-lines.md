@@ -2,7 +2,7 @@
 id: FTHR-007
 title: "Template adoption: LLM-free call sites speak canned() persona lines"
 plumage: PLM-003
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-005, FTHR-006]
 authored: 2026-07-07T19:23:41Z
