@@ -1,7 +1,7 @@
 ---
 id: PLM-003
 title: "Pluma: every vocalized response persona-flavored (revoice seam + templates)"
-status: hatched
+status: fledged
 priority: P1
 authored: 2026-07-07T17:52:04Z
 agent: fledge-orchestrate/planning
@@ -105,31 +105,31 @@ Numbered, testable statements of behavior. Referenced downstream as FC-1, FC-2, 
 
 ## Acceptance Criteria
 Checkbox list of verifiable conditions under which this plumage is considered fledged, one `- [ ] AC-N: …` line each. Authored unchecked; checked only via `fledge criteria check` at plumage closeout.
-- [ ] AC-1: With persona enabled, a deterministic skill reply (e.g. clock)
+- [x] AC-1: With persona enabled, a deterministic skill reply (e.g. clock)
       is revoiced before TTS — output differs in style from the plain string
       while every digit sequence survives verbatim; with persona disabled the
       spoken text is byte-identical to today's.
-- [ ] AC-2: ReminderScheduler announcements (single, and the catch-up
+- [x] AC-2: ReminderScheduler announcements (single, and the catch-up
       summary as one call) and CalendarWatcher announcements pass through the
       same revoice seam.
-- [ ] AC-3: A known-unhealthy provider short-circuits to plain speech with
+- [x] AC-3: A known-unhealthy provider short-circuits to plain speech with
       no timeout delay; a hung or failing revoice call falls back to the
       plain string after `revoice_timeout_s` with a logged warning — in no
       case is a reply dropped.
-- [ ] AC-4: A revoiced output that drops or mutates any digit sequence is
+- [x] AC-4: A revoiced output that drops or mutates any digit sequence is
       discarded and the plain string is spoken (guard test with a stub LLM
       returning garbled numbers).
-- [ ] AC-5: UpdateSkill, LLM-offline, pipeline-error, and base-fallback paths
+- [x] AC-5: UpdateSkill, LLM-offline, pipeline-error, and base-fallback paths
       speak a Calcifer template variant when persona is enabled (rotation
       deterministic under an injected seed) and the current plain string when
       disabled.
-- [ ] AC-6: `revoice_enabled: false` with persona on: LLM-generated replies
+- [x] AC-6: `revoice_enabled: false` with persona on: LLM-generated replies
       and templates stay flavored, deterministic skill replies are spoken
       plain, and no revoice LLM call is made.
-- [ ] AC-7: Hardening tests pass: tool-decision prompt is persona-free with
+- [x] AC-7: Hardening tests pass: tool-decision prompt is persona-free with
       persona enabled, and the spy-TTS invariant test fails if an unflavored
       string is fed to `_speak` without passing the seam.
-- [ ] AC-8: The full test suite passes without native extras or network
+- [x] AC-8: The full test suite passes without native extras or network
       (LLM stubbed per repo convention), and `ruff check assistant tests` is
       clean.
 
