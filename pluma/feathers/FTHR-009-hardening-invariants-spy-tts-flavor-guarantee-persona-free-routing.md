@@ -2,7 +2,7 @@
 id: FTHR-009
 title: "Hardening invariants: spy-TTS flavor guarantee + persona-free routing"
 plumage: PLM-003
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-007, FTHR-008]
 authored: 2026-07-07T19:25:50Z
