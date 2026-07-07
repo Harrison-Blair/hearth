@@ -1,7 +1,8 @@
 """Web search skill: agentic search loop with spoken progress and a sourced answer.
 
-The user must ask explicitly ("search the web for ..."); the tool description
-gates it so ordinary questions still get a direct LLM answer. The flow is
+The tool description routes any question whose answer depends on current or
+recent events here (no explicit "search the web" needed), while stable
+general-knowledge questions still get a direct LLM answer. The flow is
 refine -> (search -> assess)* -> answer: one merged LLM call per round grades the
 results against the question and either answers or hands back a refined query plus
 a spoken remark for the retry. Progress lines play through the injected Speaker
@@ -132,8 +133,12 @@ class WebSearchSkill(Skill):
     tool_specs = {
         "web_search": {
             "description": (
-                "Search the live web for current, real-time, or up-to-date information "
-                "(news, prices, recent events). Not for general knowledge or weather."
+                "Search the live web for information that changes over time or happened "
+                "recently: news, sports schedules and scores, game results, prices, "
+                "current events. Use this whenever the answer depends on what is "
+                "happening now or recently — the user does not need to say 'search'. "
+                "Not for stable general knowledge, the current date or time, or the "
+                "weather."
             ),
             "parameters": {
                 "type": "object",

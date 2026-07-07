@@ -402,9 +402,41 @@ async def test_zen_model_options_lists_ids(monkeypatch):
     _patch_transport(monkeypatch, handler)
     opts = await discovery.zen_model_options("https://opencode.ai/zen/v1", "k")
     assert opts == [
-        ("deepseek-v4-flash-free", "deepseek-v4-flash-free"),
+        ("deepseek-v4-flash-free  —  free", "deepseek-v4-flash-free"),
         ("gpt-oss", "gpt-oss"),
     ]
+
+
+async def test_zen_model_options_pins_free_to_top(monkeypatch):
+    def handler(request):
+        # "zzz-free" is alphabetically last but must still sort above paid models.
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "gpt-oss"}, {"id": "zzz-free"}, {"id": "claude-opus"}]},
+        )
+
+    _patch_transport(monkeypatch, handler)
+    opts = await discovery.zen_model_options("https://opencode.ai/zen/v1", "k")
+    assert opts == [
+        ("zzz-free  —  free", "zzz-free"),
+        ("claude-opus", "claude-opus"),
+        ("gpt-oss", "gpt-oss"),
+    ]
+
+
+async def test_zen_model_options_no_auth_header_when_key_blank(monkeypatch):
+    # Regression: a blank key built "Authorization: Bearer " (trailing space), which
+    # httpx rejects as an illegal header value — the request never sent, list empty.
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers.get("Authorization")
+        return httpx.Response(200, json={"data": [{"id": "deepseek-v4-flash-free"}]})
+
+    _patch_transport(monkeypatch, handler)
+    opts = await discovery.zen_model_options("https://opencode.ai/zen/v1", "")
+    assert seen["auth"] is None  # header omitted entirely
+    assert opts == [("deepseek-v4-flash-free  —  free", "deepseek-v4-flash-free")]
 
 
 async def test_zen_model_options_empty_when_down(monkeypatch):

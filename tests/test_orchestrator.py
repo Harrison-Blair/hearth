@@ -343,3 +343,38 @@ async def test_fallback_emits_turn_record(caplog):
     assert turn["tool"] is None
     assert turn["skill"] == "general"
     assert turn["speech"] == "general answer"
+
+
+async def test_routing_guidance_rides_tool_decision_calls_only():
+    # The routing rule is appended to the orchestrator's decide system prompt (both
+    # the native and JSON paths) but must never leak into GeneralSkill's answer path.
+    from assistant.core.orchestrator import _ROUTING_GUIDANCE
+    from assistant.skills.general import GeneralSkill
+
+    class RecordingLLM(ScriptedLLM):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.systems = []
+            self.complete_systems = []
+
+        async def chat_tools(self, messages, *, system=None, tools=None, label=""):
+            self.systems.append(system)
+            return await super().chat_tools(messages, system=system, tools=tools, label=label)
+
+        async def complete(self, prompt, *, system=None, json=False, label=""):  # noqa: A002
+            self.complete_systems.append(system)
+            return await super().complete(prompt, system=system, json=json, label=label)
+
+    reg = _registry(EchoSkill(), default=FallbackSkill())
+    llm = RecordingLLM(
+        chat_tools_raises=True,
+        complete_responses=['{"answer": "fine"}'],
+    )
+    await _orch(llm, reg, tool_mode="auto", system_prompt="BASE").handle("hi", [], spoken=True)
+
+    assert llm.systems == [llm.complete_systems[0]]  # same decide system on both paths
+    assert llm.systems[0].startswith("BASE")
+    assert "web_search" in llm.systems[0]
+    assert _ROUTING_GUIDANCE.strip() in llm.systems[0]
+    # GeneralSkill keeps the un-augmented prompt.
+    assert "web_search" not in GeneralSkill(llm, "BASE")._system

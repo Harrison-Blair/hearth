@@ -246,3 +246,48 @@ def test_prompt_pre_stage_shows_pick_not_result():
     assert "Picked tool: weather" in p
     assert '"when": "today"' in p
     assert "Drafted answer" not in p  # pre stage has no draft yet
+
+
+async def test_reason_extracted_on_reject():
+    llm = FakeLLM(
+        json.dumps({"decision": "reject", "reason": "use web_search instead"})
+    )
+    v = await verify("pre", _ctx("pre"), llm=llm)
+    assert v.reason == "use web_search instead"
+
+
+async def test_reason_survives_spoken_feedback_off():
+    # reason is the neutral diagnostic channel — it is NOT zeroed with the filler.
+    llm = FakeLLM(
+        json.dumps({"decision": "reject", "reason": "wrong tool", "feedback": "hmm"})
+    )
+    v = await verify("pre", _ctx("pre"), llm=llm, spoken_feedback=False)
+    assert v.reason == "wrong tool"
+    assert v.feedback == ""
+
+
+async def test_non_string_reason_coerced_to_empty():
+    llm = FakeLLM(json.dumps({"decision": "reject", "reason": 42}))
+    v = await verify("pre", _ctx("pre"), llm=llm)
+    assert v.reason == ""
+
+
+def test_prompt_includes_reason_field_for_both_stages():
+    assert '"reason"' in _build_prompt("pre", _ctx("pre"), persona_suffix="", spoken_feedback=True)
+    assert '"reason"' in _build_prompt(
+        "post", _ctx("post"), persona_suffix="", spoken_feedback=False
+    )
+
+
+def test_prompt_pre_stage_shows_alternatives():
+    ctx = _ctx("pre")
+    ctx["alternatives"] = [{"tool": "web_search", "arguments": {"query": "x"}}]
+    p = _build_prompt("pre", ctx, persona_suffix="", spoken_feedback=True)
+    assert "Other tools the model also proposed" in p
+    assert '"web_search"' in p
+    assert "If one of the other proposed tools is the right one, rewrite to it." in p
+
+
+def test_prompt_pre_stage_without_alternatives_says_none():
+    p = _build_prompt("pre", _ctx("pre"), persona_suffix="", spoken_feedback=True)
+    assert "Other tools the model also proposed: (none)" in p

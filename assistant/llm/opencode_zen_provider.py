@@ -55,11 +55,11 @@ class OpenCodeZenProvider(LLMProvider):
         self._max_retries = max(0, max_retries)
         self._retry_backoff_s = retry_backoff_s
         # One pooled client reused across every call (a voice turn makes 2+);
-        # a fresh client per request loses keep-alive entirely.
-        self._client = httpx.AsyncClient(
-            timeout=timeout,
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
+        # a fresh client per request loses keep-alive entirely. The auth header is
+        # omitted when the key is blank — httpx rejects a bare ``Bearer `` (empty
+        # token) as an illegal header value before the request is even sent.
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._client = httpx.AsyncClient(timeout=timeout, headers=headers)
 
     async def aclose(self) -> None:
         await self._client.aclose()

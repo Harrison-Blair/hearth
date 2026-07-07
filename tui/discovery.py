@@ -178,19 +178,27 @@ def llm_fallback_options(**_: object) -> list[str]:
     return ["", "ollama", "opencode-zen"]
 
 
+async def _zen_models(base_url: str, api_key: str) -> list[dict]:
+    """Raw model dicts from GET {base_url}/models. The Authorization header is
+    omitted when the key is blank — the endpoint is public, and httpx rejects a
+    bare ``Bearer `` (empty token) as an illegal header value. Raises on
+    transport/HTTP/JSON error; callers fail soft."""
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(f"{base_url.rstrip('/')}/models", headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+    return data.get("data", []) if isinstance(data, dict) else []
+
+
 async def zen_health(base_url: str = "", api_key: str = "", **_: object) -> bool:
     """True if the OpenCode Zen gateway answers at {base_url}/models. Polled often,
     so failures log at debug level."""
     if not base_url:
         return False
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                f"{base_url.rstrip('/')}/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            resp.raise_for_status()
-            return True
+        await _zen_models(base_url, api_key)
+        return True
     except (httpx.HTTPError, _json.JSONDecodeError) as exc:
         log.debug("OpenCode Zen not reachable at %s (%s)", base_url, exc)
         return False
@@ -199,28 +207,22 @@ async def zen_health(base_url: str = "", api_key: str = "", **_: object) -> bool
 async def zen_model_options(
     base_url: str = "", api_key: str = "", **_: object
 ) -> list[tuple[str, str]]:
-    """(id, id) pairs for the Zen model picker. Zen's /v1/models returns only ids
-    (no sizes/params), so label == value. [] on any error; the picker prepends
-    the current value so it's never empty."""
+    """(label, value) pairs for the Zen model picker. Zen's /v1/models returns only
+    ids (no sizes/params), so value == id; free models (id ending ``-free``, e.g.
+    ``deepseek-v4-flash-free``) sort to the top and carry a ``— free`` label. [] on
+    any error; the picker prepends the current value so it's never empty."""
     if not base_url:
         return []
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                f"{base_url.rstrip('/')}/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        models = await _zen_models(base_url, api_key)
     except (httpx.HTTPError, _json.JSONDecodeError) as exc:
         log.warning("OpenCode Zen model listing failed (%s); is the gateway up?", exc)
         return []
-    models = data.get("data", []) if isinstance(data, dict) else []
-    return [
-        (m["id"], m["id"])
-        for m in models
-        if isinstance(m, dict) and m.get("id")
-    ]
+    ids = sorted(
+        (m["id"] for m in models if isinstance(m, dict) and m.get("id")),
+        key=lambda i: (not i.endswith("-free"), i),
+    )
+    return [(f"{i}  —  free" if i.endswith("-free") else i, i) for i in ids]
 
 
 async def llm_model_options(

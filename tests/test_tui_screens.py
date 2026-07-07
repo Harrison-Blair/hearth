@@ -2,9 +2,11 @@
 
 import json
 
+import pytest
 from textual.containers import ScrollableContainer, VerticalScroll
-from textual.widgets import Button, OptionList, SelectionList, Static, Switch
+from textual.widgets import Button, Input, OptionList, SelectionList, Static, Switch
 
+from assistant.core.config import Config
 from tui import configfile, discovery
 from tui.app import AssistantTUI
 from tui.config_schema import FIELDS
@@ -13,11 +15,23 @@ from tui.screens.home import HomeScreen
 from tui.screens.logs import ChatModal, LogsScreen
 from tui.screens.models import InstalledScreen, ModelDetailScreen, ModelsScreen
 from tui.screens.now import NowScreen
+from tui.screens.picker import PickerScreen
 from tui.screens.voices import VoicesScreen
 from tui.supervisor import DaemonSupervisor
 from tui.widgets import Stepper
 
 SIZE = (40, 30)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_config(monkeypatch):
+    # Seed the app from typed defaults, never the developer's live config.yaml
+    # (full section dumps: init dicts deep-merge with yaml, so every key must win).
+    monkeypatch.setattr(
+        discovery,
+        "current_config",
+        lambda: Config(**{n: f.default.model_dump() for n, f in Config.model_fields.items()}),
+    )
 
 
 class FakeSupervisor(DaemonSupervisor):
@@ -125,7 +139,7 @@ async def test_volume_buttons_send_control_commands(monkeypatch):
         await pilot.pause()
         app.pop_screen()  # Now -> Home (the volume controls live on Home)
         await pilot.pause()
-        start = app._volume
+        app._volume = start = 0.5  # below the 1.0 clamp so vol-up has headroom
         app.supervisor.sent.clear()
         await pilot.click("#vol-up")
         await pilot.pause()
@@ -700,3 +714,34 @@ async def test_restart_llm_button_hidden_without_ollama_in_chain(monkeypatch):
         app._refresh_status()
         await pilot.pause()
         assert row.display is False
+
+
+async def test_picker_filters_and_selects(monkeypatch):
+    app = _make_app(monkeypatch)
+    options = [
+        ("deepseek-v4-flash-free  —  free", "deepseek-v4-flash-free"),
+        ("claude-opus-4.8", "claude-opus-4.8"),
+        ("gpt-5.5", "gpt-5.5"),
+    ]
+    picked: list[str | None] = []
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.push_screen(
+            PickerScreen("LLM model", options, "claude-opus-4.8"), picked.append
+        )
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PickerScreen)
+        opts = screen.query_one("#picker-options", OptionList)
+        assert opts.option_count == 3  # all shown before filtering
+        _assert_fits_40_cols(screen, "picker")
+
+        screen.query_one("#picker-filter", Input).value = "free"
+        await pilot.pause()
+        assert opts.option_count == 1  # only the free model matches
+        assert screen._visible[0][1] == "deepseek-v4-flash-free"
+
+        opts.highlighted = 0  # pick the single filtered row
+        await pilot.press("enter")
+        await pilot.pause()
+    assert picked == ["deepseek-v4-flash-free"]

@@ -31,7 +31,10 @@ class ClockSkill(Skill):
     tool_specs = {
         "time": {"description": "Get the current clock time.", "parameters": _NO_ARGS},
         "date": {
-            "description": "Get today's date or the day of the week.",
+            "description": (
+                "Get today's calendar date or day of the week. Only for asking what "
+                "the date/day is — not for events, schedules, or news happening today."
+            ),
             "parameters": _NO_ARGS,
         },
     }
@@ -43,6 +46,8 @@ class ClockSkill(Skill):
         now = self._now()
         if intent.type == "date":
             speech = f"Today is {now:%A, %B} {_ordinal(now.day)}."
+            data = {"date": now.date().isoformat(), "weekday": f"{now:%A}"}
         else:
             speech = f"It's {now:%-I:%M %p}."
-        return SkillResult(speech=speech)
+            data = {"time": f"{now:%H:%M}"}
+        return SkillResult(speech=speech, data=data)

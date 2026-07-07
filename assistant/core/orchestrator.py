@@ -31,6 +31,15 @@ from assistant.skills.base import Skill, SkillRegistry
 
 log = logging.getLogger(__name__)
 
+# Appended to the tool-decision system prompt only (never GeneralSkill's answer
+# prompt). Hard-coded like verify.py's judgment prompt, not a config tunable.
+_ROUTING_GUIDANCE = (
+    "When picking a tool: questions about schedules, scores, news, prices, or "
+    "anything happening now or recently need web_search even if the user does not "
+    "say 'search'; the date/time tools only answer what the date or time IS. "
+    "Answer stable general knowledge directly without a tool."
+)
+
 
 class Orchestrator:
     # Break to the general fallback if the model calls one tool name more than this
@@ -56,7 +65,7 @@ class Orchestrator:
         self._registry = registry
         self._tool_mode = tool_mode
         self._max_rounds = max(1, max_tool_rounds)
-        self._system = system_prompt
+        self._system = " ".join(p for p in (system_prompt.strip(), _ROUTING_GUIDANCE) if p)
         # When set, a no-tool direct answer is regenerated through the default
         # skill (which carries the persona voice) instead of spoken verbatim from
         # the persona-free tool-decision call. Off = byte-identical passthrough.
@@ -119,6 +128,20 @@ class Orchestrator:
                         if call.name not in self._tool_names:
                             log.warning("Model called unknown tool %r; falling back", call.name)
                             break
+                        # Only one call executes per round (skill speech is terminal);
+                        # the rest are surfaced to the pre-verifier as alternatives
+                        # rather than silently dropped.
+                        alternatives = [
+                            {"tool": c.name, "arguments": dict(c.arguments)}
+                            for c in resp.tool_calls[1:]
+                            if c.name in self._tool_names and c.name != call.name
+                        ]
+                        if len(resp.tool_calls) > 1:
+                            log.info(
+                                "Model proposed %d tool calls; considering %r, alternatives: %s",
+                                len(resp.tool_calls), call.name,
+                                [a["tool"] for a in alternatives],
+                            )
 
                         # PRE-verify: review the pick + args before the skill runs.
                         if (
@@ -133,6 +156,7 @@ class Orchestrator:
                                     "history": history_dicts,
                                     "tool": call.name,
                                     "arguments": dict(call.arguments),
+                                    "alternatives": alternatives,
                                 },
                                 llm=self._llm,
                                 persona_suffix=self._persona_suffix,
@@ -143,6 +167,11 @@ class Orchestrator:
                                 prev_verify_reject = True
                                 if await self._speak_filler(verdict, on_say):
                                     return SkillResult(speech=""), None  # barged: give the mic back
+                                messages.append(
+                                    self._reject_feedback(
+                                        "pre", text, call, verdict, alternatives=alternatives
+                                    )
+                                )
                                 continue  # re-decide (consumes a max_tool_rounds iteration)
                             if (
                                 verdict is not None
@@ -210,6 +239,11 @@ class Orchestrator:
                                 prev_verify_reject = True
                                 if await self._speak_filler(verdict, on_say):
                                     return SkillResult(speech=""), None  # barged
+                                messages.append(
+                                    self._reject_feedback(
+                                        "post", text, call, verdict, draft=result.speech
+                                    )
+                                )
                                 continue  # re-decide (skill already ran; side effect stands)
                             if (
                                 verdict is not None
@@ -386,6 +420,41 @@ class Orchestrator:
             'To answer from general knowledge: {"answer": "<one or two short spoken sentences>"}.\n'
             f'Request: "{text}"'
         )
+
+    @staticmethod
+    def _reject_feedback(
+        stage: str,
+        text: str,
+        call: ToolCall,
+        verdict: Verdict,
+        draft: str = "",
+        alternatives: list[dict] | None = None,
+    ) -> dict:
+        # One user-role message (not an assistant+tool pair: a `tool` message is
+        # malformed when the skill never ran, and _decide_json reads only the last
+        # message's content) telling the model why its pick was rejected.
+        reason = verdict.reason or verdict.feedback
+        if stage == "pre":
+            detail = (
+                f'A verification step rejected calling the tool "{call.name}" with '
+                f"arguments {json.dumps(call.arguments)}"
+            )
+        else:
+            detail = (
+                f'A verification step rejected the answer "{draft}" from the tool '
+                f'"{call.name}" with arguments {json.dumps(call.arguments)}'
+            )
+        if reason:
+            detail += f": {reason}"
+        if alternatives:
+            detail += f". You also proposed: {json.dumps(alternatives)}"
+        return {
+            "role": "user",
+            "content": (
+                f"{detail}. Do not repeat that choice — pick a different tool or "
+                f'answer directly. My request: "{text}"'
+            ),
+        }
 
     @staticmethod
     def _tool_feedback(call: ToolCall, result: SkillResult) -> list[dict]:

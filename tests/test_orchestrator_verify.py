@@ -92,13 +92,17 @@ class ScriptedLLM:
         self._complete_responses = list(complete_responses or [])
         self.chat_tools_calls = 0
         self.complete_calls = 0
+        self.tool_messages: list[list[dict]] = []  # messages per _decide call
+        self.complete_prompts: list[str] = []  # prompt per verify call
 
     async def chat_tools(self, messages, *, system=None, tools=None, label=""):
         self.chat_tools_calls += 1
+        self.tool_messages.append([dict(m) for m in messages])
         return self._tool_responses.pop(0) if self._tool_responses else ChatResponse()
 
     async def complete(self, prompt, *, system=None, json=False, label=""):  # noqa: A002
         self.complete_calls += 1
+        self.complete_prompts.append(prompt)
         return self._complete_responses.pop(0)
 
     async def chat(self, messages, *, system=None, label=""):
@@ -483,3 +487,117 @@ async def test_verify_failopen_treats_bad_verdict_as_approve():
     result, skill = await orch.handle("echo hi", [], spoken=True, on_say=SayRecorder())
     assert result.speech == "echoed"  # fail-open: both verifies treated as approve
     assert skill is echo
+
+
+async def test_pre_reject_reason_feeds_the_redecide():
+    # The verifier's neutral reason must reach the model's next decide as a user
+    # message naming the rejected tool, the reason, and the original request.
+    echo = EchoSkill()
+    other = OtherSkill()
+    reg = _reg(echo, other, default=FallbackSkill())
+    llm = ScriptedLLM(
+        tool_responses=[_echo_call(), _other_call()],
+        complete_responses=[
+            _verdict("reject", reason="use the other tool instead", feedback="hold on"),
+            _verdict("approve"),  # pre1
+            _verdict("approve"),  # post1
+        ],
+    )
+    orch = Orchestrator(llm, reg, tool_mode="native", verify=VerifyConfig())
+    result, skill = await orch.handle("echo hi", [], spoken=True, on_say=SayRecorder())
+    assert skill is other
+    first, second = llm.tool_messages
+    assert len(second) == len(first) + 1  # exactly one injected message
+    injected = second[-1]
+    assert injected["role"] == "user"
+    assert '"echo"' in injected["content"]  # the rejected tool
+    assert "use the other tool instead" in injected["content"]  # the reason
+    assert "echo hi" in injected["content"]  # the original request
+
+
+async def test_post_reject_reason_and_draft_feed_the_redecide():
+    echo = EchoSkill(speech="wrong draft")
+    other = OtherSkill()
+    reg = _reg(echo, other, default=FallbackSkill())
+    llm = ScriptedLLM(
+        tool_responses=[_echo_call(), _other_call()],
+        complete_responses=[
+            _verdict("approve"),  # pre0
+            _verdict("reject", reason="the answer ignored the question"),  # post0
+            _verdict("approve"),  # pre1
+            _verdict("approve"),  # post1
+        ],
+    )
+    orch = Orchestrator(llm, reg, tool_mode="native", verify=VerifyConfig())
+    result, skill = await orch.handle("echo hi", [], spoken=True, on_say=SayRecorder())
+    assert skill is other
+    injected = llm.tool_messages[1][-1]
+    assert injected["role"] == "user"
+    assert "wrong draft" in injected["content"]  # the rejected draft
+    assert "the answer ignored the question" in injected["content"]
+    assert "echo hi" in injected["content"]
+
+
+async def test_pre_reject_without_reason_falls_back_to_feedback_text():
+    echo = EchoSkill()
+    reg = _reg(echo, default=FallbackSkill())
+    llm = ScriptedLLM(
+        tool_responses=[_echo_call(), _echo_call()],
+        complete_responses=[
+            _verdict("reject", feedback="that tool cannot answer this"),
+            _verdict("approve"),  # pre1
+            _verdict("approve"),  # post1
+        ],
+    )
+    orch = Orchestrator(llm, reg, tool_mode="native", verify=VerifyConfig())
+    await orch.handle("echo hi", [], spoken=True, on_say=SayRecorder())
+    injected = llm.tool_messages[1][-1]
+    assert injected["role"] == "user"
+    assert "that tool cannot answer this" in injected["content"]
+
+
+async def test_extra_tool_calls_surface_as_alternatives_to_pre_verify():
+    # The model proposes two calls; only the first is considered, but the second
+    # must appear in the pre-verify prompt so the verifier can rewrite to it.
+    echo = EchoSkill()
+    other = OtherSkill()
+    reg = _reg(echo, other, default=FallbackSkill())
+    llm = ScriptedLLM(
+        tool_responses=[
+            ChatResponse(tool_calls=[ToolCall("echo", {"text": "hi"}), ToolCall("other", {"q": "x"})])
+        ],
+        complete_responses=[
+            _verdict("rewrite", rewritten_tool="other", rewritten_arguments={"q": "x"}),
+            _verdict("approve"),  # post
+        ],
+    )
+    orch = Orchestrator(llm, reg, tool_mode="native", verify=VerifyConfig())
+    result, skill = await orch.handle("do a thing", [], spoken=True, on_say=SayRecorder())
+    pre_prompt = llm.complete_prompts[0]
+    assert "Other tools the model also proposed" in pre_prompt
+    assert '"other"' in pre_prompt
+    assert skill is other  # the verifier's rewrite to the alternative ran
+    assert other.calls == 1
+    assert echo.calls == 0
+
+
+async def test_alternatives_ride_the_pre_reject_feedback():
+    echo = EchoSkill()
+    other = OtherSkill()
+    reg = _reg(echo, other, default=FallbackSkill())
+    llm = ScriptedLLM(
+        tool_responses=[
+            ChatResponse(tool_calls=[ToolCall("echo", {"text": "hi"}), ToolCall("other", {"q": "x"})]),
+            _other_call(),
+        ],
+        complete_responses=[
+            _verdict("reject", reason="echo cannot answer this"),
+            _verdict("approve"),  # pre1
+            _verdict("approve"),  # post1
+        ],
+    )
+    orch = Orchestrator(llm, reg, tool_mode="native", verify=VerifyConfig())
+    await orch.handle("do a thing", [], spoken=True, on_say=SayRecorder())
+    injected = llm.tool_messages[1][-1]
+    assert "You also proposed" in injected["content"]
+    assert '"other"' in injected["content"]

@@ -37,7 +37,7 @@ stt:
   log_prob_threshold: -1.0
   hallucination_max_rms: 300.0
 llm:
-  provider: ollama
+  provider: opencode-zen
   model: gemma4:12b
   host: http://localhost:11434
   timeout: 60.0
@@ -47,11 +47,10 @@ llm:
   serve_cmd:
   - ollama
   - serve
-  # OpenCode Zen (provider: opencode-zen). Token via ASSISTANT_LLM__API_KEY env var.
-  api_key: ""
+  api_key: ''
   base_url: https://opencode.ai/zen/v1
-  fallback: ""              # e.g. "ollama" to fall back to local when the primary is down
-  fallback_model: ""
+  fallback: ollama
+  fallback_model: qwen3:14b
   max_retries: 2
 persona:
   enabled: true
@@ -59,7 +58,7 @@ persona:
 agent:
   tool_mode: auto
   max_tool_rounds: 3
-  turn_timeout_s: 45.0
+  turn_timeout_s: 45
 verify:
   enabled: true
   pre: true
@@ -70,10 +69,7 @@ tts:
   voice: en_US-lessac-medium
   model_path: models/piper/en_US-lessac-medium.onnx
   length_scale: 1
-  ack_phrases:
-  - Hello!
-  - What can I help you with?
-  - Yes?
+  ack_phrases: []
   unsure_ack_phrases:
   - Did you say something?
   - What was that?
@@ -94,9 +90,9 @@ web_search:
   max_snippet_chars: 500
   max_rounds: 2
   progress_updates: true
-  tavily_api_key: ""
+  tavily_api_key: ''
   tavily_endpoint: https://api.tavily.com/search
-  exa_api_key: ""
+  exa_api_key: ''
 weather:
   latitude: 33.749
   longitude: -84.38798
@@ -141,20 +137,20 @@ conversation:
   - nevermind
   - never mind
 aec:
-  enabled: false # echo-cancel the mic against playback (needs the aec extra)
+  enabled: false
   frame_ms: 20
-  filter_length_ms: 200 # echo tail the canceller adapts over
-  extra_delay_ms: 0 # output-path latency compensation; tune on-device
+  filter_length_ms: 200
+  extra_delay_ms: 0
 barge_in:
-  enabled: false # wake word during a reply cuts playback and reopens the mic
-  threshold: 0.80 # score gate while we're speaking (>= wake.threshold)
-  trigger_frames: 3 # consecutive gated hits required (self-echo debounce)
-  announcements: false # also barge into reminder/calendar announcements
+  enabled: false
+  threshold: 0.8
+  trigger_frames: 3
+  announcements: false
 logging:
-  level: INFO # console (stderr) level; the TUI parses that format
-  dir: logs # per-run log files land here (gitignored)
-  file_enabled: true # write per-run plain-text + JSONL files
-  file_level: INFO # file handlers' level; set DEBUG when deep-debugging
-  rotate_max_bytes: 10485760 # size cap per file within a run (10 MiB)
-  rotate_backups: 3 # rotated chunks kept per file within a run
-  runs_to_keep: 20 # runs retained at boot; older pruned (0 = keep all)
+  level: INFO
+  dir: logs
+  file_enabled: true
+  file_level: INFO
+  rotate_max_bytes: 10485760
+  rotate_backups: 3
+  runs_to_keep: 20

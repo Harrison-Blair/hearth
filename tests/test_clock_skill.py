@@ -13,12 +13,19 @@ async def test_time_is_spoken_12_hour():
         Command("what time is it"), Intent("time")
     )
     assert res.speech == "It's 3:42 PM."
+    assert res.data == {"time": "15:42"}
 
 
 async def test_date_is_spoken_with_ordinal():
     dt = datetime(2026, 6, 25, 15, 42)
     res = await _clock_at(dt).handle(Command("what's the date"), Intent("date"))
     assert res.speech == f"Today is {dt:%A, %B} 25th."
+    assert res.data == {"date": "2026-06-25", "weekday": "Thursday"}
+
+
+def test_date_description_excludes_todays_events():
+    desc = ClockSkill.tool_specs["date"]["description"]
+    assert "not for events, schedules, or news" in desc
 
 
 def test_ordinal_suffixes():

@@ -1,9 +1,21 @@
+import pytest
 from textual.widgets import Static
 
-from assistant.core.config import LlmConfig
+from assistant.core.config import Config, LlmConfig
 from tui import discovery
 from tui.app import AssistantTUI
 from tui.supervisor import DaemonSupervisor
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_config(monkeypatch):
+    # Seed the app from typed defaults, never the developer's live config.yaml
+    # (full section dumps: init dicts deep-merge with yaml, so every key must win).
+    monkeypatch.setattr(
+        discovery,
+        "current_config",
+        lambda: Config(**{n: f.default.model_dump() for n, f in Config.model_fields.items()}),
+    )
 
 
 def test_serve_cmd_default():

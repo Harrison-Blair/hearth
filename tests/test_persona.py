@@ -4,7 +4,7 @@ of the tool-decision / JSON-structured paths."""
 from assistant.core import persona
 from assistant.core.config import Config, PersonaConfig
 from assistant.core.events import Command, Intent, SkillResult, ToolCall
-from assistant.core.orchestrator import Orchestrator
+from assistant.core.orchestrator import _ROUTING_GUIDANCE, Orchestrator
 from assistant.llm.base import ChatResponse
 from assistant.search.base import SearchResult
 from assistant.skills.base import Skill, SkillRegistry
@@ -235,8 +235,9 @@ async def test_direct_answer_delegates_to_general_when_enabled():
 
     assert general.calls == 1  # regenerated through the persona-bearing skill
     assert result.speech == "Fine, fine — Paris."
-    # The tool-decision call was made with the persona-free base prompt.
-    assert llm.tool_systems == ["BASE"]
+    # The tool-decision call was made with the persona-free base prompt (plus the
+    # persona-free routing guidance).
+    assert llm.tool_systems == ["BASE " + _ROUTING_GUIDANCE]
 
 
 async def test_direct_answer_verbatim_when_disabled():
@@ -263,7 +264,8 @@ async def test_tool_call_arguments_unaffected_by_delegation():
     await orch.handle("echo hi", [], spoken=True)
 
     assert echo.received.slots == {"text": "hi"}  # structured args intact
-    assert llm.tool_systems == ["BASE"]  # persona never entered tool selection
+    # persona never entered tool selection (routing guidance is persona-free)
+    assert llm.tool_systems == ["BASE " + _ROUTING_GUIDANCE]
 
 
 # --- Config ---------------------------------------------------------------

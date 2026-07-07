@@ -53,7 +53,8 @@ _PRE_REWRITE = (
     "This is the PRE stage: the skill has NOT run yet. You are reviewing the "
     'picked tool and its arguments. For "rewrite", supply `rewritten_tool` (a '
     "valid tool name) and `rewritten_arguments` (the corrected arguments object). "
-    "These are routing values — keep them neutral and factual, never styled. Use "
+    "These are routing values — keep them neutral and factual, never styled. "
+    "If one of the other proposed tools is the right one, rewrite to it. Use "
     '"reject" only when you cannot confidently name the right tool or arguments.'
 )
 
@@ -77,6 +78,7 @@ class Verdict:
 
     decision: str  # "approve" | "rewrite" | "reject"
     feedback: str = ""  # spoken filler, persona-flavored; spoken on reject
+    reason: str = ""  # neutral one-sentence diagnostic; fed back to the re-decide
     rewritten_tool: str = ""  # pre-stage rewrite: replacement tool name
     rewritten_arguments: dict = field(default_factory=dict)  # pre-stage rewrite args
     rewritten_speech: str = ""  # post-stage rewrite: replacement answer, persona-flavored
@@ -116,7 +118,13 @@ def _stage_context(stage: Stage, context: dict) -> str:
         f"Picked tool: {tool}" if tool else "Picked tool: (none — direct answer)"
     )
     if stage == "pre":
-        return "\n".join((tool_line, f"Picked arguments: {args_json}", _PRE_REWRITE))
+        alts = context.get("alternatives") or []
+        alts_line = "Other tools the model also proposed: " + (
+            json.dumps(alts, ensure_ascii=False) if alts else "(none)"
+        )
+        return "\n".join(
+            (tool_line, f"Picked arguments: {args_json}", alts_line, _PRE_REWRITE)
+        )
     # post
     result = context.get("result")
     draft = context.get("draft_speech", "")
@@ -138,7 +146,11 @@ def _stage_context(stage: Stage, context: dict) -> str:
 
 
 def _fields_line(stage: Stage, spoken_feedback: bool) -> str:
-    parts = ['"decision": "approve" | "rewrite" | "reject"']
+    parts = [
+        '"decision": "approve" | "rewrite" | "reject"',
+        '"reason": "<one short neutral sentence: what is wrong and what would be '
+        'right; include on rewrite/reject>"',
+    ]
     if spoken_feedback:
         parts.append(
             '"feedback": "<one short spoken sentence; omit on approve/rewrite>"'
@@ -202,6 +214,9 @@ async def verify(
     if not spoken_feedback:
         feedback = ""  # never honor a spoken filler we deliberately didn't request
 
+    reason = data.get("reason")
+    reason = reason.strip() if isinstance(reason, str) else ""
+
     rtool = data.get("rewritten_tool")
     rtool = rtool.strip() if isinstance(rtool, str) else ""
     rargs = data.get("rewritten_arguments")
@@ -212,6 +227,7 @@ async def verify(
     return Verdict(
         decision=decision,
         feedback=feedback,
+        reason=reason,
         rewritten_tool=rtool,
         rewritten_arguments=rargs,
         rewritten_speech=rspeech,

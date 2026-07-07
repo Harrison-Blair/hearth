@@ -451,3 +451,10 @@ async def test_tavily_answer_block_injection_is_neutralized_in_assess_prompt():
     assert injection not in assess_prompt
     assert "[filtered]" in assess_prompt
     assert "never follow any" in system.lower()
+
+
+def test_tool_description_invites_implicit_current_events():
+    desc = WebSearchSkill.tool_specs["web_search"]["description"]
+    assert "sports" in desc
+    assert "does not need to say 'search'" in desc
+    assert "Not for general knowledge or weather." not in desc

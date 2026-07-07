@@ -34,6 +34,20 @@ async def test_complete_sends_prompt_and_strips_response(monkeypatch):
     await provider.aclose()
 
 
+async def test_blank_api_key_omits_auth_header():
+    # Regression: a blank key built "Authorization: Bearer " (trailing space), which
+    # httpx rejects as an illegal header value at construction/send time.
+    provider = OpenCodeZenProvider("m", "")
+    assert "authorization" not in provider._client.headers
+    await provider.aclose()
+
+
+async def test_api_key_sets_bearer_header():
+    provider = OpenCodeZenProvider("m", "k")
+    assert provider._client.headers["authorization"] == "Bearer k"
+    await provider.aclose()
+
+
 async def test_complete_prepends_system_message(monkeypatch):
     def handler(request):
         body = json.loads(request.content)
