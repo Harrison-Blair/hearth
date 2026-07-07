@@ -2,7 +2,7 @@
 id: FTHR-003
 title: "Tracer: routed web-search seam + Tavily provider end-to-end"
 plumage: PLM-002
-status: hatching
+status: fledged
 priority: P1
 depends_on: []
 oversight: merge
