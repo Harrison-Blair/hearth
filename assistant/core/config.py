@@ -213,7 +213,7 @@ class WebSearchConfig(BaseModel):
     # Real keys arrive only via ASSISTANT_WEB_SEARCH__TAVILY_API_KEY / __EXA_API_KEY.
     tavily_api_key: str = ""
     tavily_endpoint: str = "https://api.tavily.com/search"
-    exa_api_key: str = ""  # reserved for FTHR-004
+    exa_api_key: str = ""
 
 
 class WeatherConfig(BaseModel):
