@@ -84,6 +84,16 @@ def test_web_search_env_override(monkeypatch):
     assert Config().web_search.result_count == 5
 
 
+def test_web_search_api_keys_default_empty():
+    assert WebSearchConfig().tavily_api_key == ""
+    assert WebSearchConfig().exa_api_key == ""
+
+
+def test_web_search_tavily_api_key_env_override(monkeypatch):
+    monkeypatch.setenv("ASSISTANT_WEB_SEARCH__TAVILY_API_KEY", "test-key-123")
+    assert Config().web_search.tavily_api_key == "test-key-123"
+
+
 def test_weather_env_override(monkeypatch):
     monkeypatch.setenv("ASSISTANT_WEATHER__LATITUDE", "40.7")
     assert Config().weather.latitude == 40.7
