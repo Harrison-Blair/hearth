@@ -1,7 +1,7 @@
 ---
 id: PLM-001
 title: "Self-update: restart in place to apply on-disk changes"
-status: hatched
+status: fledged
 priority: P2
 authored: 2026-07-07T02:54:03Z
 agent: fledge-orchestrate/planning
@@ -73,23 +73,23 @@ Numbered, testable statements of behavior. Referenced downstream as FC-1, FC-2, 
 
 ## Acceptance Criteria
 Checkbox list of verifiable conditions under which this plumage is considered fledged, one `- [ ] AC-N: …` line each. Authored unchecked; checked only via `fledge criteria check` at plumage closeout.
-- [ ] AC-1: A spoken "update yourself" (and at least one paraphrase, e.g. "restart
+- [x] AC-1: A spoken "update yourself" (and at least one paraphrase, e.g. "restart
       with the new code") routes to the update-self intent and produces a spoken
       confirmation prompt rather than an immediate restart.
-- [ ] AC-2: The same command typed into the monitor chat routes to the update-self
+- [x] AC-2: The same command typed into the monitor chat routes to the update-self
       intent.
-- [ ] AC-3: Confirming the prompt produces an in-character sign-off utterance and
+- [x] AC-3: Confirming the prompt produces an in-character sign-off utterance and
       then triggers a restart-in-place; the freshly started process is running the
       code as it exists on disk at restart time.
-- [ ] AC-4: Declining, replying with something unrelated, or staying silent cancels:
+- [x] AC-4: Declining, replying with something unrelated, or staying silent cancels:
       no restart occurs and the assistant resumes normal listening.
-- [ ] AC-5: The update flow makes no network, git, or package-install calls (verified
+- [x] AC-5: The update flow makes no network, git, or package-install calls (verified
       by the absence of such effects in the exercised path).
-- [ ] AC-6: Under the monitor TUI, a confirmed update restarts the daemon without the
+- [x] AC-6: Under the monitor TUI, a confirmed update restarts the daemon without the
       TUI treating it as a crash, and the assistant is responsive again afterward.
-- [ ] AC-7: Standalone (no TUI), a confirmed update restarts the process in place and
+- [x] AC-7: Standalone (no TUI), a confirmed update restarts the process in place and
       it resumes listening without manual relaunch.
-- [ ] AC-8: On-disk stores (reminders, calendar state) are intact after an update
+- [x] AC-8: On-disk stores (reminders, calendar state) are intact after an update
       restart.
 
 ## Out of Scope
