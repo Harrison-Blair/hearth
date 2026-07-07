@@ -91,13 +91,13 @@ handled it) before any change, then passing.
   it. Pins down subtlety (1). (FC-7 robustness)
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing (or meaningfully exercising
+- [x] AC-1: The tests listed above were observed failing (or meaningfully exercising
       the re-exec path) before implementation and pass after.
-- [ ] AC-2: Under `DaemonSupervisor`, an in-place `os.execv` re-exec keeps `running`
+- [x] AC-2: Under `DaemonSupervisor`, an in-place `os.execv` re-exec keeps `running`
       `True` and does not terminate `lines()`; the TUI pump therefore never enters the
       `stopped` state at the re-exec boundary. (PLM-001 FC-7)
-- [ ] AC-3: The parent-death signal is confirmed to survive the self-re-exec (or is
+- [x] AC-3: The parent-death signal is confirmed to survive the self-re-exec (or is
       re-armed so a TUI crash still reaps the re-exec'd daemon). (PLM-001 FC-7)
-- [ ] AC-4: Any production change to `tui/supervisor.py` or `tui/app.py` is limited to
+- [x] AC-4: Any production change to `tui/supervisor.py` or `tui/app.py` is limited to
       what a failing test required; no unrelated refactor. (scope discipline)
-- [ ] AC-5: `pytest` is green and `ruff check` is clean over the touched files.
+- [x] AC-5: `pytest` is green and `ruff check` is clean over the touched files.
