@@ -64,10 +64,10 @@ prompt), then pass with the break reverted — evidence captured in the molt
 file per AC-2.
 
 ## Acceptance Criteria
-- [ ] AC-1: All new invariant tests pass on the completed PLM-003 stack.
-- [ ] AC-2: Each invariant test was observed failing under a deliberate
+- [x] AC-1: All new invariant tests pass on the completed PLM-003 stack.
+- [x] AC-2: Each invariant test was observed failing under a deliberate
       seam break (documented break → failure → revert → pass), proving it
       guards the behavior (PLM-003 AC-7).
-- [ ] AC-3: No production file is modified by this feather.
-- [ ] AC-4: `ruff check assistant tests` and the full suite pass without
+- [x] AC-3: No production file is modified by this feather.
+- [x] AC-4: `ruff check assistant tests` and the full suite pass without
       native extras or network (closes PLM-003 AC-8).
