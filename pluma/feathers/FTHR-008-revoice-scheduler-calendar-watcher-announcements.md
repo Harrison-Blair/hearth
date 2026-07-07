@@ -57,12 +57,12 @@ against unchanged code for the expected reason; (3) implement until they
 pass.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before
+- [x] AC-1: The tests listed above were observed failing before
       implementation and pass after.
-- [ ] AC-2: Due-reminder, catch-up (one call), and calendar announcements
+- [x] AC-2: Due-reminder, catch-up (one call), and calendar announcements
       all pass through the shared Revoicer before TTS (PLM-003 AC-2).
-- [ ] AC-3: With `revoicer=None` or persona disabled, both schedulers'
+- [x] AC-3: With `revoicer=None` or persona disabled, both schedulers'
       spoken output is byte-identical to today; a failing revoice never
       drops or delays an announcement beyond `revoice_timeout_s`.
-- [ ] AC-4: `ruff check assistant tests` and the full suite pass without
+- [x] AC-4: `ruff check assistant tests` and the full suite pass without
       native extras or network.

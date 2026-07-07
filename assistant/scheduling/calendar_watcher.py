@@ -22,6 +22,7 @@ from assistant.audio.base import AudioOut
 from assistant.calendar.base import CalendarProvider, speakable_title
 from assistant.calendar.blocklist import EventBlocklist
 from assistant.core.arbiter import AudioArbiter
+from assistant.core.revoice import Revoicer
 from assistant.core.standdown import StandDown
 from assistant.skills.base import local_now
 from assistant.storage.calendar_state import CalendarStateStore
@@ -48,6 +49,7 @@ class CalendarWatcher:
         enabled: bool = True,
         now: Callable[[], datetime] = local_now,
         standdown: StandDown | None = None,
+        revoicer: Revoicer | None = None,
     ) -> None:
         self._provider = provider
         self._state = state
@@ -62,6 +64,7 @@ class CalendarWatcher:
         self.enabled = enabled  # config sets the boot state; the skill flips it
         # While standing down, polls are skipped (no fetch, no announcements).
         self._standdown = standdown or StandDown()
+        self._revoicer = revoicer
 
     async def run(self) -> None:
         log.info(
@@ -104,6 +107,8 @@ class CalendarWatcher:
             text = f"You have {title} in {minutes} minute{'' if minutes == 1 else 's'}."
         try:
             log.info("Calendar announcement: %r", text)
+            if self._revoicer is not None:
+                text = await self._revoicer.revoice(text)
             async with self._arbiter.hold("calendar"):
                 await self._audio_out.play(await self._tts.synthesize(text))
         except Exception as exc:  # noqa: BLE001 - unmarked, so the next poll retries

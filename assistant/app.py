@@ -341,6 +341,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
             lead_minutes=config.calendar.watcher_lead_minutes,
             enabled=config.calendar.watcher_enabled,
             standdown=standdown,
+            revoicer=revoicer,
         )
         registry.register(CalendarSkill(
             calendar_provider,
@@ -472,7 +473,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     )
     scheduler = ReminderScheduler(
         store, tts, out, arbiter, poll_seconds=config.scheduling.poll_seconds,
-        standdown=standdown,
+        standdown=standdown, revoicer=revoicer,
     )
     # Optional control channel: line commands on stdin (typed commands, live
     # volume) from the monitor TUI when the daemon runs as its child.
