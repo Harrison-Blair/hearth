@@ -63,12 +63,12 @@ Implementation order is fixed: (1) write the tests; (2) confirm they FAIL agains
 unchanged code for the expected reason; (3) implement until they pass.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and
+- [x] AC-1: The tests listed above were observed failing before implementation and
       pass after.
-- [ ] AC-2: A semantic query end-to-end through `WebSearchSkill` (stubbed Exa) is
+- [x] AC-2: A semantic query end-to-end through `WebSearchSkill` (stubbed Exa) is
       served by `ExaSearch` and produces a spoken, attributed answer
       (PLM-002 AC-2).
-- [ ] AC-3: Exa failure/missing key degrades exactly as FTHR-003's fallback
+- [x] AC-3: Exa failure/missing key degrades exactly as FTHR-003's fallback
       contract (spoken notice + keyless tier) with no code changes to the skill.
-- [ ] AC-4: No key in committed files; `ruff check assistant tests` and the full
+- [x] AC-4: No key in committed files; `ruff check assistant tests` and the full
       suite pass with no network (PLM-002 AC-6/AC-7).
