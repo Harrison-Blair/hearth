@@ -2,7 +2,7 @@
 id: FTHR-001
 title: Self-update skill and restart-in-place (source mode)
 plumage: PLM-001
-status: hatching
+status: fledged
 priority: P2
 depends_on: []
 oversight: merge
