@@ -2,7 +2,7 @@
 id: FTHR-002
 title: TUI supervisor survives in-place re-exec
 plumage: PLM-001
-status: egg
+status: hatching
 priority: P2
 depends_on: [FTHR-001]
 oversight: merge
