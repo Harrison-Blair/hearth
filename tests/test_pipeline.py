@@ -102,13 +102,16 @@ class FakeSkill(Skill):
     name = "fake"
     intents = {"general"}
 
-    def __init__(self, speech="it is noon", expects_reply=False):
+    def __init__(self, speech="it is noon", expects_reply=False,
+                 reply_speech="reply handled", reply_restart=False):
         self.handled = []
         self.histories = []
         self.spokens = []
         self.replies = []
         self._speech = speech
         self._expects_reply = expects_reply
+        self._reply_speech = reply_speech
+        self._reply_restart = reply_restart
 
     async def handle(self, cmd, intent):
         self.handled.append((cmd.text, intent.type))
@@ -118,7 +121,7 @@ class FakeSkill(Skill):
 
     async def handle_reply(self, cmd):
         self.replies.append(cmd.text)
-        return SkillResult(speech="reply handled")
+        return SkillResult(speech=self._reply_speech, restart=self._reply_restart)
 
 
 class FakeTTS:
@@ -172,7 +175,7 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
               decline_phrases=None, confirm_earcon=b"", end_phrases=None,
               ack_delay_s=0.0, standdown=None, barge_in_enabled=False,
               barge_in_threshold=0.8, barge_in_trigger_frames=3,
-              barge_in_announcements=False):
+              barge_in_announcements=False, restart_in_place=None):
     # Tests pass a single wake_earcon for convenience; the pipeline takes a pool.
     if wake_earcons is None:
         wake_earcons = [wake_earcon] if wake_earcon else []
@@ -204,6 +207,7 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
         barge_in_threshold=barge_in_threshold,
         barge_in_trigger_frames=barge_in_trigger_frames,
         barge_in_announcements=barge_in_announcements,
+        restart_in_place=restart_in_place,
     )
 
 
@@ -783,6 +787,51 @@ async def test_reply_is_one_round_only():
     await pipeline.run()
 
     assert skill.replies == ["confirm"]  # the reply's expects_reply is ignored
+
+
+async def test_pipeline_invokes_restart_after_speaking():
+    # The restart must happen only after the sign-off has been spoken (played),
+    # never before — otherwise the process is replaced mid-sentence.
+    order = []
+
+    class OrderedOut(FakeOut):
+        async def play(self, audio):
+            await super().play(audio)
+            order.append("play")
+
+    def restart_fn():
+        order.append("restart")
+
+    skill = FakeSkill(speech="confirm?", expects_reply=True,
+                       reply_speech="signing off", reply_restart=True)
+    stt = FakeSTT(transcripts=["update please", "yes"])
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, FakeTTS(), OrderedOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=False, restart_in_place=restart_fn,
+    )
+
+    await pipeline.run()
+
+    assert skill.replies == ["yes"]
+    assert order == ["play", "play", "restart"]  # confirm prompt, sign-off, then restart
+
+
+async def test_decline_or_silence_cancels_no_restart():
+    # A negative/unrelated/silent reply (SkillResult.restart stays False, the
+    # default) must never trigger the injected restart callable.
+    calls = []
+    skill = FakeSkill(speech="confirm?", expects_reply=True,
+                       reply_speech="okay, never mind", reply_restart=False)
+    stt = FakeSTT(transcripts=["update please", ""])
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True, restart_in_place=calls.append,
+    )
+
+    await pipeline.run()
+
+    assert skill.replies == [""]
+    assert calls == []
 
 
 async def test_silence_during_pending_reply_cancels():

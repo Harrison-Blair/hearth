@@ -12,6 +12,7 @@ import logging
 import random
 import re
 from collections import deque
+from typing import Callable
 
 import numpy as np
 
@@ -22,6 +23,7 @@ from assistant.core.arbiter import AudioArbiter
 from assistant.core.conversation import Conversation
 from assistant.core.events import Command, Turn, WakeEvent
 from assistant.core.orchestrator import Orchestrator
+from assistant.core.selfupdate import restart_in_place as _default_restart_in_place
 from assistant.core.standdown import StandDown
 from assistant.core.state import NullStateEmitter
 from assistant.llm.base import LLMProvider
@@ -109,6 +111,7 @@ class VoicePipeline:
         barge_in_threshold: float = 0.8,
         barge_in_trigger_frames: int = 3,
         barge_in_announcements: bool = False,
+        restart_in_place: Callable[[], None] | None = None,
     ) -> None:
         self._audio_in = audio_in
         self._detector = detector
@@ -209,6 +212,9 @@ class VoicePipeline:
         self._barge_in_trigger_frames = max(1, barge_in_trigger_frames)
         self._barge_in_announcements = barge_in_announcements
         self._barged = False  # set by _speak, consumed by _converse
+        # Self-update: re-execs the daemon after a sign-off is spoken. Injectable
+        # so tests never invoke the real os.execv; defaults to the real primitive.
+        self._restart_in_place = restart_in_place or _default_restart_in_place
 
     def request_listen(self) -> None:
         """Start a turn now, skipping the wake word (tap-to-listen). No-op if a
@@ -551,6 +557,8 @@ class VoicePipeline:
         if on_reply is not None:
             on_reply(result)  # kick off cue generation to overlap with playback
         await self._speak(result.speech)
+        if result.restart:
+            self._restart_in_place()
         conv.add("user", transcript)
         if result.speech:
             conv.add("assistant", result.speech)
@@ -568,6 +576,8 @@ class VoicePipeline:
         if on_reply is not None:
             on_reply(result)  # kick off cue generation to overlap with playback
         await self._speak(result.speech)
+        if result.restart:
+            self._restart_in_place()
         if transcript:
             conv.add("user", transcript)
         if result.speech:

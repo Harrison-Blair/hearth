@@ -5,6 +5,7 @@ from assistant.core.events import SkillResult, ToolCall, Turn
 from assistant.core.orchestrator import Orchestrator
 from assistant.llm.base import ChatResponse
 from assistant.skills.base import Skill, SkillRegistry
+from assistant.skills.update import UpdateSkill
 
 
 class EchoSkill(Skill):
@@ -113,6 +114,24 @@ async def test_tool_call_dispatches_with_arguments_in_slots():
     assert echo.received.type == "echo"
     assert echo.received.slots == {"text": "hi"}  # tool args populate Intent.slots
     assert llm.chat_tools_calls == 1
+    assert fallback.calls == 0
+
+
+async def test_typed_update_routes_to_update_self():
+    # A typed command (spoken=False) walks the same tool-call path as speech; the
+    # model's tool pick is what determines routing, not the transcript text.
+    update = UpdateSkill()
+    fallback = FallbackSkill()
+    reg = _registry(update, default=fallback)
+    llm = ScriptedLLM(tool_responses=[ChatResponse(tool_calls=[ToolCall("update_self", {})])])
+
+    result, skill = await _orch(llm, reg, tool_mode="native").handle(
+        "update yourself", [], spoken=False
+    )
+
+    assert skill is update
+    assert result.expects_reply is True  # confirmation prompt, not an immediate restart
+    assert result.restart is False
     assert fallback.calls == 0
 
 
