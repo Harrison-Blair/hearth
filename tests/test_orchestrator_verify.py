@@ -11,9 +11,11 @@ spoken_feedback=False never speak a filler.
 import asyncio
 import json
 
+from assistant.core import persona
 from assistant.core.config import VerifyConfig
 from assistant.core.events import SkillResult, ToolCall
 from assistant.core.orchestrator import Orchestrator
+from assistant.core.verify import verify as _verify
 from assistant.llm.base import ChatResponse
 from assistant.skills.base import Skill, SkillRegistry
 
@@ -609,3 +611,36 @@ async def test_alternatives_ride_the_pre_reject_feedback():
     injected = llm.tool_messages[1][-1]
     assert "You also proposed" in injected["content"]
     assert '"other"' in injected["content"]
+
+
+async def test_verify_decision_context_is_persona_free_with_no_exempt_field():
+    # FTHR-009 (PLM-003 FC-9a) hardening, verify side: `decision` (and the
+    # pre-stage's routing rewrite fields) must never carry persona. The PRE
+    # stage with spoken_feedback off has zero exempt fields (no `feedback`,
+    # and `rewritten_speech` is a POST-only field) -- so persona must not ride
+    # ANY part of the built prompt. Asserted against persona_segment() content
+    # imported from persona.py, not a copied string.
+    persona_text = persona.persona_segment("terse")
+
+    class CapturingLLM:
+        def __init__(self, reply):
+            self._reply = reply
+            self.system = None
+            self.prompt = None
+
+        async def complete(self, prompt, *, system=None, json=False, label=""):  # noqa: A002
+            self.system = system
+            self.prompt = prompt
+            return self._reply
+
+    llm = CapturingLLM(json.dumps({"decision": "approve"}))
+    await _verify(
+        "pre",
+        {"request": "echo hi", "history": [], "tool": "echo", "arguments": {"text": "hi"}},
+        llm=llm,
+        persona_suffix=persona_text,
+        spoken_feedback=False,
+    )
+
+    assert persona_text not in llm.system
+    assert persona_text not in llm.prompt
