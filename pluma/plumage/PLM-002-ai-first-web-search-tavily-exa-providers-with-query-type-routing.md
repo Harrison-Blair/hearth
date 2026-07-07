@@ -1,7 +1,7 @@
 ---
 id: PLM-002
 title: "AI-first web search: Tavily + Exa providers with query-type routing"
-status: hatched
+status: fledged
 priority: P1
 authored: 2026-07-07T07:15:24Z
 agent: fledge-orchestrate/planning
@@ -77,23 +77,23 @@ Numbered, testable statements of behavior. Referenced downstream as FC-1, FC-2, 
 
 ## Acceptance Criteria
 Checkbox list of verifiable conditions under which this plumage is considered fledged, one `- [ ] AC-N: …` line each. Authored unchecked; checked only via `fledge criteria check` at plumage closeout.
-- [ ] AC-1: With a Tavily key configured, a factual query ("search the web for
+- [x] AC-1: With a Tavily key configured, a factual query ("search the web for
       <current event>") is served by Tavily: the provider returns structured
       results (and an answer block) that the assess loop consumes, and the spoken
       answer carries a source attribution.
-- [ ] AC-2: With an Exa key configured, a semantic query ("find me things like…")
+- [x] AC-2: With an Exa key configured, a semantic query ("find me things like…")
       routes to Exa and returns meaning-matched results.
-- [ ] AC-3: The refine call's JSON carries the `query_type` field; factual →
+- [x] AC-3: The refine call's JSON carries the `query_type` field; factual →
       Tavily, semantic → Exa; an unparseable classification falls back to factual.
-- [ ] AC-4: Killing the keyed provider (no key / forced failure) produces a spoken
+- [x] AC-4: Killing the keyed provider (no key / forced failure) produces a spoken
       notice and a same-round keyless-tier answer; with no keys at all, behavior
       is identical to the current release except the one-time boot warning.
-- [ ] AC-5: Injection-shaped content placed in a Tavily answer or keyed-provider
+- [x] AC-5: Injection-shaped content placed in a Tavily answer or keyed-provider
       snippet is neutralized before reaching the assess prompt (existing
       injection-defense tests extended to the new providers).
-- [ ] AC-6: No API key or secret appears in any committed file; keys arrive via
+- [x] AC-6: No API key or secret appears in any committed file; keys arrive via
       env override only.
-- [ ] AC-7: The full test suite passes without the keys or network (keyed
+- [x] AC-7: The full test suite passes without the keys or network (keyed
       providers stubbed, per the repo's test convention).
 
 ## Out of Scope
