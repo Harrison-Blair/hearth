@@ -125,3 +125,18 @@ async def test_say_waits_for_arbiter_before_speaking():
         assert speaker.said == []  # blocked: reply still owns the audio device
     await say
     assert speaker.said == [("hello", None)]  # spoke once the hold released
+
+
+async def test_resume_verb_ends_standdown():
+    from assistant.core.standdown import StandDown
+
+    standdown = StandDown()
+    standdown.engage(None)
+    ch = ControlChannel(FakePipeline(), FakeOut(), FakeSpeaker(), AudioArbiter(), standdown)
+    await ch.dispatch("RESUME")
+    assert not standdown.active
+
+
+async def test_resume_without_standdown_is_ignored():
+    ch, _, _ = _channel()  # no standdown wired
+    await ch.dispatch("RESUME")  # no raise

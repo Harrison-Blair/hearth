@@ -24,6 +24,14 @@ llm = ["httpx"]  # async HTTP client for the Ollama provider
 nlu = ["dateparser"]
 scheduling = ["apscheduler"]
 search = ["httpx", "ddgs"]  # httpx for the Wikipedia API, ddgs for DuckDuckGo
+# google-auth mints/refreshes the service-account token (via its sync `requests`
+# transport); all Calendar v3 REST calls go through async httpx.
+gcal = ["httpx", "google-auth", "requests"]
+# Acoustic echo cancellation for barge-in (audio/aec.py). Source build with a C
+# extension: needs libspeexdsp headers first (sudo apt install libspeexdsp-dev).
+# Deliberately NOT in `all` until the build is validated on the Pi 5; the app
+# degrades to a passthrough mic when the import fails.
+aec = ["speexdsp"]
 # Monitor TUI: supervises the daemon as a child process. Deliberately NOT in
 # `all` — the Pi may run the TUI separately, and it imports no native deps.
 # textual pinned to 8.2.x: collapse.py and the log widgets poke RichLog
@@ -31,7 +39,7 @@ search = ["httpx", "ddgs"]  # httpx for the Wikipedia API, ddgs for DuckDuckGo
 tui = ["textual~=8.2", "httpx"]  # httpx for live Ollama model discovery
 dev = ["pytest", "pytest-asyncio", "ruff"]
 # Every runtime capability in one shot.
-all = ["personal-assistant[tts,wake,stt,vad,llm,nlu,scheduling,search]"]
+all = ["personal-assistant[tts,wake,stt,vad,llm,nlu,scheduling,search,gcal]"]
 
 [project.scripts]
 assistant = "assistant.app:main"

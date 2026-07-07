@@ -80,6 +80,26 @@ async def test_complete_unlabeled_uses_llm_tag(monkeypatch, caplog):
     assert not any("system:" in m for m in messages)
 
 
+async def test_complete_trace_record_carries_full_content(monkeypatch, caplog):
+    long_prompt = "p" * 500
+    long_response = "r" * 500
+
+    def handler(request):
+        return httpx.Response(200, json={"response": long_response})
+
+    _patch_transport(monkeypatch, handler)
+    with caplog.at_level("INFO", logger="assistant.llm.ollama_provider"):
+        await OllamaProvider("m").complete(long_prompt, label="agent")
+    record = next(r for r in caplog.records if getattr(r, "data", None))
+    assert record.getMessage() == f"[agent] response: {'r' * 200}…"  # console stays clipped
+    assert record.data["kind"] == "llm.complete"
+    assert record.data["prompt"] == long_prompt
+    assert record.data["response"] == long_response
+    assert record.data["model"] == "m"
+    assert record.data["label"] == "agent"
+    assert isinstance(record.data["latency_ms"], int)
+
+
 async def test_chat_sends_messages_and_strips_content(monkeypatch):
     def handler(request):
         assert request.url.path == "/api/chat"
@@ -172,6 +192,30 @@ async def test_chat_tools_content_only_when_no_calls(monkeypatch):
     resp = await OllamaProvider("m").chat_tools([{"role": "user", "content": "hi"}])
     assert resp.content == "hello there"
     assert resp.tool_calls == []
+
+
+async def test_chat_tools_trace_record(monkeypatch, caplog):
+    tools = [{"type": "function", "function": {"name": "echo"}}]
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "echo", "arguments": {"text": "hi"}}}],
+                }
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+    with caplog.at_level("INFO", logger="assistant.llm.ollama_provider"):
+        await OllamaProvider("m").chat_tools([{"role": "user", "content": "hi"}], tools=tools)
+    record = next(r for r in caplog.records if getattr(r, "data", None))
+    assert record.data["kind"] == "llm.chat_tools"
+    assert record.data["tools"] == ["echo"]
+    assert record.data["tool_calls"] == [{"name": "echo", "arguments": {"text": "hi"}}]
+    assert isinstance(record.data["latency_ms"], int)
 
 
 async def test_num_ctx_threaded_into_options(monkeypatch):

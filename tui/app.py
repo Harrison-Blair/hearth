@@ -46,6 +46,8 @@ from tui.screens import (
     NowScreen,
     VoicesScreen,
 )
+from tui.screens.now import paused_banner
+from tui.runlog import RunLogWriter, ollama_log_path
 from tui.supervisor import DaemonSupervisor, free_ollama_port
 from tui.widgets import NavBar, ScreenWidthRichLog, Stepper  # noqa: F401 - re-exported
 
@@ -65,6 +67,40 @@ def _as_option(item: object) -> tuple[str, str]:
         label, value = item
         return str(label), str(value)
     return str(item), str(item)
+
+
+LLM_TIER_STYLE = {"up": "green", "degraded": "yellow", "down": "red"}
+
+
+def _provider_label(name: str) -> str:
+    """Short display name that fits the 40-col status line."""
+    return "zen" if name == "opencode-zen" else name
+
+
+def _ollama_in_chain(llm) -> bool:
+    """True when the local Ollama server is the primary or the fallback."""
+    return llm.provider == "ollama" or llm.fallback == "ollama"
+
+
+def _derive_tier(primary_ok: bool, fallback_ok: bool | None) -> str:
+    """up/degraded/down. ``fallback_ok`` is None when no fallback is configured
+    (then there is no degraded state: it's up or down on the primary alone).
+    Matches FallbackLLMProvider.health(): usable iff primary_ok or fallback_ok."""
+    oks = [primary_ok] + ([] if fallback_ok is None else [fallback_ok])
+    if all(oks):
+        return "up"
+    if any(oks):
+        return "degraded"
+    return "down"
+
+
+def _llm_status_line(llm, primary_ok: bool, fallback_ok: bool | None, tier: str) -> str:
+    """Provider-aware text, e.g. "zen ✓ · ollama ✓" / "zen ✗ · ollama ✓ (degraded)"."""
+    parts = [f"{_provider_label(llm.provider)} {'✓' if primary_ok else '✗'}"]
+    if llm.fallback:
+        parts.append(f"{_provider_label(llm.fallback)} {'✓' if fallback_ok else '✗'}")
+    line = " · ".join(parts)
+    return f"{line} (degraded)" if tier == "degraded" else line
 
 
 def _default_query(model: str) -> str:
@@ -94,7 +130,8 @@ class AssistantTUI(App):
         self.ollama = ollama or DaemonSupervisor(list(self._config.llm.serve_cmd))
         self._overrides: dict[str, str] = {}
         self._state = "stopped"
-        self._ollama_up = False
+        self._llm_tier = "down"
+        self._llm_status = "llm …"  # placeholder until the first probe
         self._volume = self._config.audio.output_volume
         self._muted = self._volume == 0.0
         self._last_volume = self._volume or 1.0
@@ -108,6 +145,9 @@ class AssistantTUI(App):
         # Log channels: writers exist once LogsScreen has mounted; until then
         # lines wait here (bounded like the widgets' backlog).
         self._writers: dict[str, CollapsingWriter] = {}
+        # On-disk copy of the spawned Ollama server's output (the daemon writes
+        # its own log files; only this channel would otherwise vanish on exit).
+        self._ollama_log: RunLogWriter | None = None
         self._pending: dict[str, deque] = {
             name: deque(maxlen=MAX_LOG_LINES) for name in LOG_CHANNELS
         }
@@ -143,6 +183,8 @@ class AssistantTUI(App):
     async def on_unmount(self) -> None:
         await self.supervisor.stop()
         await self.ollama.stop()  # only stops it if the TUI started it
+        if self._ollama_log is not None:
+            self._ollama_log.close()
 
     @on(TextSelected)
     async def _on_text_selected(self) -> None:
@@ -222,6 +264,8 @@ class AssistantTUI(App):
             self._now.set_reply(payload["text"])
         if payload.get("message") and state in ("no_speech", "error"):
             self._now.set_banner(payload["message"])
+        if state == "paused":
+            self._now.set_banner(paused_banner(payload.get("remaining")))
         if "level" in payload:
             self._now.set_level(payload["level"])
 
@@ -249,6 +293,8 @@ class AssistantTUI(App):
         Non-destructive: if a server is already responding we leave it alone (we
         can't capture an external process's output, and killing a healthy server
         would be surprising). Only start one when nothing answers."""
+        if not _ollama_in_chain(self._config.llm):
+            return
         if await discovery.ollama_health(self._config.llm.host):
             self._log("ollama", "LLM server already running.")
             return
@@ -258,10 +304,13 @@ class AssistantTUI(App):
         if pid:
             self._log("ollama", f"Stopped stale ollama serve (pid {pid}).")
         await self.ollama.start()
+        self._open_ollama_log()
         self.run_worker(self._pump_ollama(), exclusive=True, group="ollama-pump")
-        self.run_worker(self._check_ollama_health(), group="health-now")
+        self.run_worker(self._check_llm_health(), group="health-now")
 
     async def _on_ollama_restart(self) -> None:
+        if not _ollama_in_chain(self._config.llm):
+            return
         self._log("app", "Restarting LLM server… (see Ollama channel in Logs)")
         self._log("ollama", "Restarting LLM server…")
         # A server we didn't spawn (a bare `ollama serve` from another shell) owns
@@ -274,28 +323,67 @@ class AssistantTUI(App):
         await self.ollama.restart()
         # Stream the server's own output into the Ollama channel (so a failed start
         # is visible — the reason health was failing in the first place).
+        self._open_ollama_log()
         self.run_worker(self._pump_ollama(), exclusive=True, group="ollama-pump")
-        self.run_worker(self._check_ollama_health(), group="health-now")
+        self.run_worker(self._check_llm_health(), group="health-now")
+
+    def _open_ollama_log(self) -> None:
+        """Start a fresh per-run file for the server we just spawned."""
+        if self._ollama_log is not None:
+            self._ollama_log.close()
+            self._ollama_log = None
+        if self._config.logging.file_enabled:
+            self._ollama_log = RunLogWriter(
+                ollama_log_path(self._config.logging.dir),
+                self._config.logging.rotate_max_bytes,
+            )
 
     async def _pump_ollama(self) -> None:
         async for line in self.ollama.lines():
+            if self._ollama_log is not None:
+                try:
+                    self._ollama_log.write(line)
+                except OSError as exc:
+                    log.warning("Ollama log write failed (%s); disabling file copy", exc)
+                    self._ollama_log = None
             self._log("ollama", colorize_line(line), line)
 
     async def _health_loop(self) -> None:
         while True:
-            await self._check_ollama_health()
+            await self._check_llm_health()
             await asyncio.sleep(HEALTH_POLL_SECONDS)
 
-    async def _check_ollama_health(self) -> None:
-        self._ollama_up = await discovery.ollama_health(self._config.llm.host)
+    async def _probe_provider(self, name: str) -> bool:
+        llm = self._config.llm
+        if name == "opencode-zen":
+            return await discovery.zen_health(llm.base_url, llm.api_key)
+        return await discovery.ollama_health(llm.host)
+
+    async def _check_llm_health(self) -> None:
+        llm = self._config.llm
+        primary_ok = await self._probe_provider(llm.provider)
+        fallback_ok = await self._probe_provider(llm.fallback) if llm.fallback else None
+        self._llm_tier = _derive_tier(primary_ok, fallback_ok)
+        self._llm_status = _llm_status_line(llm, primary_ok, fallback_ok, self._llm_tier)
         self._refresh_status()
 
     # ---- config editing --------------------------------------------------------
 
     async def _select_options(self, field: Field, current: str = "") -> list[tuple[str, str]]:
-        """Resolve a field's options provider into (label, value) pairs."""
+        """Resolve a field's options provider into (label, value) pairs.
+
+        Providers share the ``(host=..., **_)`` signature; the LLM-identity
+        providers also read ``provider``/``base_url``/``api_key``/``fallback``
+        off the same ``**_`` (backward-compatible — other providers ignore them)."""
+        llm = self._config.llm
         try:
-            result = field.options(host=self._config.llm.host) if field.options else []
+            result = field.options(
+                host=llm.host,
+                provider=llm.provider,
+                base_url=llm.base_url,
+                api_key=llm.api_key,
+                fallback=llm.fallback,
+            ) if field.options else []
             if inspect.isawaitable(result):
                 result = await result
         except Exception as exc:  # noqa: BLE001 - discovery is best-effort
@@ -324,12 +412,17 @@ class AssistantTUI(App):
         self.run_worker(self._refresh_wake_options(), group="wake-options")
 
     async def _show_model_detail(self, name: str) -> None:
-        host = self._config.llm.host
-        info = await discovery.ollama_model_detail(host, name)
         try:
             detail = self._config_screen.query_one("#model-detail", Static)
         except Exception:  # noqa: BLE001 - config screen not visited yet
             return
+        # Zen models live server-side; /v1/models returns only ids (no
+        # sizes/params/quant), so the Ollama-rich detail panel doesn't apply.
+        if self._config.llm.provider == "opencode-zen":
+            detail.update(f"{name}: server-side model · details unavailable")
+            return
+        host = self._config.llm.host
+        info = await discovery.ollama_model_detail(host, name)
         if info is None:
             # Distinguish a down server from a model that genuinely has no details.
             if await discovery.ollama_health(host):
@@ -356,6 +449,19 @@ class AssistantTUI(App):
         configfile.write_fields(configfile.CONFIG_FILE, {("llm", "model"): value})
         self._overrides.pop("ASSISTANT_LLM__MODEL", None)
         self._log("app", f"LLM model set to {value} — saved as default, restarting…")
+        await self._restart()
+
+    async def _on_llm_identity_picked(self, field: Field, value: str) -> None:
+        """Persist an LLM-identity pick (provider/fallback/fallback_model) to
+        config.yaml as the new default, drop any env override that would shadow
+        it, and restart so the daemon rebuilds the provider chain. Same shape as
+        _on_model_picked, generalized over the field."""
+        current = discovery.current_value(self._config, field.key)
+        if value == current and field.env not in self._overrides:
+            return
+        configfile.write_fields(configfile.CONFIG_FILE, {field.key: value})
+        self._overrides.pop(field.env, None)
+        self._log("app", f"{field.label} set to {value!r} — saved as default, restarting…")
         await self._restart()
 
     async def _on_voice_picked(self, value: str) -> None:
@@ -535,8 +641,8 @@ class AssistantTUI(App):
         text = Text()
         text.append("● ", style=state_style)
         text.append(f"daemon {self._state.upper()}\n")
-        text.append("● ", style="green" if self._ollama_up else "red")
-        text.append("ollama up\n" if self._ollama_up else "ollama DOWN\n")
+        text.append("● ", style=LLM_TIER_STYLE[self._llm_tier])
+        text.append(self._llm_status + "\n")
         text.append(f"model: {model}\n")
         text.append(f"wake: {phrases}\n")
         text.append("MUTED" if self._muted else f"vol {int(round(self._volume * 100))}%")
@@ -554,12 +660,15 @@ class AssistantTUI(App):
             self._home.query_one("#vol-mute", Button).label = (
                 "Unmute" if self._muted else "Mute"
             )
+            self._home.query_one("#row-ollama-restart").display = _ollama_in_chain(
+                self._config.llm
+            )
         except Exception:  # noqa: BLE001 - home not mounted yet
             pass
         daemon_up = self._state == "running"
         for screen in (self._now, self._config_screen, self._models_screen, self._installed_screen):
             if screen.is_attached:
-                screen.query_one(NavBar).set_dots(daemon_up, self._ollama_up)
+                screen.query_one(NavBar).set_dots(daemon_up, self._llm_tier)
 
 
 def main() -> None:

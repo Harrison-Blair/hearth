@@ -135,7 +135,7 @@ async def test_health_badge_reflects_up(monkeypatch):
     async with app.run_test(size=(40, 30)) as pilot:
         await pilot.pause()
         status = str(app._home.query_one("#home-status", Static).render())
-        assert "ollama up" in status
+        assert "ollama ✓" in status
 
 
 async def test_health_badge_reflects_down(monkeypatch):
@@ -145,7 +145,7 @@ async def test_health_badge_reflects_down(monkeypatch):
     async with app.run_test(size=(40, 30)) as pilot:
         await pilot.pause()
         status = str(app._home.query_one("#home-status", Static).render())
-        assert "ollama DOWN" in status
+        assert "ollama ✗" in status
 
 
 async def test_ollama_autostarts_when_down(monkeypatch):

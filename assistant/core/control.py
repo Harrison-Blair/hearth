@@ -10,6 +10,7 @@ without a restart:
     LISTEN                     start a turn now, skipping the wake word (tap-to-listen)
     CANCEL                     abandon the current capture (tap-to-cancel)
     STOP                       cut off in-progress playback (barge-in on a reply)
+    RESUME                     end a stand-down now (the TUI's Resume button)
 
 Running the daemon standalone in a terminal is unaffected: stdin simply blocks
 until EOF (Ctrl-D), and any stray input is ignored.
@@ -25,6 +26,7 @@ from assistant.audio.sounddevice_io import SoundDeviceOut
 from assistant.core.arbiter import AudioArbiter
 from assistant.core.pipeline import VoicePipeline
 from assistant.core.speech import Speaker
+from assistant.core.standdown import StandDown
 
 log = logging.getLogger(__name__)
 
@@ -36,11 +38,13 @@ class ControlChannel:
         out: SoundDeviceOut,
         speaker: Speaker | None = None,
         arbiter: AudioArbiter | None = None,
+        standdown: StandDown | None = None,
     ) -> None:
         self._pipeline = pipeline
         self._out = out
         self._speaker = speaker
         self._arbiter = arbiter
+        self._standdown = standdown
 
     async def run(self) -> None:
         """Read stdin line by line (off-thread) and dispatch until EOF."""
@@ -70,6 +74,11 @@ class ControlChannel:
             self._pipeline.cancel()
         elif verb == "STOP":
             self._out.stop()
+        elif verb == "RESUME":
+            if self._standdown is not None:
+                self._standdown.resume()
+            else:
+                log.debug("control channel: RESUME ignored (no standdown wired)")
         else:
             log.debug("control channel: ignoring unknown command %r", line)
 

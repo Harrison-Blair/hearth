@@ -88,16 +88,18 @@ async def test_transient_failure_retries_then_speaks():
     store.close()
 
 
-async def test_permanent_failure_deleted_after_max_attempts():
-    # An un-speakable reminder is dropped after exactly max_attempts polls, not
-    # before (so it can't loop forever, but transient failures still get retries).
-    store = ReminderStore(":memory:")
-    store.add(50.0, "always-boom", created_at=0.0)
-    tts = FakeTTS()
+class BoomOut:
+    async def play(self, audio):
+        raise RuntimeError("audio device gone")
 
-    class BoomOut:
-        async def play(self, audio):
-            raise RuntimeError("audio device gone")
+
+async def test_permanent_failure_defers_instead_of_deleting():
+    # An un-speakable reminder is deferred after exactly max_attempts polls, not
+    # deleted: a failure to *speak* must never destroy the reminder, but pushing
+    # due_at forward keeps it from looping on every poll.
+    store = ReminderStore(":memory:")
+    rid = store.add(50.0, "always-boom", created_at=0.0)
+    tts = FakeTTS()
 
     sched = ReminderScheduler(
         store, tts, BoomOut(), AudioArbiter(), poll_seconds=0.01, max_attempts=3, now=lambda: 100.0
@@ -108,7 +110,74 @@ async def test_permanent_failure_deleted_after_max_attempts():
         assert store.due(now=100.0) != []  # still present before the budget is spent
 
     await sched._fire(store.due(now=100.0)[0])  # third attempt reaches max_attempts
-    assert store.due(now=100.0) == []
+    assert store.due(now=100.0) == []  # no longer immediately due: no tight loop
+    (deferred,) = store.pending(now=100.0)  # but the row survives
+    assert deferred.id == rid
+    assert deferred.due_at == 160.0  # 100 (now) + 60 (defer window)
+    assert rid not in sched._attempts  # budget reset for the next window
+    store.close()
+
+
+async def test_recurring_reminder_survives_exhausted_retries():
+    # A recurring reminder mid-conversation (audio held elsewhere) must survive
+    # the exhausted retry budget with its cadence intact.
+    store = ReminderStore(":memory:")
+    rid = store.add(50.0, "Reminder: stretch.", created_at=0.0, interval=900.0)
+    tts = FakeTTS()
+
+    sched = ReminderScheduler(
+        store, tts, BoomOut(), AudioArbiter(), poll_seconds=0.01, max_attempts=3, now=lambda: 100.0
+    )
+
+    for _ in range(3):
+        await sched._fire(store.due(now=100.0)[0])
+
+    (deferred,) = store.pending(now=100.0)
+    assert deferred.id == rid
+    assert deferred.interval == 900.0
+    assert deferred.due_at == 160.0  # deferred, not deleted or re-armed a full interval
+    store.close()
+
+
+async def test_recurring_reminder_rearms_instead_of_deleting():
+    store = ReminderStore(":memory:")
+    rid = store.add(50.0, "Reminder: stretch.", created_at=0.0, interval=900.0)
+    tts, out = FakeTTS(), FakeOut()
+    sched = ReminderScheduler(
+        store, tts, out, AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0
+    )
+
+    await sched._fire(store.due(now=100.0)[0])
+
+    assert tts.spoke == ["Reminder: stretch."]
+    # Row survives, re-armed to now + interval (not deleted, not replaying missed slots).
+    (rearmed,) = store.pending(now=100.0)
+    assert rearmed.id == rid
+    assert rearmed.due_at == 1000.0  # 100 (now) + 900 (interval)
+    assert store.due(now=100.0) == []  # no longer due until 1000
+    store.close()
+
+
+async def test_catch_up_rearms_recurring_deletes_oneshot():
+    store = ReminderStore(":memory:")
+    store.add(10.0, "Reminder: stretch.", created_at=0.0, interval=900.0)
+    store.add(20.0, "Reminder: call mom.", created_at=0.0)  # one-shot
+    tts, out = FakeTTS(), FakeOut()
+    sched = ReminderScheduler(
+        store, tts, out, AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0
+    )
+
+    task = asyncio.create_task(sched.run())
+    await _run_until(lambda: out.played)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    # One-shot is gone; recurring survives, re-armed to the future.
+    remaining = {r.speech: r.due_at for r in store.pending(now=100.0)}
+    assert remaining == {"Reminder: stretch.": 1000.0}
     store.close()
 
 
@@ -185,4 +254,69 @@ async def test_announcement_waits_for_arbiter():
         pass
 
     assert out.played == [b"hi"]
+    store.close()
+
+
+async def test_standdown_delays_reminders_until_resume():
+    # While standing down the poll is skipped: nothing plays and the row survives.
+    # Resume -> the next poll fires and deletes it via the existing machinery.
+    from assistant.core.standdown import StandDown
+
+    store = ReminderStore(":memory:")
+    store.add(50.0, "delayed", created_at=0.0)
+    tts, out = FakeTTS(), FakeOut()
+    standdown = StandDown()
+    standdown.engage(None)
+    sched = ReminderScheduler(
+        store, tts, out, AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0,
+        standdown=standdown,
+    )
+
+    task = asyncio.create_task(sched.run())
+    await asyncio.sleep(0.05)
+    assert out.played == []               # silenced while standing down
+    assert store.due(now=100.0) != []     # not lost
+
+    standdown.resume()
+    await _run_until(lambda: out.played)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert tts.spoke == ["delayed"]
+    assert store.due(now=100.0) == []     # fired and deleted after resume
+    store.close()
+
+
+async def test_standdown_preserves_boot_catchup():
+    # Paused polls must not consume the first-poll flag: after resume, a multi-
+    # reminder backlog still coalesces into one "while I was away" summary.
+    from assistant.core.standdown import StandDown
+
+    store = ReminderStore(":memory:")
+    store.add(10.0, "r1", created_at=0.0)
+    store.add(20.0, "r2", created_at=0.0)
+    tts, out = FakeTTS(), FakeOut()
+    standdown = StandDown()
+    standdown.engage(None)
+    sched = ReminderScheduler(
+        store, tts, out, AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0,
+        standdown=standdown,
+    )
+
+    task = asyncio.create_task(sched.run())
+    await asyncio.sleep(0.05)  # several paused polls tick by
+    assert out.played == []    # backlog held, nothing spoken while standing down
+    standdown.resume()
+    await _run_until(lambda: out.played)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert len(out.played) == 1  # one combined announcement, not two
+    assert tts.spoke[0].startswith("While I was away, 2 reminders came due.")
     store.close()

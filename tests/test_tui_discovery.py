@@ -348,3 +348,135 @@ def test_stt_model_options_are_static_and_nonempty():
     options = discovery.stt_model_options()
     assert "distil-medium.en" in options
     assert all(isinstance(o, str) for o in options)
+
+
+# ---- OpenCode Zen discovery + provider-aware routing ------------------------
+
+
+def test_llm_provider_options_static():
+    assert discovery.llm_provider_options() == ["ollama", "opencode-zen"]
+
+
+def test_llm_fallback_options_static_includes_none():
+    opts = discovery.llm_fallback_options()
+    assert opts[0] == ""  # "" = no fallback, listed first
+    assert "ollama" in opts and "opencode-zen" in opts
+
+
+async def test_zen_health_true_when_models_ok(monkeypatch):
+    def handler(request):
+        assert request.url.path == "/zen/v1/models"
+        assert request.headers["Authorization"] == "Bearer k"
+        return httpx.Response(200, json={"data": [{"id": "deepseek-v4-flash-free"}]})
+
+    _patch_transport(monkeypatch, handler)
+    assert await discovery.zen_health("https://opencode.ai/zen/v1", "k") is True
+
+
+async def test_zen_health_false_when_down(monkeypatch):
+    def handler(request):
+        raise httpx.ConnectError("connection refused")
+
+    _patch_transport(monkeypatch, handler)
+    assert await discovery.zen_health("https://opencode.ai/zen/v1", "k") is False
+
+
+async def test_zen_health_false_on_401(monkeypatch):
+    def handler(request):
+        return httpx.Response(401, text="unauthorized")
+
+    _patch_transport(monkeypatch, handler)
+    assert await discovery.zen_health("https://opencode.ai/zen/v1", "k") is False
+
+
+async def test_zen_health_false_when_no_base_url():
+    assert await discovery.zen_health("", "k") is False
+
+
+async def test_zen_model_options_lists_ids(monkeypatch):
+    def handler(request):
+        return httpx.Response(
+            200, json={"data": [{"id": "deepseek-v4-flash-free"}, {"id": "gpt-oss"}]}
+        )
+
+    _patch_transport(monkeypatch, handler)
+    opts = await discovery.zen_model_options("https://opencode.ai/zen/v1", "k")
+    assert opts == [
+        ("deepseek-v4-flash-free", "deepseek-v4-flash-free"),
+        ("gpt-oss", "gpt-oss"),
+    ]
+
+
+async def test_zen_model_options_empty_when_down(monkeypatch):
+    def handler(request):
+        raise httpx.ConnectError("connection refused")
+
+    _patch_transport(monkeypatch, handler)
+    assert await discovery.zen_model_options("https://opencode.ai/zen/v1", "k") == []
+
+
+async def test_zen_model_options_empty_when_no_base_url():
+    assert await discovery.zen_model_options("", "k") == []
+
+
+async def test_zen_model_options_skips_entries_without_id(monkeypatch):
+    def handler(request):
+        return httpx.Response(200, json={"data": [{"id": "ok"}, {"no": "id"}, "x"]})
+
+    _patch_transport(monkeypatch, handler)
+    assert await discovery.zen_model_options("https://x/v1", "k") == [("ok", "ok")]
+
+
+async def test_llm_model_options_routes_to_zen(monkeypatch):
+    async def fake_zen(base_url="", api_key="", **_):
+        assert base_url == "https://zen/v1"
+        assert api_key == "k"
+        return [("m1", "m1")]
+
+    async def fake_ollama(host="", **_):
+        raise AssertionError("should not call ollama for zen primary")
+
+    monkeypatch.setattr(discovery, "zen_model_options", fake_zen)
+    monkeypatch.setattr(discovery, "ollama_model_options", fake_ollama)
+    opts = await discovery.llm_model_options(
+        provider="opencode-zen", base_url="https://zen/v1", api_key="k",
+    )
+    assert opts == [("m1", "m1")]
+
+
+async def test_llm_model_options_routes_to_ollama(monkeypatch):
+    async def fake_ollama(host="", **_):
+        assert host == "http://localhost:11434"
+        return [("q:3b", "q:3b")]
+
+    async def fake_zen(**_):
+        raise AssertionError("should not call zen for ollama primary")
+
+    monkeypatch.setattr(discovery, "ollama_model_options", fake_ollama)
+    monkeypatch.setattr(discovery, "zen_model_options", fake_zen)
+    opts = await discovery.llm_model_options(
+        provider="ollama", host="http://localhost:11434",
+    )
+    assert opts == [("q:3b", "q:3b")]
+
+
+async def test_llm_fallback_model_options_routes_by_fallback_provider(monkeypatch):
+    async def fake_zen(base_url="", api_key="", **_):
+        return [("zen-m", "zen-m")]
+
+    async def fake_ollama(host="", **_):
+        return [("ollama-m", "ollama-m")]
+
+    monkeypatch.setattr(discovery, "zen_model_options", fake_zen)
+    monkeypatch.setattr(discovery, "ollama_model_options", fake_ollama)
+    # The fallback model picker keys off `fallback`, NOT `provider`.
+    assert await discovery.llm_fallback_model_options(
+        provider="opencode-zen", fallback="ollama", host="http://h",
+    ) == [("ollama-m", "ollama-m")]
+    assert await discovery.llm_fallback_model_options(
+        provider="ollama", fallback="opencode-zen", base_url="https://zen/v1", api_key="k",
+    ) == [("zen-m", "zen-m")]
+    # No fallback configured -> still lists local models so one can be chosen.
+    assert await discovery.llm_fallback_model_options(fallback="", host="http://h") == [
+        ("ollama-m", "ollama-m")
+    ]

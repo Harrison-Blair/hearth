@@ -11,31 +11,43 @@ import logging
 import sys
 
 from assistant.audio.devices import DeviceSelection, select_devices
-from assistant.audio.earcon import chime, descending, no_speech
+from assistant.audio.earcon import checkin, chime, descending, no_speech
 from assistant.audio.recorder import VadRecorder
+from assistant.audio.aec import build_aec
+from assistant.audio.mic_hub import MicHub
 from assistant.audio.sounddevice_io import SoundDeviceIn, SoundDeviceOut
+from assistant.calendar.blocklist import EventBlocklist
+from assistant.calendar.google_calendar import GoogleCalendar
 from assistant.core.arbiter import AudioArbiter
-from assistant.core.config import Config, WebSearchConfig
+from assistant.core.config import Config, LlmConfig, WebSearchConfig
 from assistant.core.control import ControlChannel
 from assistant.core.logging import setup_logging
+from assistant.core import persona
 from assistant.core.orchestrator import Orchestrator
 from assistant.core.pipeline import VoicePipeline
 from assistant.core.speech import Speaker
+from assistant.core.standdown import StandDown
 from assistant.core.state import NullStateEmitter, StateEmitter
+from assistant.llm.base import LLMProvider
+from assistant.llm.fallback_provider import FallbackLLMProvider
 from assistant.llm.ollama_provider import OllamaProvider
-from assistant.nlu.command_router import CommandEntryRouter
-from assistant.nlu.keyphrase_router import KeyphraseRouter
+from assistant.llm.opencode_zen_provider import OpenCodeZenProvider
+from assistant.scheduling.calendar_watcher import CalendarWatcher
 from assistant.scheduling.scheduler import ReminderScheduler
 from assistant.search.base import SearchProvider
 from assistant.search.ddgs_provider import DdgsSearch
 from assistant.search.multi import MultiSearch
 from assistant.search.wikipedia import WikipediaSearch
 from assistant.skills.base import SkillRegistry
+from assistant.skills.calendar import CalendarSkill
 from assistant.skills.clock import ClockSkill
 from assistant.skills.general import GeneralSkill
 from assistant.skills.reminder import ReminderSkill
+from assistant.skills.stand_down import StandDownSkill
+from assistant.skills.timer import TimerSkill
 from assistant.skills.weather import WeatherSkill
 from assistant.skills.web_search import WebSearchSkill
+from assistant.storage.calendar_state import CalendarStateStore
 from assistant.storage.reminders import ReminderStore
 from assistant.stt.faster_whisper_stt import FasterWhisperSTT
 from assistant.tts.piper_tts import PiperTTS
@@ -81,19 +93,81 @@ def _build_search(cfg: WebSearchConfig) -> SearchProvider:
     return MultiSearch(providers, max_results=cfg.max_results)
 
 
+def _build_llm(cfg: LlmConfig) -> LLMProvider:
+    """Construct the configured LLM provider, wrapping in a fallback when one is
+    named. Unknown provider names fall back to Ollama with a warning so the daemon
+    still boots."""
+    primary = _build_one_llm(cfg, cfg.provider, cfg.model)
+    if not cfg.fallback or cfg.fallback == cfg.provider:
+        return primary
+    fb_model = cfg.fallback_model or cfg.model
+    fallback = _build_one_llm(cfg, cfg.fallback, fb_model)
+    return FallbackLLMProvider(primary, fallback)
+
+
+def _build_one_llm(cfg: LlmConfig, provider: str, model: str) -> LLMProvider:
+    if provider == "opencode-zen":
+        if not cfg.api_key:
+            log.warning(
+                "OpenCode Zen provider selected but llm.api_key is empty; set "
+                "ASSISTANT_LLM__API_KEY. Requests will fail with 401."
+            )
+        return OpenCodeZenProvider(
+            model=model,
+            api_key=cfg.api_key,
+            base_url=cfg.base_url,
+            timeout=cfg.timeout,
+            health_timeout=cfg.health_timeout,
+            max_retries=cfg.max_retries,
+        )
+    if provider != "ollama":
+        log.warning("Unknown llm.provider %r; defaulting to ollama", provider)
+    return OllamaProvider(
+        model,
+        cfg.host,
+        cfg.timeout,
+        cfg.health_timeout,
+        cfg.num_ctx,
+        cfg.think,
+    )
+
+
+def _config_dump(config: Config) -> dict:
+    """Effective config for the boot trace record, with personal identifiers masked."""
+    dump = config.model_dump()
+    for key in ("personal_calendar_id", "calcifer_calendar_id"):
+        if dump["calendar"].get(key):
+            dump["calendar"][key] = "***"
+    if dump["llm"].get("api_key"):
+        dump["llm"]["api_key"] = "***"
+    return dump
+
+
 def main() -> None:
     config = Config()
-    setup_logging(config.logging.level)
+    setup_logging(
+        config.logging.level,
+        log_dir=config.logging.dir if config.logging.file_enabled else None,
+        file_level=config.logging.file_level,
+        rotate_max_bytes=config.logging.rotate_max_bytes,
+        rotate_backups=config.logging.rotate_backups,
+        runs_to_keep=config.logging.runs_to_keep,
+    )
 
+    llm_endpoint = (
+        config.llm.base_url if config.llm.provider == "opencode-zen" else config.llm.host
+    )
     log.info("Personal assistant booting (v%s)", __import__("assistant").__version__)
     log.info(
-        "Config: wake=%r models=%s | stt=%s | llm=%s@%s | tts=%s",
+        "Config: wake=%r models=%s | stt=%s | llm=%s/%s@%s | tts=%s",
         ", ".join(config.wake.phrases()),
         config.wake.model_refs(),
         config.stt.model,
+        config.llm.provider,
         config.llm.model,
-        config.llm.host,
+        llm_endpoint,
         config.tts.model_path or config.tts.voice,
+        extra={"data": {"kind": "boot.config", "config": _config_dump(config)}},
     )
 
     try:
@@ -113,44 +187,46 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         log.error("No TTS model configured (tts.model_path); cannot speak. Aborting.")
         return
 
-    # Voice out.
+    # Voice out. When AEC is enabled, everything the speaker plays is also fed
+    # to the canceller as the echo reference for the mic (see audio/aec.py);
+    # build_aec degrades to None (passthrough) when the native lib is missing.
+    aec = None
+    if config.aec.enabled:
+        aec = build_aec(
+            sample_rate=config.audio.sample_rate,
+            frame_ms=config.aec.frame_ms,
+            filter_length_ms=config.aec.filter_length_ms,
+            extra_delay_ms=config.aec.extra_delay_ms,
+        )
     tts = PiperTTS(config.tts.model_path, config.tts.length_scale)
     out = SoundDeviceOut(
-        devices.output.index, tts.sample_rate, volume=config.audio.output_volume
+        devices.output.index, tts.sample_rate, volume=config.audio.output_volume,
+        far_sink=aec,
     )
+    arbiter = AudioArbiter()
+    # Shared "stand down" state: the skill engages it, the pipeline/scheduler/
+    # watcher go silent while it's active, the TUI's RESUME verb clears it.
+    standdown = StandDown()
 
     # LLM + routing + skills.
-    llm = OllamaProvider(
-        config.llm.model,
-        config.llm.host,
-        config.llm.timeout,
-        config.llm.health_timeout,
-        config.llm.num_ctx,
-        config.llm.think,
-    )
+    llm = _build_llm(config.llm)
     if not await llm.health():
-        log.warning(
-            "Ollama not ready (host=%s, model=%s); answers will fail until it's up. "
-            "Run `ollama serve` and `ollama pull %s`.",
-            config.llm.host,
-            config.llm.model,
-            config.llm.model,
-        )
+        if config.llm.provider == "opencode-zen":
+            log.warning(
+                "OpenCode Zen not ready (base_url=%s, model=%s); answers will fail "
+                "until it's reachable. Verify ASSISTANT_LLM__API_KEY and network.",
+                config.llm.base_url,
+                config.llm.model,
+            )
+        else:
+            log.warning(
+                "Ollama not ready (host=%s, model=%s); answers will fail until it's up. "
+                "Run `ollama serve` and `ollama pull %s`.",
+                config.llm.host,
+                config.llm.model,
+                config.llm.model,
+            )
     store = ReminderStore(config.storage.db_path)
-    # The keyphrase matcher is the orchestrator's LLM-free fast path for cheap,
-    # frequent commands; anything it doesn't confidently match enters the tool loop.
-    keyphrases = KeyphraseRouter(default_intent="general")
-    keyphrases.add("time", "what time", "the time")
-    keyphrases.add("date", "what day", "what's the date", "the date", "today's date")
-    keyphrases.add("timer", "set a timer", "set timer", "timer for")
-    keyphrases.add("reminder", "remind me", "set a reminder")
-    keyphrases.add("manage_reminders", "cancel", "clear", "delete", "forget", "remove",
-                   "change my", "change the", "update my", "reschedule", "move my", "rename")
-    keyphrases.add("list_reminders", "my reminders", "any reminders", "have reminders")
-    keyphrases.add("web_search", "search the web", "search for", "look up", "look it up",
-                   "google", "what's the latest", "latest on")
-    keyphrases.add("weather", "weather", "forecast", "temperature",
-                   "will it rain", "how hot", "how cold")
     search = _build_search(config.web_search)
     weather = OpenMeteoWeather(
         forecast_endpoint=config.weather.forecast_endpoint,
@@ -162,9 +238,14 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         forecast_days=config.weather.forecast_days,
         timeout=config.weather.timeout,
     )
+    persona_suffix = persona.suffix(
+        enabled=config.persona.enabled, strength=config.persona.strength
+    )
     registry = SkillRegistry()
     registry.register(ClockSkill())
     registry.register(ReminderSkill(store, llm))
+    registry.register(TimerSkill(store))
+    registry.register(StandDownSkill(standdown))
     registry.register(WebSearchSkill(
         search,
         llm,
@@ -172,6 +253,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         max_rounds=config.web_search.max_rounds,
         speaker=Speaker(tts, out),
         progress_updates=config.web_search.progress_updates,
+        persona_suffix=persona_suffix,
     ))
     registry.register(WeatherSkill(
         weather,
@@ -179,25 +261,71 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         home_lat=config.weather.latitude,
         home_lon=config.weather.longitude,
         home_name=config.weather.location_name,
+        persona_suffix=persona_suffix,
     ))
-    registry.register(GeneralSkill(llm, config.llm.system_prompt), default=True)
-    # Fast path: explicit "tool X" invocation, then keyphrase match. Both LLM-free;
-    # a miss returns the default intent, which drops the turn into the tool loop.
-    fast_path = CommandEntryRouter(
-        config.nlu.command_keyphrase,
-        registry,
-        next_router=keyphrases,
-        aliases=config.nlu.command_aliases,
+    calendar_provider = None
+    calendar_watcher = None
+    calendar_state = None
+    if config.calendar.enabled:
+        calendar_ids = [
+            config.calendar.personal_calendar_id,
+            config.calendar.calcifer_calendar_id,
+        ]
+        calendar_provider = GoogleCalendar(
+            config.calendar.credentials_path,
+            timeout=config.calendar.timeout,
+            health_calendar_ids=calendar_ids,
+        )
+        # Warn, don't bar: the skill and watcher degrade per-call with a spoken
+        # failure, matching the Ollama health check above.
+        if not await calendar_provider.health():
+            log.warning(
+                "Google Calendar not reachable (creds=%s); calendar commands will "
+                "fail with a spoken message until it's fixed",
+                config.calendar.credentials_path,
+            )
+        calendar_state = CalendarStateStore(config.storage.db_path)
+        calendar_blocklist = EventBlocklist(
+            calendar_state,
+            config_patterns=config.calendar.blocked_titles,
+            hidden_tag=config.calendar.hidden_tag,
+        )
+        calendar_watcher = CalendarWatcher(
+            calendar_provider,
+            calendar_state,
+            tts,
+            out,
+            arbiter,
+            blocklist=calendar_blocklist,
+            calendar_ids=calendar_ids,
+            poll_seconds=config.calendar.watcher_poll_seconds,
+            lead_minutes=config.calendar.watcher_lead_minutes,
+            enabled=config.calendar.watcher_enabled,
+            standdown=standdown,
+        )
+        registry.register(CalendarSkill(
+            calendar_provider,
+            llm,
+            store,
+            calendar_watcher,
+            blocklist=calendar_blocklist,
+            personal_id=config.calendar.personal_calendar_id,
+            calcifer_id=config.calendar.calcifer_calendar_id,
+        ))
+    registry.register(
+        GeneralSkill(llm, config.llm.system_prompt, persona_suffix=persona_suffix),
+        default=True,
     )
     orchestrator = Orchestrator(
         llm,
         registry,
-        fast_path,
         tool_mode=config.agent.tool_mode,
         max_tool_rounds=config.agent.max_tool_rounds,
-        fast_path_enabled=config.agent.fast_path,
         system_prompt=config.llm.system_prompt,
         turn_timeout_s=config.agent.turn_timeout_s,
+        delegate_direct_answers=config.persona.enabled,
+        verify=config.verify,
+        persona_suffix=persona_suffix,
     )
 
     # Startup chime.
@@ -221,12 +349,20 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         initial_prompt=config.stt.initial_prompt,
         device=config.stt.device,
         cpu_threads=config.stt.cpu_threads,
+        no_speech_threshold=config.stt.no_speech_threshold,
+        log_prob_threshold=config.stt.log_prob_threshold,
     )
-    audio_in = SoundDeviceIn(
-        devices.input.index,
-        sample_rate=config.audio.sample_rate,
-        block_size=config.audio.block_size,
-        channels=config.audio.channels,
+    # The hub fans the mic out: the pipeline's stream stays the single consumer,
+    # while a tap lets wake scoring continue during playback (barge-in). With
+    # AEC on, every frame is echo-cancelled before the recorder and the tap.
+    audio_in = MicHub(
+        SoundDeviceIn(
+            devices.input.index,
+            sample_rate=config.audio.sample_rate,
+            block_size=config.audio.block_size,
+            channels=config.audio.channels,
+        ),
+        processor=aec.process if aec is not None else None,
     )
     recorder = VadRecorder(
         sample_rate=config.audio.sample_rate,
@@ -234,18 +370,23 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         silence_ms=config.recorder.silence_ms,
         max_ms=config.recorder.max_ms,
         start_timeout_ms=config.recorder.start_timeout_ms,
+        min_speech_ms=config.recorder.min_speech_ms,
     )
 
-    arbiter = AudioArbiter()
     # Spoken wake acknowledgements, synthesized once and cached as PCM so they play
-    # with earcon-latency (no per-turn TTS). One is picked at random per wake for
-    # variety. Played the instant the wake fires.
-    wake_acks: list[bytes] = []
-    for phrase in config.tts.ack_phrases:
-        try:
-            wake_acks.append(await tts.synthesize(phrase))
-        except Exception as exc:  # noqa: BLE001 - skip a bad phrase, never block boot
-            log.warning("Could not synthesize wake acknowledgement %r: %s", phrase, exc)
+    # with earcon-latency (no per-turn TTS). One is picked at random per wake:
+    # confident wakes draw from ack_phrases, low-score wakes from unsure_ack_phrases.
+    async def _synth_acks(phrases: list[str]) -> list[bytes]:
+        acks: list[bytes] = []
+        for phrase in phrases:
+            try:
+                acks.append(await tts.synthesize(phrase))
+            except Exception as exc:  # noqa: BLE001 - skip a bad phrase, never block boot
+                log.warning("Could not synthesize wake acknowledgement %r: %s", phrase, exc)
+        return acks
+
+    wake_acks = await _synth_acks(config.tts.ack_phrases)
+    unsure_wake_acks = await _synth_acks(config.tts.unsure_ack_phrases)
     pipeline = VoicePipeline(
         audio_in,
         detector,
@@ -259,45 +400,60 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         sample_rate=config.audio.sample_rate,
         no_speech_earcon=no_speech(tts.sample_rate),
         wake_earcons=wake_acks,
+        unsure_wake_earcons=unsure_wake_acks,
+        wake_confident_threshold=config.wake.confident_threshold,
         end_earcon=descending(tts.sample_rate),
         normalize=config.audio.normalize,
         normalize_target_peak=config.audio.normalize_target_peak,
         normalize_rms_floor=config.audio.normalize_rms_floor,
         min_transcribe_rms=config.audio.min_transcribe_rms,
+        hallucination_phrases=config.stt.hallucination_phrases,
+        hallucination_max_rms=config.stt.hallucination_max_rms,
         conversation_enabled=config.conversation.enabled,
         followup_window_ms=config.conversation.followup_window_ms,
         max_history_turns=config.conversation.max_history_turns,
         llm=llm,
-        followup_cue_enabled=config.conversation.followup_cue_enabled,
-        followup_cue_timeout_s=config.conversation.followup_cue_timeout_s,
-        followup_cue_prompt=config.conversation.followup_cue_prompt,
-        signoff_enabled=config.conversation.signoff_enabled,
-        signoff_timeout_s=config.conversation.signoff_timeout_s,
-        signoff_pause_s=config.conversation.signoff_pause_s,
-        signoff_prompt=config.conversation.signoff_prompt,
+        decision_enabled=config.conversation.decision_enabled,
+        decision_timeout_s=config.conversation.decision_timeout_s,
+        decision_prompt=config.conversation.decision_prompt,
+        decline_phrases=config.conversation.decline_phrases,
+        confirm_earcon=checkin(tts.sample_rate),
         end_phrases=config.conversation.end_phrases,
         ack_delay_s=config.tts.ack_delay_s,
         # State feed to the monitor TUI, which reads our stdout. Suppressed on an
         # interactive terminal (standalone), where it would just be log noise.
         state_emitter=NullStateEmitter() if sys.stdout.isatty() else StateEmitter(),
+        standdown=standdown,
+        barge_in_enabled=config.barge_in.enabled,
+        barge_in_threshold=config.barge_in.threshold,
+        barge_in_trigger_frames=config.barge_in.trigger_frames,
+        barge_in_announcements=config.barge_in.announcements,
     )
     scheduler = ReminderScheduler(
-        store, tts, out, arbiter, poll_seconds=config.scheduling.poll_seconds
+        store, tts, out, arbiter, poll_seconds=config.scheduling.poll_seconds,
+        standdown=standdown,
     )
     # Optional control channel: line commands on stdin (typed commands, live
     # volume) from the monitor TUI when the daemon runs as its child.
-    control = ControlChannel(pipeline, out, Speaker(tts, out), arbiter)
+    control = ControlChannel(pipeline, out, Speaker(tts, out), arbiter, standdown)
 
-    # Pipeline (wake -> reply), scheduler (proactive reminders), and control
-    # channel share the one event loop, audio output, and arbiter; all run until
-    # interrupted.
+    # Pipeline (wake -> reply), scheduler (proactive reminders), calendar watcher
+    # (proactive event announcements, when enabled), and control channel share the
+    # one event loop, audio output, and arbiter; all run until interrupted.
+    tasks = [pipeline.run(), scheduler.run(), control.run()]
+    if calendar_watcher is not None:
+        tasks.append(calendar_watcher.run())
     try:
-        await asyncio.gather(pipeline.run(), scheduler.run(), control.run())
+        await asyncio.gather(*tasks)
     finally:
         store.close()
+        if calendar_state is not None:
+            calendar_state.close()
         await llm.aclose()
         await search.aclose()
         await weather.aclose()
+        if calendar_provider is not None:
+            await calendar_provider.aclose()
 
 
 if __name__ == "__main__":

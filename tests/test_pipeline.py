@@ -16,7 +16,7 @@ class DirectOrchestrator:
     def __init__(self, skill):
         self._skill = skill
 
-    async def handle(self, text, history, *, spoken):
+    async def handle(self, text, history, *, spoken, on_say=None):
         result = await self._skill.handle(
             Command(text, spoken=spoken, history=history),
             Intent(type="general", raw_text=text),
@@ -38,8 +38,9 @@ class FakeAudioIn:
 
 
 class FakeDetector:
-    def __init__(self, fires=1):
+    def __init__(self, fires=1, score=0.9):
         self._remaining = fires
+        self._score = score
         self.resets = 0
 
     @property
@@ -49,7 +50,7 @@ class FakeDetector:
     def process(self, frame):
         if self._remaining > 0:
             self._remaining -= 1
-            return WakeEvent("test", 0.9)
+            return WakeEvent("test", self._score)
         return None
 
     def reset(self):
@@ -57,9 +58,10 @@ class FakeDetector:
 
 
 class FakeRecorder:
-    def __init__(self):
+    def __init__(self, pcm=b"\x00\x00"):
         self.prefixes = []
         self.start_timeouts = []
+        self._pcm = pcm
 
     async def record(self, frames, prefix=b"", start_timeout_ms=None, on_level=None,
                      cancel_event=None):
@@ -69,7 +71,7 @@ class FakeRecorder:
             await frames.__anext__()  # consume one frame, like a real capture
         except StopAsyncIteration:
             pass
-        return b"\x00\x00"
+        return self._pcm
 
 
 class FakeSTT:
@@ -141,17 +143,19 @@ class FakeOut:
 
 
 class FakeLLM:
-    """Records completions and returns a fixed text (or raises), so the cue and
-    sign-off paths can be exercised without a real model. Each call logs
-    (prompt, system, label)."""
+    """Records completions and returns a fixed text (or raises), so the decision
+    path can be exercised without a real model. Each call logs
+    (prompt, system, label); `jsons` logs (label, json) for format assertions."""
 
     def __init__(self, text="take care", raises=False):
         self.calls = []
+        self.jsons = []
         self._text = text
         self._raises = raises
 
     async def complete(self, prompt, *, system=None, json=False, label=""):
         self.calls.append((prompt, system, label))
+        self.jsons.append((label, json))
         if self._raises:
             raise RuntimeError("llm down")
         return self._text
@@ -159,12 +163,16 @@ class FakeLLM:
 
 def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
               recorder=None, no_speech_earcon=b"", wake_earcon=b"", wake_earcons=None,
+              unsure_wake_earcons=None, wake_confident_threshold=0.0,
               end_earcon=b"", conversation_enabled=False, followup_window_ms=6000,
-              max_history_turns=12, min_transcribe_rms=0.0, state_emitter=None,
-              llm=None, followup_cue_enabled=False, followup_cue_prompt="cue",
-              followup_cue_timeout_s=4.0, signoff_enabled=False, signoff_prompt="bye",
-              signoff_timeout_s=4.0, signoff_pause_s=0.0, end_phrases=None,
-              ack_delay_s=0.0):
+              max_history_turns=12, min_transcribe_rms=0.0,
+              hallucination_phrases=None, hallucination_max_rms=0.0,
+              state_emitter=None, llm=None, decision_enabled=False,
+              decision_prompt="decide", decision_timeout_s=4.0,
+              decline_phrases=None, confirm_earcon=b"", end_phrases=None,
+              ack_delay_s=0.0, standdown=None, barge_in_enabled=False,
+              barge_in_threshold=0.8, barge_in_trigger_frames=3,
+              barge_in_announcements=False):
     # Tests pass a single wake_earcon for convenience; the pipeline takes a pool.
     if wake_earcons is None:
         wake_earcons = [wake_earcon] if wake_earcon else []
@@ -173,22 +181,29 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
         DirectOrchestrator(skill), tts, out, arbiter,
         no_speech_earcon=no_speech_earcon,
         wake_earcons=wake_earcons,
+        unsure_wake_earcons=unsure_wake_earcons,
+        wake_confident_threshold=wake_confident_threshold,
         end_earcon=end_earcon,
         min_transcribe_rms=min_transcribe_rms,
+        hallucination_phrases=hallucination_phrases,
+        hallucination_max_rms=hallucination_max_rms,
         conversation_enabled=conversation_enabled,
         followup_window_ms=followup_window_ms,
         max_history_turns=max_history_turns,
         llm=llm,
-        followup_cue_enabled=followup_cue_enabled,
-        followup_cue_timeout_s=followup_cue_timeout_s,
-        followup_cue_prompt=followup_cue_prompt,
-        signoff_enabled=signoff_enabled,
-        signoff_timeout_s=signoff_timeout_s,
-        signoff_pause_s=signoff_pause_s,
-        signoff_prompt=signoff_prompt,
+        decision_enabled=decision_enabled,
+        decision_timeout_s=decision_timeout_s,
+        decision_prompt=decision_prompt,
+        decline_phrases=decline_phrases,
+        confirm_earcon=confirm_earcon,
         end_phrases=end_phrases,
         ack_delay_s=ack_delay_s,
         state_emitter=state_emitter,
+        standdown=standdown,
+        barge_in_enabled=barge_in_enabled,
+        barge_in_threshold=barge_in_threshold,
+        barge_in_trigger_frames=barge_in_trigger_frames,
+        barge_in_announcements=barge_in_announcements,
     )
 
 
@@ -406,6 +421,67 @@ async def test_wake_cue_picked_from_pool():
 
     assert out.played[0] in pool          # the mic-open cue is from the pool
     assert out.played[-1] == b"AUDIO"     # reply still spoken
+
+
+async def test_confident_wake_uses_confident_ack_pool():
+    # A score at/above the confident threshold greets enthusiastically.
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(score=0.9), FakeSkill(), FakeTTS(), out,
+        AudioArbiter(),
+        wake_earcons=[b"HELLO"], unsure_wake_earcons=[b"WHAT"],
+        wake_confident_threshold=0.85,
+    )
+
+    await pipeline.run()
+
+    assert out.played[0] == b"HELLO"
+
+
+async def test_low_confidence_wake_uses_unsure_ack_pool():
+    # A score between the fire threshold and the confident threshold signals an
+    # uncertain pickup ("did you say something?").
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(score=0.7), FakeSkill(), FakeTTS(), out,
+        AudioArbiter(),
+        wake_earcons=[b"HELLO"], unsure_wake_earcons=[b"WHAT"],
+        wake_confident_threshold=0.85,
+    )
+
+    await pipeline.run()
+
+    assert out.played[0] == b"WHAT"
+
+
+async def test_manual_listen_uses_confident_ack_pool():
+    # A tap-to-listen carries score 1.0 and never sounds unsure.
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(fires=0), FakeSkill(), FakeTTS(), out,
+        AudioArbiter(),
+        wake_earcons=[b"HELLO"], unsure_wake_earcons=[b"WHAT"],
+        wake_confident_threshold=0.85,
+    )
+    pipeline.request_listen()
+
+    await pipeline.run()
+
+    assert out.played[0] == b"HELLO"
+
+
+async def test_low_confidence_wake_falls_back_without_unsure_pool():
+    # No unsure pool configured -> every wake draws from the confident pool.
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(score=0.7), FakeSkill(), FakeTTS(), out,
+        AudioArbiter(),
+        wake_earcons=[b"HELLO"], wake_confident_threshold=0.85,
+    )
+
+    await pipeline.run()
+
+    assert out.played[0] == b"HELLO"
 
 
 async def test_end_earcon_plays_at_mic_close():
@@ -798,7 +874,7 @@ async def test_followup_does_not_replay_wake_ack():
     pipeline = _pipeline(
         FakeAudioIn(8), FakeDetector(), skill, FakeTTS(), out, AudioArbiter(),
         stt=stt, conversation_enabled=True, wake_earcon=b"ACK",
-    )  # follow-up cue disabled -> the follow-up mic opens silently
+    )  # decision disabled -> the follow-up mic opens silently
 
     await pipeline.run()
 
@@ -806,28 +882,30 @@ async def test_followup_does_not_replay_wake_ack():
     assert out.played.count(b"ACK") == 1  # only the first wake, never the follow-ups
 
 
-async def test_followup_cue_generated_and_spoken_when_enabled():
-    # With a cue LLM, the follow-up mic-open speaks a context-aware cue instead of
-    # the wake ack. The cue is generated (label "cue") and synthesized.
+async def test_confirm_plays_checkin_earcon():
+    # A "confirm" decision opens the follow-up mic with the check-in earcon —
+    # no phrase is ever synthesized for it.
     skill = FakeSkill(speech="it is noon")
     stt = FakeSTT(transcripts=["what time is it", ""])
     tts = FakeTTS()
-    llm = FakeLLM("anything else")
+    out = FakeOut()
+    llm = FakeLLM('{"action": "confirm"}')
     pipeline = _pipeline(
-        FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
-        stt=stt, conversation_enabled=True, llm=llm,
-        followup_cue_enabled=True,
+        FakeAudioIn(6), FakeDetector(), skill, tts, out, AudioArbiter(),
+        stt=stt, conversation_enabled=True, llm=llm, decision_enabled=True,
+        confirm_earcon=b"CHECK",
     )
 
     await pipeline.run()
 
-    assert "anything else" in tts.spoke                         # cue synthesized
-    assert any(label == "cue" for (_, _, label) in llm.calls)   # via the cue path
+    assert b"CHECK" in out.played          # earcon marks the check-in at mic-open
+    assert tts.spoke == ["it is noon"]     # only the reply; no check-in phrase
+    assert ("decide", True) in llm.jsons   # decision requested as structured JSON
 
 
-async def test_followup_cue_degrades_on_llm_failure():
-    # A cue LLM that raises must not break the loop: the follow-up mic just opens
-    # silently and the conversation continues.
+async def test_decision_degrades_on_llm_failure():
+    # A decision LLM that raises must not break the loop: the follow-up mic just
+    # opens silently and the conversation continues (ends on silence, as before).
     skill = FakeSkill()
     stt = FakeSTT(transcripts=["what time is it", "and the date", ""])
     out = FakeOut()
@@ -835,7 +913,7 @@ async def test_followup_cue_degrades_on_llm_failure():
     pipeline = _pipeline(
         FakeAudioIn(8), FakeDetector(), skill, FakeTTS(), out, AudioArbiter(),
         stt=stt, conversation_enabled=True, llm=llm,
-        followup_cue_enabled=True, wake_earcon=b"ACK",
+        decision_enabled=True, wake_earcon=b"ACK",
     )
 
     await pipeline.run()
@@ -844,29 +922,188 @@ async def test_followup_cue_degrades_on_llm_failure():
     assert out.played.count(b"ACK") == 1  # still no ack replayed on the follow-up
 
 
-async def test_signoff_on_explicit_end_phrase():
-    # Saying an end phrase ("goodbye") closes the conversation with a context-aware
-    # farewell, and the phrase itself is not routed to a skill.
+async def test_listen_decision_reopens_mic_silently():
+    # A "listen" decision (the reply asked a question) reopens the mic with no
+    # extra cue: only the replies themselves are synthesized.
+    skill = FakeSkill(speech="which city?")
+    stt = FakeSTT(transcripts=["weather", "paris", ""])
+    tts = FakeTTS()
+    recorder = FakeRecorder()
+    llm = FakeLLM('{"action": "listen"}')
+    pipeline = _pipeline(
+        FakeAudioIn(8), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
+        stt=stt, recorder=recorder, conversation_enabled=True, llm=llm,
+        decision_enabled=True,
+    )
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["weather", "paris"]
+    assert tts.spoke == ["which city?", "which city?"]  # replies only, no cue
+    assert recorder.start_timeouts[1:] == [6000, 6000]  # mic reopened both times
+
+
+async def test_end_decision_closes_without_reopen():
+    # An "end" decision closes the conversation right after the reply: the
+    # follow-up mic never opens.
+    skill = FakeSkill(speech="done, timer set")
+    recorder = FakeRecorder()
+    stt = FakeSTT(transcripts=["set a timer"])
+    llm = FakeLLM('{"action": "end"}')
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, recorder=recorder, conversation_enabled=True, llm=llm,
+        decision_enabled=True,
+    )
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["set a timer"]
+    assert recorder.start_timeouts == [None]  # initial capture only, no follow-up
+
+
+async def test_confirm_second_time_ends_instead():
+    # The check-in plays at most once per conversation: a second "confirm"
+    # decision degrades to "end" instead of chiming again.
+    skill = FakeSkill(speech="done")
+    recorder = FakeRecorder()
+    stt = FakeSTT(transcripts=["set a timer", "what's the weather", "more", ""])
+    out = FakeOut()
+    llm = FakeLLM('{"action": "confirm"}')
+    pipeline = _pipeline(
+        FakeAudioIn(10), FakeDetector(), skill, FakeTTS(), out, AudioArbiter(),
+        stt=stt, recorder=recorder, conversation_enabled=True, llm=llm,
+        decision_enabled=True, confirm_earcon=b"CHECK",
+    )
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["set a timer", "what's the weather"]
+    assert out.played.count(b"CHECK") == 1  # chimed once, never repeated
+    assert recorder.start_timeouts == [None, 6000]  # second completed turn ended
+
+
+async def test_decline_after_confirm_ends_and_is_not_routed():
+    # "No" right after the check-in chime ends the conversation and is never
+    # routed to a skill.
+    skill = FakeSkill(speech="done")
+    stt = FakeSTT(transcripts=["set a timer", "no"])
+    llm = FakeLLM('{"action": "confirm"}')
+    pipeline = _pipeline(
+        FakeAudioIn(8), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True, llm=llm,
+        decision_enabled=True, decline_phrases=["no", "nope"],
+    )
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["set a timer"]  # "no" never routed
+
+
+async def test_bad_decision_json_falls_back_to_listen():
+    # Malformed decision output degrades to a silent listen; the loop continues
+    # and still ends on silence.
+    skill = FakeSkill()
+    stt = FakeSTT(transcripts=["one", "two", ""])
+    llm = FakeLLM("not json at all")
+    pipeline = _pipeline(
+        FakeAudioIn(8), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True, llm=llm, decision_enabled=True,
+    )
+
+    await pipeline.run()
+
+    assert [t for (t, _) in skill.handled] == ["one", "two"]
+
+
+async def test_expects_reply_skips_decision():
+    # A reply-expecting skill controls the mic itself: no decision is requested,
+    # and the pending-reply silence-cancel path is unchanged.
+    skill = FakeSkill(speech="confirm?", expects_reply=True)
+    stt = FakeSTT(transcripts=["turn off for 20 minutes", ""])
+    llm = FakeLLM('{"action": "end"}')
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=True, llm=llm, decision_enabled=True,
+    )
+
+    await pipeline.run()
+
+    assert skill.replies == [""]  # silence still delivered to the pending skill
+    assert not any(label == "decide" for (_, _, label) in llm.calls)
+
+
+async def test_empty_pcm_never_reaches_stt():
+    # A recorder that heard no speech returns b""; nothing is sent to whisper
+    # (which hallucinates on silent audio).
+    stt = FakeSTT()
+    recorder = FakeRecorder(pcm=b"")
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), FakeSkill(), FakeTTS(), FakeOut(),
+        AudioArbiter(), stt=stt, recorder=recorder, no_speech_earcon=b"NOPE",
+    )
+
+    await pipeline.run()
+
+    assert stt.calls == []  # silent captures (initial + retry) never transcribed
+
+
+async def test_hallucination_phrase_dropped_when_quiet():
+    # A near-silent capture transcribed as a known whisper artifact is treated as
+    # silence: nothing is routed.
+    skill = FakeSkill()
+    stt = FakeSTT(transcript="Thank you. Thank you.")
+    recorder = FakeRecorder(pcm=b"\x00\x00" * 100)  # rms 0: room tone
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, recorder=recorder,
+        hallucination_phrases=["thank you"], hallucination_max_rms=300.0,
+    )
+
+    await pipeline.run()
+
+    assert skill.handled == []  # dropped, never routed
+
+
+async def test_hallucination_phrase_kept_when_loud():
+    # The same phrase in a loud capture is real speech and passes through.
+    skill = FakeSkill()
+    stt = FakeSTT(transcript="Thank you.")
+    loud = (10000).to_bytes(2, "little", signed=True) * 100
+    recorder = FakeRecorder(pcm=loud)
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, FakeTTS(), FakeOut(), AudioArbiter(),
+        stt=stt, recorder=recorder,
+        hallucination_phrases=["thank you"], hallucination_max_rms=300.0,
+    )
+
+    await pipeline.run()
+
+    assert skill.handled == [("Thank you.", "general")]
+
+
+async def test_end_phrase_closes_silently():
+    # Saying an end phrase ("goodbye") closes the conversation without routing it
+    # to a skill — and without any farewell speech or extra LLM call.
     skill = FakeSkill(speech="it is noon")
     stt = FakeSTT(transcripts=["what time is it", "goodbye"])
     tts = FakeTTS()
     llm = FakeLLM("take care")
     pipeline = _pipeline(
         FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
-        stt=stt, conversation_enabled=True, llm=llm,
-        signoff_enabled=True, end_phrases=["goodbye"],
+        stt=stt, conversation_enabled=True, llm=llm, end_phrases=["goodbye"],
     )
 
     await pipeline.run()
 
-    assert skill.handled == [("what time is it", "general")]      # "goodbye" not routed
-    assert "take care" in tts.spoke                               # farewell spoken
-    assert any(label == "signoff" for (_, _, label) in llm.calls)
+    assert skill.handled == [("what time is it", "general")]  # "goodbye" not routed
+    assert tts.spoke == ["it is noon"]                        # no farewell spoken
+    assert llm.calls == []                                    # no sign-off generated
 
 
-async def test_no_signoff_on_silence():
-    # A conversation that ends on silence closes quietly: the descending tone plays
-    # but no farewell is generated or spoken.
+async def test_silence_closes_quietly():
+    # A conversation that ends on silence closes with just the descending tone:
+    # nothing extra is generated or spoken.
     skill = FakeSkill()
     stt = FakeSTT(transcripts=["what time is it", ""])
     tts = FakeTTS()
@@ -875,33 +1112,14 @@ async def test_no_signoff_on_silence():
     pipeline = _pipeline(
         FakeAudioIn(6), FakeDetector(), skill, tts, out, AudioArbiter(),
         stt=stt, conversation_enabled=True, llm=llm,
-        signoff_enabled=True, end_phrases=["goodbye"], end_earcon=b"END",
+        end_phrases=["goodbye"], end_earcon=b"END",
     )
 
     await pipeline.run()
 
-    assert "take care" not in tts.spoke  # silence ends quietly, no farewell
-    assert llm.calls == []               # sign-off never generated
+    assert tts.spoke == ["it is noon"]   # only the reply
+    assert llm.calls == []               # no farewell generated
     assert b"END" in out.played          # the descending tone still marks the end
-
-
-async def test_signoff_degrades_on_llm_failure():
-    # An end phrase with a failing sign-off LLM still closes cleanly: the phrase is
-    # not routed and no farewell is spoken.
-    skill = FakeSkill(speech="it is noon")
-    stt = FakeSTT(transcripts=["what time is it", "goodbye"])
-    tts = FakeTTS()
-    llm = FakeLLM(raises=True)
-    pipeline = _pipeline(
-        FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
-        stt=stt, conversation_enabled=True, llm=llm,
-        signoff_enabled=True, end_phrases=["goodbye"],
-    )
-
-    await pipeline.run()
-
-    assert skill.handled == [("what time is it", "general")]  # "goodbye" not routed
-    assert tts.spoke == ["it is noon"]                        # only the reply, no farewell
 
 
 async def test_wake_ack_delay_precedes_ack(monkeypatch):
@@ -943,24 +1161,305 @@ async def test_no_wake_ack_delay_by_default(monkeypatch):
     assert sleeps == []
 
 
-async def test_signoff_pause_precedes_farewell(monkeypatch):
-    # A breath (pause) is inserted right before the farewell is spoken.
-    sleeps = []
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
 
-    async def _fake_sleep(seconds):
-        sleeps.append(seconds)
+    def __call__(self):
+        return self.now
 
-    monkeypatch.setattr("assistant.core.pipeline.asyncio.sleep", _fake_sleep)
+
+class EngagingSkill(FakeSkill):
+    """A skill that engages a stand-down when handled (like StandDownSkill)."""
+
+    def __init__(self, standdown, speech="okay, standing down"):
+        super().__init__(speech=speech)
+        self._standdown = standdown
+
+    async def handle(self, cmd, intent):
+        self._standdown.engage(None)
+        return await super().handle(cmd, intent)
+
+
+class ClockAdvancingIn:
+    """Yields frames, advancing the stand-down clock partway through the stream
+    so a timed pause expires mid-run."""
+
+    def __init__(self, clock, advance_at, advance_by, n):
+        self._clock = clock
+        self._advance_at = advance_at
+        self._advance_by = advance_by
+        self._n = n
+
+    async def stream(self):
+        for i in range(self._n):
+            if i == self._advance_at:
+                self._clock.now += self._advance_by
+            yield FRAME
+
+    def drain(self):
+        pass
+
+
+async def test_standdown_suppresses_wake():
+    # While standing down, no frame reaches the wake detector and nothing routes.
+    from assistant.core.standdown import StandDown
+
+    detector = FakeDetector()
+    skill = FakeSkill()
     tts = FakeTTS()
-    llm = FakeLLM("take care")
-    stt = FakeSTT(transcripts=["what time is it", "goodbye"])
-    pipeline = _pipeline(
-        FakeAudioIn(6), FakeDetector(), FakeSkill(speech="it is noon"), tts, FakeOut(),
-        AudioArbiter(), stt=stt, conversation_enabled=True, llm=llm,
-        signoff_enabled=True, end_phrases=["goodbye"], signoff_pause_s=0.5,
-    )
+    standdown = StandDown()
+    standdown.engage(None)
+    pipeline = _pipeline(FakeAudioIn(3), detector, skill, tts, FakeOut(), AudioArbiter(),
+                         standdown=standdown)
 
     await pipeline.run()
 
-    assert 0.5 in sleeps            # the breath before the farewell
-    assert "take care" in tts.spoke  # farewell still spoken
+    assert detector.fired is False  # never processed a frame
+    assert skill.handled == []
+    assert tts.spoke == []
+
+
+async def test_standdown_ignores_tap_to_listen():
+    # A tap-to-listen while standing down is dropped, not queued for resume.
+    from assistant.core.standdown import StandDown
+
+    skill = FakeSkill()
+    standdown = StandDown()
+    standdown.engage(None)
+    pipeline = _pipeline(FakeAudioIn(3), FakeDetector(fires=0), skill, FakeTTS(),
+                         FakeOut(), AudioArbiter(), standdown=standdown)
+    pipeline.request_listen()
+
+    await pipeline.run()
+
+    assert skill.handled == []                  # no turn started
+    assert not pipeline._listen_event.is_set()  # tap consumed, not left pending
+
+
+async def test_standdown_turn_speaks_confirmation_then_no_followup():
+    # The turn that engages a stand-down still speaks its confirmation, but the
+    # conversation ends immediately: no follow-up mic reopen.
+    from assistant.core.standdown import StandDown
+
+    standdown = StandDown()
+    skill = EngagingSkill(standdown)
+    tts = FakeTTS()
+    recorder = FakeRecorder()
+    # Scripted silence after the first turn, so a missing gate fails the
+    # start_timeouts assertion instead of conversing forever.
+    stt = FakeSTT(transcripts=["stand down", ""])
+    pipeline = _pipeline(FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(),
+                         AudioArbiter(), recorder=recorder, conversation_enabled=True,
+                         stt=stt, standdown=standdown)
+
+    await pipeline.run()
+
+    assert tts.spoke == ["okay, standing down"]  # confirmation spoken
+    assert len(skill.handled) == 1               # handled exactly once
+    assert recorder.start_timeouts == [None]     # no follow-up capture
+
+
+class TapAudioIn(FakeAudioIn):
+    """FakeAudioIn that also accepts a mic tap, like MicHub."""
+
+    def __init__(self, n):
+        super().__init__(n)
+        self.tap = None
+        self.tap_clears = 0
+
+    def set_tap(self, tap):
+        self.tap = tap
+
+    def clear_tap(self):
+        self.tap = None
+        self.tap_clears += 1
+
+
+class BargingOut(FakeOut):
+    """FakeOut that injects mic frames into the audio-in tap while 'playing',
+    simulating the user speaking over the reply (as the MicHub pump would)."""
+
+    def __init__(self, audio_in, frames_per_play=3):
+        super().__init__()
+        self._audio_in = audio_in
+        self._frames = frames_per_play
+
+    async def play(self, audio):
+        await super().play(audio)
+        tap = self._audio_in.tap
+        if tap is not None:
+            for _ in range(self._frames):
+                tap(FRAME)
+
+
+class ScriptedDetector:
+    """WakeEvents from a scripted score queue (None = no event that frame)."""
+
+    def __init__(self, scores):
+        self._scores = deque(scores)
+        self.resets = 0
+
+    def process(self, frame):
+        score = self._scores.popleft() if self._scores else None
+        return WakeEvent("test", score) if score is not None else None
+
+    def reset(self):
+        self.resets += 1
+
+
+async def test_barge_in_cuts_reply_and_recaptures_without_ack():
+    audio_in = TapAudioIn(6)
+    out = BargingOut(audio_in, frames_per_play=3)
+    skill = FakeSkill(speech="First sentence. Second sentence.")
+    tts = FakeTTS()
+    recorder = FakeRecorder()
+    # The wake fires, then the 3 tap frames during playback all clear the gate.
+    detector = ScriptedDetector([0.9, 0.9, 0.9, 0.9])
+    stt = FakeSTT(transcripts=["tell me a story", ""])
+    pipeline = _pipeline(audio_in, detector, skill, tts, out, AudioArbiter(),
+                         recorder=recorder, stt=stt, wake_earcon=b"ACK",
+                         conversation_enabled=True, barge_in_enabled=True,
+                         barge_in_threshold=0.8, barge_in_trigger_frames=3)
+
+    await pipeline.run()
+
+    assert out.stops == 1                           # playback cut mid-reply
+    assert tts.spoke == ["First sentence."]         # second sentence never synthesized
+    assert out.played.count(b"ACK") == 1            # no wake ack on the barge reopen
+    assert recorder.start_timeouts == [None, 6000]  # mic reopened with the follow-up window
+    assert audio_in.tap is None                     # tap removed after speaking
+
+
+async def test_barge_in_disabled_ignores_wake_during_speak():
+    audio_in = TapAudioIn(3)
+    out = BargingOut(audio_in)
+    skill = FakeSkill(speech="First. Second.")
+    tts = FakeTTS()
+    pipeline = _pipeline(audio_in, FakeDetector(), skill, tts, out, AudioArbiter())
+
+    await pipeline.run()
+
+    assert out.stops == 0
+    assert tts.spoke == ["First.", "Second."]  # full reply spoken
+    assert audio_in.tap is None                # tap never installed
+    assert audio_in.tap_clears == 0
+
+
+async def test_barge_gate_requires_raised_score():
+    # Wake events during playback that clear the wake threshold but not the barge
+    # threshold never barge (residual speaker echo must not cut the reply).
+    audio_in = TapAudioIn(3)
+    out = BargingOut(audio_in, frames_per_play=5)
+    skill = FakeSkill(speech="One long reply.")
+    tts = FakeTTS()
+    detector = ScriptedDetector([0.9] + [0.7] * 5)
+    pipeline = _pipeline(audio_in, detector, skill, tts, out, AudioArbiter(),
+                         barge_in_enabled=True, barge_in_threshold=0.8,
+                         barge_in_trigger_frames=3)
+
+    await pipeline.run()
+
+    assert out.stops == 0
+    assert tts.spoke == ["One long reply."]
+
+
+async def test_barge_gate_requires_consecutive_hits():
+    # A sub-threshold event mid-streak resets the count: 2 hits, a miss, 2 hits
+    # never reaches trigger_frames=3.
+    audio_in = TapAudioIn(3)
+    out = BargingOut(audio_in, frames_per_play=5)
+    skill = FakeSkill(speech="One long reply.")
+    tts = FakeTTS()
+    detector = ScriptedDetector([0.9, 0.9, 0.9, 0.7, 0.9, 0.9])
+    pipeline = _pipeline(audio_in, detector, skill, tts, out, AudioArbiter(),
+                         barge_in_enabled=True, barge_in_threshold=0.8,
+                         barge_in_trigger_frames=3)
+
+    await pipeline.run()
+
+    assert out.stops == 0
+    assert tts.spoke == ["One long reply."]
+
+
+class BusyAnnouncementIn:
+    """Yields ``busy_frames`` frames while another holder owns the arbiter (a
+    proactive announcement), then frees it and yields ``tail`` more."""
+
+    def __init__(self, arbiter, busy_frames=3, tail=3):
+        self._arbiter = arbiter
+        self._busy = busy_frames
+        self._tail = tail
+
+    async def stream(self):
+        await self._arbiter._lock.acquire()
+        for _ in range(self._busy):
+            yield FRAME
+        self._arbiter._lock.release()
+        for _ in range(self._tail):
+            yield FRAME
+
+    def drain(self):
+        pass
+
+    def set_tap(self, tap):
+        pass
+
+    def clear_tap(self):
+        pass
+
+
+async def test_announcement_barge_stops_playback_and_opens_turn():
+    # A gated wake while a reminder announcement plays (arbiter busy) cuts the
+    # announcer's playback and opens a manual-listen turn once the arbiter frees.
+    arbiter = AudioArbiter()
+    audio_in = BusyAnnouncementIn(arbiter, busy_frames=3, tail=3)
+    detector = ScriptedDetector([0.9, 0.9, 0.9])  # scored during the busy frames
+    out = FakeOut()
+    skill = FakeSkill()
+    pipeline = _pipeline(audio_in, detector, skill, FakeTTS(), out, arbiter,
+                         barge_in_enabled=True, barge_in_threshold=0.8,
+                         barge_in_trigger_frames=3, barge_in_announcements=True)
+
+    await pipeline.run()
+
+    assert out.stops == 1  # the announcement was cut
+    assert skill.handled == [("what time is it", "general")]  # turn followed
+
+
+async def test_announcement_barge_off_keeps_dropping_frames():
+    # barge_in.announcements defaults off: the busy branch must keep dropping
+    # frames (never score the announcement's own audio), even with barge_in on.
+    arbiter = AudioArbiter()
+    audio_in = BusyAnnouncementIn(arbiter, busy_frames=3, tail=0)
+    detector = ScriptedDetector([0.9, 0.9, 0.9])
+    out = FakeOut()
+    skill = FakeSkill()
+    pipeline = _pipeline(audio_in, detector, skill, FakeTTS(), out, arbiter,
+                         barge_in_enabled=True, barge_in_threshold=0.8,
+                         barge_in_trigger_frames=3)
+
+    await pipeline.run()
+
+    assert out.stops == 0
+    assert skill.handled == []
+
+
+async def test_standdown_emits_paused_once_then_idle_on_expiry():
+    # Entering the pause emits one "paused" (with remaining); expiry of the timer
+    # emits one "idle" — edge-triggered, not per frame.
+    from assistant.core.standdown import StandDown
+
+    clock = FakeClock()
+    standdown = StandDown(clock=clock)
+    standdown.engage(60)
+    emitter = RecordingEmitter()
+    audio_in = ClockAdvancingIn(clock, advance_at=3, advance_by=120, n=6)
+    pipeline = _pipeline(audio_in, FakeDetector(fires=0), FakeSkill(), FakeTTS(),
+                         FakeOut(), AudioArbiter(), state_emitter=emitter,
+                         standdown=standdown)
+
+    await pipeline.run()
+
+    assert emitter.states == ["idle", "paused", "idle"]
+    assert emitter.fields[1] == {"remaining": 60}

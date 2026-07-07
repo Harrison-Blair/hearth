@@ -231,13 +231,19 @@ class ConfigScreen(Screen):
             if value is None:
                 return
             self._select_values[field.key] = value
-            button.label = value
+            button.label = value or "(none)"
             if field.key == ("llm", "model"):
                 self.query_one("#model-detail", Static).update(f"Loading details for {value}…")
                 self.app.run_worker(
                     self.app._show_model_detail(value), group="model-detail", exclusive=True
                 )
                 self.app.run_worker(self.app._on_model_picked(value), group="model-default")
+            elif field.key in (("llm", "provider"), ("llm", "fallback"), ("llm", "fallback_model")):
+                # Persist + restart so the daemon rebuilds the provider chain; drop
+                # any env override that would shadow the new default.
+                self.app.run_worker(
+                    self.app._on_llm_identity_picked(field, value), group="llm-identity"
+                )
             elif field.key == self.VOICE_KEY:
                 # Persist + restart so the daemon reloads at the new voice's sample
                 # rate (a bare rate/ack tweak is live-testable, a model swap is not).

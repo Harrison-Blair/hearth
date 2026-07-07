@@ -80,12 +80,21 @@ class SoundDeviceOut(AudioOut):
     """
 
     def __init__(
-        self, device: int, sample_rate: int, channels: int = 1, volume: float = 1.0
+        self,
+        device: int,
+        sample_rate: int,
+        channels: int = 1,
+        volume: float = 1.0,
+        far_sink=None,
     ) -> None:
         self._device = device
         self._sample_rate = sample_rate
         self._channels = channels
         self._volume = volume
+        # Echo-cancellation reference (duck-typed: feed_far/clear_far, see
+        # audio/aec.py): every clip is fed to it right before it reaches the
+        # speaker, so the canceller knows what echo to subtract from the mic.
+        self._far_sink = far_sink
 
     def set_volume(self, volume: float) -> None:
         """Adjust playback gain live (used by the control channel for mute/volume)."""
@@ -99,6 +108,8 @@ class SoundDeviceOut(AudioOut):
             sd.stop()
         except Exception as exc:  # noqa: BLE001 - stop must never raise into the caller
             log.debug("audio stop failed: %s", exc)
+        if self._far_sink is not None:
+            self._far_sink.clear_far()  # the cut clip will never reach the mic
 
     async def play(self, audio: bytes) -> None:
         await asyncio.to_thread(self._play, audio)
@@ -108,5 +119,8 @@ class SoundDeviceOut(AudioOut):
         if self._volume != 1.0:
             scaled = samples.astype(np.float32) * self._volume
             samples = np.clip(scaled, -32768, 32767).astype(np.int16)
+        if self._far_sink is not None:
+            # Post-volume, so the reference matches what actually leaves the speaker.
+            self._far_sink.feed_far(samples.tobytes(), self._sample_rate)
         sd.play(samples, samplerate=self._sample_rate, device=self._device)
         sd.wait()

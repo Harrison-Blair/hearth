@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json as _json
 import logging
+import time
 
 import httpx
 
@@ -58,15 +59,25 @@ class OllamaProvider(LLMProvider):
         if json:
             payload["format"] = "json"
 
+        t0 = time.perf_counter()
         resp = await self._client.post(f"{self._host}/api/generate", json=payload)
         resp.raise_for_status()
+        latency_ms = round((time.perf_counter() - t0) * 1000)
         data = resp.json()
         response = data.get("response", "").strip()
         tag = label or "llm"
         log.info("[%s] prompt: %s", tag, _clip(prompt, 200))
         if system:
             log.info("[%s] system: %s", tag, _clip(system, 120))
-        log.info("[%s] response: %s", tag, response)
+        # Console stays clipped; the full trace rides `data` into the JSONL file.
+        log.info(
+            "[%s] response: %s", tag, _clip(response, 200),
+            extra={"data": {
+                "kind": "llm.complete", "label": tag, "model": self._model,
+                "prompt": prompt, "system": system, "response": response,
+                "json": json, "latency_ms": latency_ms,
+            }},
+        )
         return response
 
     async def chat(
@@ -83,13 +94,21 @@ class OllamaProvider(LLMProvider):
             "options": {"num_ctx": self._num_ctx},
         }
 
+        t0 = time.perf_counter()
         resp = await self._client.post(f"{self._host}/api/chat", json=payload)
         resp.raise_for_status()
+        latency_ms = round((time.perf_counter() - t0) * 1000)
         data = resp.json()
         response = data["message"]["content"].strip()
         tag = label or "llm"
         log.info("[%s] chat (%d msgs)", tag, len(msgs))
-        log.info("[%s] response: %s", tag, response)
+        log.info(
+            "[%s] response: %s", tag, response,
+            extra={"data": {
+                "kind": "llm.chat", "label": tag, "model": self._model,
+                "messages": msgs, "response": response, "latency_ms": latency_ms,
+            }},
+        )
         return response
 
     async def chat_tools(
@@ -113,8 +132,10 @@ class OllamaProvider(LLMProvider):
         if tools:
             payload["tools"] = tools
 
+        t0 = time.perf_counter()
         resp = await self._client.post(f"{self._host}/api/chat", json=payload)
         resp.raise_for_status()
+        latency_ms = round((time.perf_counter() - t0) * 1000)
         message = resp.json().get("message", {})
         content = (message.get("content") or "").strip()
         calls: list[ToolCall] = []
@@ -135,6 +156,14 @@ class OllamaProvider(LLMProvider):
         log.info(
             "[%s] chat_tools (%d msgs, %d tools) -> %d call(s), content: %s",
             tag, len(msgs), len(tools or []), len(calls), _clip(content, 120),
+            extra={"data": {
+                "kind": "llm.chat_tools", "label": tag, "model": self._model,
+                "messages": msgs,
+                "tools": [t["function"]["name"] for t in tools or []],
+                "content": content,
+                "tool_calls": [{"name": c.name, "arguments": c.arguments} for c in calls],
+                "latency_ms": latency_ms,
+            }},
         )
         return ChatResponse(content=content, tool_calls=calls)
 

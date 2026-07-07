@@ -1,9 +1,49 @@
 # Tool-call eval
 
-An opt-in regression harness that measures whether the **configured live Ollama
-model** produces correctly-formatted tool calls through the real orchestrator
-decision path — the reference doc's **Stage-1 gate (≥90% correct tool
-formatting)**.
+Two harnesses share this directory:
+
+- **Live eval** (`run_eval.py`) — opt-in, measures the *configured Ollama model*
+  against `dataset.py`. Use it to compare models/prompts.
+- **Replay eval** (`run_replay.py`) — offline, re-runs *captured real turns*
+  through the real orchestrator with recorded LLM responses. Use it as a
+  regression gate on orchestrator/routing code: refactors must reproduce
+  identical decisions from identical model output.
+
+## Replay: capture → curate → replay
+
+```bash
+# 1. Capture: run the daemon (Ollama up) and have a few real turns
+python -m assistant.app          # speak or type turns, Ctrl-C when done
+
+# 2. Extract the turn + LLM records from that run's JSONL log
+python -m tests.eval.extract logs/assistant-<stamp>/assistant.jsonl \
+    -o tests/eval/captures/session1.jsonl
+
+# 3. Curate: open the capture, delete unwanted `turn` lines
+#    (leftover llm.* lines are harmless unused cache entries)
+
+# 4. Replay offline — no Ollama needed
+python -m tests.eval.run_replay
+pytest tests/eval/test_replay_eval.py -q   # same gate via pytest
+```
+
+`test_replay_eval.py` **skips** while `captures/` has no turn records, so a fresh
+checkout stays green; once a baseline is committed the gate asserts 100%.
+
+### Miss semantics
+
+Replay responses are keyed on a content hash of the exact prompt/messages/tool
+catalogue. Any deliberate change to the system prompt, tool schemas, or
+registered skills makes captured keys miss (`ReplayMiss`) and the eval fail —
+that is the signal to **re-record the baseline** (repeat capture → curate) after
+reviewing that the new decisions are right. `fallback` turns (LLM was down at
+capture time) are excluded from scoring.
+
+## Live eval
+
+Measures whether the **configured live Ollama model** produces correctly-formatted
+tool calls through the real orchestrator decision path — the reference doc's
+**Stage-1 gate (≥90% correct tool formatting)**.
 
 ## What it measures
 
@@ -22,10 +62,8 @@ exactly as production routes) and scores:
 The aggregate score must be **≥ 0.90**.
 
 The orchestrator is built exactly as `assistant/app.py` builds it (same LLM,
-skill registry, tool schemas, system prompt), minus audio/TTS. The LLM-free
-keyphrase fast path is **disabled** so every case exercises the model — that
-shortcut is not what this eval measures. Skills are wired but never executed; only
-the tool decision is scored.
+skill registry, tool schemas, system prompt), minus audio/TTS. Skills are wired
+but never executed; only the tool decision is scored.
 
 ## How to run
 

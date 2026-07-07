@@ -1,11 +1,11 @@
 {
   "calcifer": {
-    "fpph": 0.03876469828143171,
+    "fpph": 0.07727975270479134,
     "gate_passed": true,
     "model_path": "models/wake/calcifer.onnx",
     "phrase": "Calcifer",
-    "recall": 0.9097333333333333,
-    "threshold": 0.66,
-    "trained_at": "2026-07-05T06:22:05"
+    "recall": 0.8636666666666667,
+    "threshold": 0.85,
+    "trained_at": "2026-07-06T03:08:08"
   }
 }

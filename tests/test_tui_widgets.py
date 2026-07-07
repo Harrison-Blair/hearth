@@ -122,9 +122,14 @@ async def test_navbar_dots_reflect_state():
     app = _NavApp()
     async with app.run_test(size=(40, 30)) as pilot:
         bar = app.query_one(NavBar)
-        bar.set_dots(True, False)
+        bar.set_dots(True, "down")
         await pilot.pause()
         dots = app.query_one(".nav-dots", Static).render()
-        # First dot (daemon) green, second (ollama) red.
+        # First dot (daemon) green, second (LLM) red.
         styles = [str(s.style) for s in getattr(dots, "spans", [])]
         assert any("green" in s for s in styles) and any("red" in s for s in styles)
+        bar.set_dots(True, "degraded")
+        await pilot.pause()
+        dots = app.query_one(".nav-dots", Static).render()
+        styles = [str(s.style) for s in getattr(dots, "spans", [])]
+        assert any("yellow" in s for s in styles)

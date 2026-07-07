@@ -25,6 +25,8 @@ class FasterWhisperSTT(SpeechToText):
         initial_prompt: str | None = None,
         device: str = "cpu",
         cpu_threads: int = 0,
+        no_speech_threshold: float = 0.6,
+        log_prob_threshold: float = -1.0,
     ) -> None:
         # First load downloads the model from HF and caches it.
         self._model = WhisperModel(
@@ -35,6 +37,8 @@ class FasterWhisperSTT(SpeechToText):
         self._vad_filter = vad_filter
         self._condition_on_previous_text = condition_on_previous_text
         self._initial_prompt = initial_prompt
+        self._no_speech_threshold = no_speech_threshold
+        self._log_prob_threshold = log_prob_threshold
         log.info("STT ready: faster-whisper %s (%s)", model, compute_type)
 
     async def transcribe(self, audio: bytes) -> str:
@@ -42,6 +46,8 @@ class FasterWhisperSTT(SpeechToText):
 
     def _transcribe(self, audio: bytes) -> str:
         samples = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
+        if not len(samples):
+            return ""
         segments, _ = self._model.transcribe(
             samples,
             language=self._language,
@@ -49,5 +55,14 @@ class FasterWhisperSTT(SpeechToText):
             vad_filter=self._vad_filter,
             condition_on_previous_text=self._condition_on_previous_text,
             initial_prompt=self._initial_prompt or None,
+            no_speech_threshold=self._no_speech_threshold,
+            log_prob_threshold=self._log_prob_threshold,
         )
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        # Whisper only skips a segment when no_speech_prob is high AND avg_logprob
+        # is low; confident hallucinations ("Thank you.") pass that test, so drop
+        # likely-silent segments independently.
+        return " ".join(
+            seg.text.strip()
+            for seg in segments
+            if seg.no_speech_prob <= self._no_speech_threshold
+        ).strip()

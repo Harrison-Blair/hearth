@@ -1,9 +1,9 @@
 import asyncio
+import logging
 
-from assistant.core.events import SkillResult, ToolCall
+from assistant.core.events import SkillResult, ToolCall, Turn
 from assistant.core.orchestrator import Orchestrator
 from assistant.llm.base import ChatResponse
-from assistant.nlu.keyphrase_router import KeyphraseRouter
 from assistant.skills.base import Skill, SkillRegistry
 
 
@@ -46,6 +46,7 @@ class FallbackSkill(Skill):
 
     def __init__(self, speech="general answer"):
         self.calls = 0
+        self.received = None
         self._speech = speech
 
     def tools(self):
@@ -53,6 +54,7 @@ class FallbackSkill(Skill):
 
     async def handle(self, cmd, intent):
         self.calls += 1
+        self.received = intent
         return SkillResult(speech=self._speech)
 
 
@@ -92,9 +94,8 @@ def _registry(*skills, default):
     return reg
 
 
-def _orch(llm, registry, *, fast_path=None, **kw):
-    fp = fast_path if fast_path is not None else KeyphraseRouter(default_intent="general")
-    return Orchestrator(llm, registry, fp, **kw)
+def _orch(llm, registry, **kw):
+    return Orchestrator(llm, registry, **kw)
 
 
 async def test_tool_call_dispatches_with_arguments_in_slots():
@@ -129,21 +130,23 @@ async def test_direct_answer_when_model_calls_no_tool():
     assert fallback.calls == 0
 
 
-async def test_fast_path_hit_dispatches_without_any_llm_call():
-    echo = EchoSkill(speech="echoed")
-    reg = _registry(echo, default=FallbackSkill())
-    kp = KeyphraseRouter(default_intent="general")
-    kp.add("echo", "please echo")
-    llm = ScriptedLLM()  # any LLM call would pop from an empty queue and error
+async def test_delegated_direct_answer_passes_refusal_as_draft():
+    # With persona delegation on, a no-tool direct answer (here a refusal) must be
+    # handed to the default skill as a draft to re-voice faithfully — NOT re-derived,
+    # which is how an honest refusal used to be laundered into a fabricated success.
+    fallback = FallbackSkill(speech="Ugh, fine, no.")
+    reg = _registry(EchoSkill(), default=fallback)
+    llm = ScriptedLLM(tool_responses=[ChatResponse(content="I cannot set recurring reminders.")])
 
-    result, skill = await _orch(llm, reg, fast_path=kp).handle(
-        "please echo this", [], spoken=True
-    )
+    result, skill = await _orch(
+        llm, reg, tool_mode="native", delegate_direct_answers=True
+    ).handle("remind me every 15 minutes to stretch", [], spoken=True)
 
-    assert result.speech == "echoed"
-    assert skill is echo
-    assert llm.chat_tools_calls == 0
-    assert llm.complete_calls == 0
+    assert skill is fallback
+    assert fallback.calls == 1
+    # The refusal rides through as a draft; the skill never sees only the raw request.
+    assert fallback.received.slots.get("draft") == "I cannot set recurring reminders."
+    assert result.speech == "Ugh, fine, no."
 
 
 async def test_native_failure_falls_back_to_json_tool_selection():
@@ -235,3 +238,89 @@ async def test_unknown_tool_name_falls_back_to_general():
 
     assert result.speech == "general answer"
     assert skill is fallback
+
+
+async def test_tool_call_logs_route_trace(caplog):
+    echo = EchoSkill(speech="echoed hi")
+    reg = _registry(echo, default=FallbackSkill())
+    llm = ScriptedLLM(tool_responses=[ChatResponse(tool_calls=[ToolCall("echo", {"text": "hi"})])])
+
+    with caplog.at_level(logging.INFO, logger="assistant.core.orchestrator"):
+        await _orch(llm, reg, tool_mode="native").handle("please echo hi", [], spoken=True)
+
+    record = next(r for r in caplog.records if getattr(r, "data", None))
+    assert record.getMessage() == "Tool call: echo"
+    assert record.data == {"kind": "route.tool", "tool": "echo", "arguments": {"text": "hi"}}
+
+
+async def test_direct_answer_logs(caplog):
+    reg = _registry(EchoSkill(), default=FallbackSkill())
+    llm = ScriptedLLM(tool_responses=[ChatResponse(content="Paris is the capital.")])
+
+    with caplog.at_level(logging.INFO, logger="assistant.core.orchestrator"):
+        await _orch(llm, reg, tool_mode="native").handle("capital of France?", [], spoken=True)
+
+    assert any(r.getMessage() == "Direct answer (no tool)" for r in caplog.records)
+
+
+def _turn_record(caplog):
+    records = [
+        r.data for r in caplog.records
+        if isinstance(getattr(r, "data", None), dict) and r.data.get("kind") == "turn"
+    ]
+    assert len(records) == 1  # exactly one turn record per handle() call
+    return records[0]
+
+
+async def test_tool_path_emits_turn_record(caplog):
+    echo = EchoSkill(speech="echoed hi")
+    reg = _registry(echo, default=FallbackSkill())
+    llm = ScriptedLLM(tool_responses=[ChatResponse(tool_calls=[ToolCall("echo", {"text": "hi"})])])
+    history = [Turn("user", "earlier"), Turn("assistant", "sure")]
+
+    with caplog.at_level(logging.INFO, logger="assistant.core.orchestrator"):
+        await _orch(llm, reg, tool_mode="native").handle("please echo hi", history, spoken=True)
+
+    turn = _turn_record(caplog)
+    assert turn["route"] == "tool"
+    assert turn["text"] == "please echo hi"
+    assert turn["spoken"] is True
+    assert turn["history"] == [
+        {"role": "user", "content": "earlier"},
+        {"role": "assistant", "content": "sure"},
+    ]
+    assert turn["tool"] == "echo"
+    assert turn["slots"] == {"text": "hi"}
+    assert turn["skill"] == "echo"
+    assert turn["speech"] == "echoed hi"
+    assert turn["success"] is True
+
+
+async def test_direct_answer_emits_turn_record(caplog):
+    reg = _registry(EchoSkill(), default=FallbackSkill())
+    llm = ScriptedLLM(tool_responses=[ChatResponse(content="Paris is the capital.")])
+
+    with caplog.at_level(logging.INFO, logger="assistant.core.orchestrator"):
+        await _orch(llm, reg, tool_mode="native").handle("capital of France?", [], spoken=False)
+
+    turn = _turn_record(caplog)
+    assert turn["route"] == "direct"
+    assert turn["spoken"] is False
+    assert turn["tool"] is None
+    assert turn["skill"] is None
+    assert turn["speech"] == "Paris is the capital."
+
+
+async def test_fallback_emits_turn_record(caplog):
+    fallback = FallbackSkill(speech="general answer")
+    reg = _registry(EchoSkill(), default=fallback)
+    llm = ScriptedLLM(chat_tools_raises=True)
+
+    with caplog.at_level(logging.INFO, logger="assistant.core.orchestrator"):
+        await _orch(llm, reg, tool_mode="native").handle("do a thing", [], spoken=True)
+
+    turn = _turn_record(caplog)
+    assert turn["route"] == "fallback"
+    assert turn["tool"] is None
+    assert turn["skill"] == "general"
+    assert turn["speech"] == "general answer"

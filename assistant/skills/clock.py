@@ -1,7 +1,7 @@
 """Clock skill: speak the current local time or date.
 
-Pure request/response — no scheduling or proactive audio. Exercises real
-keyphrase routing (``time`` / ``date`` intents) instead of the LLM fallback.
+Pure request/response — no scheduling or proactive audio. Exposes the
+``time`` / ``date`` tool intents.
 """
 
 from __future__ import annotations

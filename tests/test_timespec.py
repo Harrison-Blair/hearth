@@ -52,38 +52,75 @@ def test_humanize():
 
 async def test_relative_reminder_uses_regex_not_llm():
     llm = FakeLLM("{}")
-    due, message = await extract_reminder(
+    spec = await extract_reminder(
         "remind me in 30 seconds to brush my teeth", llm, NOW
     )
-    assert message == "brush my teeth"
-    assert due == NOW.timestamp() + 30
+    assert spec.message == "brush my teeth"
+    assert spec.due_at == NOW.timestamp() + 30
+    assert spec.interval is None  # one-shot
     assert llm.calls == []  # regex path never touched the LLM
 
 
 async def test_message_before_duration():
-    due, message = await extract_reminder(
+    spec = await extract_reminder(
         "remind me to call mom in 5 minutes", FakeLLM("{}"), NOW
     )
-    assert message == "call mom"
-    assert due == NOW.timestamp() + 300
+    assert spec.message == "call mom"
+    assert spec.due_at == NOW.timestamp() + 300
+
+
+async def test_recurring_every_uses_regex_not_llm():
+    llm = FakeLLM("{}")
+    spec = await extract_reminder("remind me every 15 minutes to stretch", llm, NOW)
+    assert spec.message == "stretch"
+    assert spec.interval == 900.0
+    assert spec.due_at == NOW.timestamp() + 900  # first fire one interval out
+    assert llm.calls == []  # regex path
+
+
+async def test_recurring_every_message_after_cadence():
+    spec = await extract_reminder("remind me to stretch every 15 minutes", FakeLLM("{}"), NOW)
+    assert spec.message == "stretch"
+    assert spec.interval == 900.0
+
+
+async def test_recurring_every_without_count_means_one():
+    spec = await extract_reminder("remind me every hour to drink water", FakeLLM("{}"), NOW)
+    assert spec.message == "drink water"
+    assert spec.interval == 3600.0
+
+
+async def test_recurring_via_llm_with_clock_start():
+    llm = FakeLLM(
+        json.dumps(
+            {"delay_seconds": None, "at_time": "09:00", "interval_seconds": 86400,
+             "message": "take pills"}
+        )
+    )
+    spec = await extract_reminder("remind me every day at 9 am to take pills", llm, NOW)
+    assert spec.message == "take pills"
+    assert spec.interval == 86400.0
+    # First fire honours the clock start, then repeats every interval.
+    assert spec.due_at == NOW.replace(hour=9, minute=0, second=0, microsecond=0).timestamp() + 86400
 
 
 async def test_absolute_time_via_llm():
     llm = FakeLLM(json.dumps({"delay_seconds": None, "at_time": "17:00", "message": "call mom"}))
-    due, message = await extract_reminder("remind me at 5 pm to call mom", llm, NOW)
-    assert message == "call mom"
-    assert due == NOW.replace(hour=17, minute=0, second=0, microsecond=0).timestamp()
+    spec = await extract_reminder("remind me at 5 pm to call mom", llm, NOW)
+    assert spec.message == "call mom"
+    assert spec.due_at == NOW.replace(hour=17, minute=0, second=0, microsecond=0).timestamp()
+    assert spec.interval is None
 
 
 async def test_embedded_duration_with_clock_time_defers_to_llm():
     # "10 minute" is part of the task, not the schedule: a clock time is present,
     # so the regex must not hijack it — the LLM resolves the 6 pm time instead.
     llm = FakeLLM(json.dumps({"delay_seconds": None, "at_time": "18:00", "message": "workout"}))
-    due, message = await extract_reminder(
+    spec = await extract_reminder(
         "remind me to do a 10 minute workout at 6 pm", llm, NOW
     )
-    assert message == "workout"
-    assert due == NOW.replace(hour=18, minute=0, second=0, microsecond=0).timestamp()
+    assert spec.message == "workout"
+    assert spec.due_at == NOW.replace(hour=18, minute=0, second=0, microsecond=0).timestamp()
     assert llm.calls != []  # the clock time forced the LLM path
 
 

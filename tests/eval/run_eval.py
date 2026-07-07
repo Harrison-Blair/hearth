@@ -7,9 +7,7 @@ production does) and score tool-name correctness + required-argument presence,
 plus the direct-answer cases. The aggregate is the reference doc's Stage-1 gate.
 
 The orchestrator is built as ``assistant.app`` builds it (same LLM, skill
-registry, tool schemas, and system prompt), minus audio/TTS. The LLM-free fast
-path is disabled so every utterance exercises the model rather than the keyphrase
-shortcut — the fast path is what we are *not* measuring here.
+registry, tool schemas, and system prompt), minus audio/TTS.
 
 Run standalone:  ``ASSISTANT_EVAL=1 python -m tests.eval.run_eval``
 Or via pytest:   ``tests/eval/test_tool_eval.py`` (opt-in + skips when offline).
@@ -22,13 +20,14 @@ from dataclasses import dataclass
 
 from assistant.core.config import Config
 from assistant.core.orchestrator import Orchestrator
+from assistant.llm.base import LLMProvider
 from assistant.llm.ollama_provider import OllamaProvider
-from assistant.nlu.keyphrase_router import KeyphraseRouter
 from assistant.search.wikipedia import WikipediaSearch
 from assistant.skills.base import SkillRegistry
 from assistant.skills.clock import ClockSkill
 from assistant.skills.general import GeneralSkill
 from assistant.skills.reminder import ReminderSkill
+from assistant.skills.timer import TimerSkill
 from assistant.skills.weather import WeatherSkill
 from assistant.skills.web_search import WebSearchSkill
 from assistant.storage.reminders import ReminderStore
@@ -45,7 +44,7 @@ def _build_llm(config: Config) -> OllamaProvider:
     )
 
 
-def build_orchestrator(config: Config, llm: OllamaProvider) -> Orchestrator:
+def build_orchestrator(config: Config, llm: LLMProvider) -> Orchestrator:
     """Construct the real skill registry + orchestrator exactly as ``assistant.app``
     does, minus audio/TTS. Skills are wired with their real dependencies so the tool
     schemas match production; they are never executed here (we only score the tool
@@ -70,6 +69,7 @@ def build_orchestrator(config: Config, llm: OllamaProvider) -> Orchestrator:
     registry = SkillRegistry()
     registry.register(ClockSkill())
     registry.register(ReminderSkill(store, llm))
+    registry.register(TimerSkill(store))
     registry.register(WebSearchSkill(
         search, llm,
         count=config.web_search.result_count,
@@ -87,10 +87,8 @@ def build_orchestrator(config: Config, llm: OllamaProvider) -> Orchestrator:
     return Orchestrator(
         llm,
         registry,
-        KeyphraseRouter(default_intent="general"),
         tool_mode=config.agent.tool_mode,
         max_tool_rounds=config.agent.max_tool_rounds,
-        fast_path_enabled=False,
         system_prompt=config.llm.system_prompt,
     )
 

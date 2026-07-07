@@ -2,11 +2,12 @@
 
 import json
 
-from textual.containers import ScrollableContainer
+from textual.containers import ScrollableContainer, VerticalScroll
 from textual.widgets import Button, OptionList, SelectionList, Static, Switch
 
 from tui import configfile, discovery
 from tui.app import AssistantTUI
+from tui.config_schema import FIELDS
 from tui.screens.config import ConfigScreen
 from tui.screens.home import HomeScreen
 from tui.screens.logs import ChatModal, LogsScreen
@@ -228,7 +229,7 @@ async def test_ack_delay_stepper_flows_into_apply(monkeypatch):
         assert app._overrides["ASSISTANT_TTS__ACK_DELAY_S"] == "0.5"
 
 
-async def test_signoff_pause_saved_as_float(monkeypatch):
+async def test_ack_delay_saved_as_float(monkeypatch):
     app = _make_app(monkeypatch)
     written = {}
     monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
@@ -236,27 +237,27 @@ async def test_signoff_pause_saved_as_float(monkeypatch):
         await pilot.pause()
         app.push_screen("config")
         await pilot.pause()
-        app._config_screen.query_one("#field-conversation_signoff_pause_s", Stepper).value = 0.7
+        app._config_screen.query_one("#field-tts_ack_delay_s", Stepper).value = 0.7
         await pilot.click("#config-save")
         await pilot.pause()
-        assert written[("conversation", "signoff_pause_s")] == 0.7
-        assert isinstance(written[("conversation", "signoff_pause_s")], float)
+        assert written[("tts", "ack_delay_s")] == 0.7
+        assert isinstance(written[("tts", "ack_delay_s")], float)
 
 
-async def test_signoff_toggle_flows_into_values_and_apply(monkeypatch):
+async def test_decision_toggle_flows_into_values_and_apply(monkeypatch):
     app = _make_app(monkeypatch)
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
         app.push_screen("config")
         await pilot.pause()
         screen = app._config_screen
-        switch = screen.query_one("#field-conversation_signoff_enabled", Switch)
+        switch = screen.query_one("#field-conversation_decision_enabled", Switch)
         assert switch.value is True  # default ON
         switch.value = False
         # form_values coerces the toggle to a real bool (not the truthy string "False")
-        assert screen.form_values()[("conversation", "signoff_enabled")] is False
+        assert screen.form_values()[("conversation", "decision_enabled")] is False
         await app._on_config_apply(screen.form_strings())
-        assert app._overrides["ASSISTANT_CONVERSATION__SIGNOFF_ENABLED"] == "False"
+        assert app._overrides["ASSISTANT_CONVERSATION__DECISION_ENABLED"] == "False"
 
 
 async def test_picker_updates_select_field(monkeypatch):
@@ -271,6 +272,13 @@ async def test_picker_updates_select_field(monkeypatch):
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
         app.push_screen("config")
+        await pilot.pause()
+        # The LLM-identity fields push logging_level below the 40x30 viewport;
+        # scroll it into view before clicking.
+        scroller = app._config_screen.query_one(VerticalScroll)
+        log_btn = app._config_screen.query_one("#field-logging_level", Button)
+        scroller.scroll_to_widget(log_btn, animate=False)
+        await pilot.pause()
         await pilot.pause()
         await pilot.click("#field-logging_level")
         await pilot.pause()
@@ -382,6 +390,59 @@ async def test_picking_same_voice_is_a_noop(monkeypatch):
         await pilot.pause()
         await app._on_voice_picked(app._config.tts.model_path)  # unchanged
         assert written == {} and app.supervisor.restarts == 0
+
+
+def _field(key):
+    return next(f for f in FIELDS if f.key == key)
+
+
+async def test_picking_llm_provider_persists_and_restarts(monkeypatch):
+    app = _make_app(monkeypatch)
+    written = {}
+    monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        await app._on_llm_identity_picked(_field(("llm", "provider")), "opencode-zen")
+        assert written == {("llm", "provider"): "opencode-zen"}
+        assert app.supervisor.restarts == 1
+
+
+async def test_picking_same_llm_provider_is_a_noop(monkeypatch):
+    app = _make_app(monkeypatch)
+    written = {}
+    monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        await app._on_llm_identity_picked(
+            _field(("llm", "provider")), app._config.llm.provider
+        )
+        assert written == {} and app.supervisor.restarts == 0
+
+
+async def test_picking_llm_identity_drops_shadowing_env_override(monkeypatch):
+    app = _make_app(monkeypatch)
+    written = {}
+    monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app._overrides["ASSISTANT_LLM__FALLBACK"] = "stale-ollama"
+        await app._on_llm_identity_picked(_field(("llm", "fallback")), "ollama")
+        assert written == {("llm", "fallback"): "ollama"}
+        assert "ASSISTANT_LLM__FALLBACK" not in app._overrides  # shadow dropped
+        assert app.supervisor.restarts == 1
+
+
+async def test_picking_fallback_model_persists_and_restarts(monkeypatch):
+    app = _make_app(monkeypatch)
+    written = {}
+    monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        await app._on_llm_identity_picked(
+            _field(("llm", "fallback_model")), "qwen2.5:3b-instruct"
+        )
+        assert written == {("llm", "fallback_model"): "qwen2.5:3b-instruct"}
+        assert app.supervisor.restarts == 1
 
 
 async def test_ack_multiselect_flows_into_apply_as_json(monkeypatch):
@@ -540,6 +601,7 @@ async def test_context_button_sends_verb_per_state(monkeypatch):
         ("listening", "CANCEL"),
         ("thinking", "CANCEL"),
         ("speaking", "STOP"),
+        ("paused", "RESUME"),
     ):
         app = _make_app(monkeypatch)
         async with app.run_test(size=SIZE) as pilot:
@@ -550,6 +612,28 @@ async def test_context_button_sends_verb_per_state(monkeypatch):
             await pilot.click("#now-context")
             await pilot.pause()
             assert verb in app.supervisor.sent, f"{state} should send {verb}"
+
+
+async def test_paused_state_shows_standing_down_with_banner(monkeypatch):
+    # A stand-down state line flips the Now face to "Standing down" with a
+    # remaining-time banner (or a resume hint when indefinite), still 40-col clean.
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app._on_state({"state": "paused", "remaining": 1800})
+        await pilot.pause()
+        indicator = app._now.query_one("#now-indicator", Static)
+        assert str(indicator.render()) == "Standing down"
+        assert indicator.has_class("state-paused")
+        banner = app._now.query_one("#now-banner", Static)
+        assert "Back in 30 min" in str(banner.render())
+        button = app._now.query_one("#now-context", Button)
+        assert str(button.label) == "Resume"
+        _assert_fits_40_cols(app.screen, "now-paused")
+        # Indefinite pause: no remaining -> point at the button instead.
+        app._on_state({"state": "paused"})
+        await pilot.pause()
+        assert "Tap Resume to wake" in str(banner.render())
 
 
 async def test_installed_delete_calls_discovery(monkeypatch):
@@ -583,3 +667,36 @@ async def test_installed_delete_calls_discovery(monkeypatch):
         await pilot.click("#model-delete")
         await pilot.pause()
         assert deleted == ["qwen2.5:3b"]
+
+
+async def test_verify_and_turn_fields_render(monkeypatch):
+    # The five surfaced verify/turn knobs render as their declared widget kinds
+    # and fit the 40-col grid.
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.pop_screen()
+        app.push_screen("config")
+        await pilot.pause()
+        screen = app._config_screen
+        assert isinstance(screen.query_one("#field-verify_enabled", Switch), Switch)
+        assert isinstance(screen.query_one("#field-verify_spoken_feedback", Switch), Switch)
+        assert screen.query_one("#field-verify_max_verify_rounds", Stepper).value == 2
+        assert screen.query_one("#field-recorder_max_ms", Stepper).value == 30000
+        assert screen.query_one("#field-agent_turn_timeout_s", Stepper).value == 45.0
+        _assert_fits_40_cols(screen, "config")
+
+
+async def test_restart_llm_button_hidden_without_ollama_in_chain(monkeypatch):
+    app = _make_app(monkeypatch)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.pop_screen()  # -> home
+        await pilot.pause()
+        row = app._home.query_one("#row-ollama-restart")
+        assert row.display is True  # default config: ollama is the primary
+        app._config.llm.provider = "opencode-zen"
+        app._config.llm.fallback = ""
+        app._refresh_status()
+        await pilot.pause()
+        assert row.display is False

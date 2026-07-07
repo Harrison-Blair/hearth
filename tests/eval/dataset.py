@@ -28,9 +28,11 @@ CASES: list[Case] = [
     Case("do you have the time", "time"),
     Case("what's today's date", "date"),
     Case("what day of the week is it", "date"),
-    # reminder: timer needs a duration
+    # timer: needs a duration; list/cancel take no required args
     Case("set a timer for 5 minutes", "timer", required_args=("duration",)),
     Case("start a 30 second timer", "timer", required_args=("duration",)),
+    Case("how much time is left on my timer", "list_timers"),
+    Case("cancel my pasta timer", "cancel_timer"),
     # reminder: create / list / manage
     Case("remind me to call mom at 6pm", "reminder", required_args=("text",)),
     Case("remind me to take out the trash tomorrow morning", "reminder", required_args=("text",)),

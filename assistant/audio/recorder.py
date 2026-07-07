@@ -26,6 +26,7 @@ class VadRecorder:
         silence_ms: int = 800,
         max_ms: int = 10000,
         start_timeout_ms: int = 3000,
+        min_speech_ms: int = 0,
     ) -> None:
         self._vad = webrtcvad.Vad(aggressiveness)
         self._sample_rate = sample_rate
@@ -33,6 +34,7 @@ class VadRecorder:
         self._silence_ms = silence_ms
         self._max_ms = max_ms
         self._start_timeout_ms = start_timeout_ms
+        self._min_speech_ms = min_speech_ms
 
     async def record(
         self,
@@ -52,12 +54,20 @@ class VadRecorder:
         int16 RMS, driving the live level meter.
         ``cancel_event`` (if given and set) abandons the capture immediately,
         returning empty so the turn ends without routing anything.
+
+        Returns ``b""`` whenever no speech was detected (cancelled, start
+        timeout, or cap reached before speech), so callers can treat empty
+        bytes as "nothing said" without transcribing room tone.
         """
         collected = bytearray(prefix)
         speech_started = False
+        voiced_ms = 0
         silence_ms = 0
         elapsed_ms = 0
         start_timeout = self._start_timeout_ms if start_timeout_ms is None else start_timeout_ms
+        # Cumulative voiced audio required before the capture counts as speech;
+        # rejects a lone VAD blip (chair creak) from opening an utterance.
+        min_speech = max(self._min_speech_ms, _VAD_FRAME_MS)
 
         async for frame in frames:
             if cancel_event is not None and cancel_event.is_set():
@@ -73,7 +83,9 @@ class VadRecorder:
                 elapsed_ms += _VAD_FRAME_MS
 
                 if voiced:
-                    speech_started = True
+                    voiced_ms += _VAD_FRAME_MS
+                    if voiced_ms >= min_speech:
+                        speech_started = True
                     silence_ms = 0
                 elif speech_started:
                     silence_ms += _VAD_FRAME_MS
@@ -82,9 +94,9 @@ class VadRecorder:
                     return bytes(collected)
                 if not speech_started and elapsed_ms >= start_timeout:
                     log.debug("no speech detected within start timeout")
-                    return bytes(collected)
+                    return b""
                 if elapsed_ms >= self._max_ms:
                     log.debug("max utterance length reached")
-                    return bytes(collected)
+                    return bytes(collected) if speech_started else b""
 
-        return bytes(collected)
+        return bytes(collected) if speech_started else b""

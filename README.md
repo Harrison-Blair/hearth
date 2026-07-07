@@ -1,7 +1,7 @@
 # personal-assistant
 
 Offline-first voice personal assistant. Listens for a wake word, transcribes a
-command, routes it (search / reminder / calendar / general LLM answer), and
+command, routes it (search / weather / reminder / calendar / general LLM answer), and
 speaks the response. Everything that can run locally does; remote/cloud is an
 optional accelerator behind an interface, never a hard dependency.
 
@@ -11,22 +11,44 @@ lives in `config.yaml`, so the Pi port is config-only.
 
 ## Status
 
-Phase 3 (first full slice) complete: `python -m assistant.app` speaks a greeting,
-then runs the end-to-end loop — wake word (livekit-wakeword) → record (WebRTC VAD) →
-transcribe (faster-whisper) → route (LLM classifier, keyphrase fallback) → answer (local LLM via Ollama) →
-speak (Piper). Everything runs locally. Earlier phases delivered the scaffolding,
-contracts, typed config, audio device auto-detection, and local TTS voice-out.
+`python -m assistant.app` speaks a greeting, then runs the end-to-end loop —
+wake word (livekit-wakeword) → record (WebRTC VAD) → transcribe (faster-whisper) →
+route/answer (local LLM tool-calling via Ollama) →
+speak (Piper). Everything runs locally; the only skills that leave the machine
+are web search, weather, and calendar, each degrading to a spoken apology when
+their service is unreachable.
 
-Skills so far: `ClockSkill` (time/date), `ReminderSkill` (reminders + timers), and
-a `general` LLM-answer fallback, all via keyphrase routing. Reminders/timers persist
-to SQLite and are spoken **proactively** when due — a background `ReminderScheduler`
-polls the store and announces through the `AudioArbiter`, which serializes the
-announcement against wake-word capture so it can't collide or self-trigger. Reminder
-times are parsed offline by regex for durations ("in 30 seconds") and by the local
-LLM for clock times ("at 5 pm"). Missed reminders (app was off when due) are spoken
-on the next start. Routing is two-tier: the local LLM classifies each utterance
-against the known intents (primary), degrading to cheap keyphrase matching when
-the LLM is unreachable so routing keeps working fully offline.
+Skills: `ClockSkill` (time/date), `ReminderSkill` (reminders + timers),
+`WeatherSkill` (Open-Meteo forecasts), `WebSearchSkill` (agentic
+DuckDuckGo/Wikipedia search), `CalendarSkill` (Google Calendar — query upcoming
+events, create/reschedule/rename/cancel events, set spoken reminders for
+events, toggle the calendar watcher, and voice-manage a blocklist of event
+titles), `StandDownSkill` ("stand down" / "stop listening" — pauses wake
+detection for a spoken duration or indefinitely, until the TUI's Resume button
+is tapped), and a `general` LLM-answer fallback.
+
+Reminders/timers persist to SQLite and are spoken **proactively** when due — a
+background `ReminderScheduler` polls the store and announces through the
+`AudioArbiter`, which serializes the announcement against wake-word capture so
+it can't collide or self-trigger. A `CalendarWatcher` announces upcoming
+calendar events the same way ("You have *title* in N minutes"), deduped across
+restarts. Both pause while standing down. Reminder times are parsed offline by
+regex for durations ("in 30 seconds") and by the local LLM for clock times
+("at 5 pm"). Missed reminders (app was off when due) are spoken on the next
+start.
+
+Routing is a single LLM tool-calling loop: the local model either calls one
+skill tool (its arguments become the skill's slots) or answers directly from
+general knowledge. If the LLM is unreachable or the turn times out, the
+orchestrator degrades to the default general skill, which speaks a clean
+"couldn't reach my language model" message, so a reply always comes back.
+Conversations are
+LLM-steered: after each reply the model decides to keep listening (it asked a
+question), check in once with a soft ready-tone, or end — an exact-match
+decline ("no", "nope", …) after the tone ends the conversation cleanly
+(`conversation.decision_*`, `decline_phrases`). Low-energy captures matching
+known whisper artifacts ("thank you", YouTube outros) are dropped as
+hallucinations rather than routed.
 
 ## Setup
 
@@ -53,8 +75,10 @@ python -m assistant.app         # boot, log devices, speak greeting
 pytest                          # run tests
 ```
 
-Per-phase heavy/native dependencies are installed as each phase lands, e.g.
-`pip install -e ".[tts]"` (Piper), `.[wake]`, `.[stt]`, `.[vad]`, `.[llm]`, `.[scheduling]`.
+Heavy/native dependencies are split into per-capability extras, installed only
+as needed: `pip install -e ".[tts]"` (Piper), `.[wake]`, `.[stt]`, `.[vad]`,
+`.[llm]`, `.[nlu]`, `.[scheduling]`, `.[search]`, `.[gcal]` — or `.[all]` for
+everything (the TUI's `.[tui]` is deliberately separate).
 
 **Wake word (livekit-wakeword):** a minimal onnxruntime + numpy runtime with the
 mel/embedding models bundled in the wheel — no extra install steps:
@@ -70,11 +94,11 @@ The runtime loads the trained `.onnx` classifier(s) named in `config.yaml`
 ### System prerequisites
 
 - **PortAudio** (`sounddevice` backend) — e.g. `pacman -S portaudio` / `apt install libportaudio2`.
-- **Ollama** (local LLM, from Phase 3) — install the binary, then pull the model:
+- **Ollama** (local LLM) — install the binary, then pull the model:
   ```bash
   # Arch: sudo pacman -S ollama   |   else: curl -fsSL https://ollama.com/install.sh | sh
   ollama serve                     # start the daemon (or enable the systemd unit)
-  ollama pull qwen2.5:3b-instruct  # ~2 GB; the model config.yaml expects
+  ollama pull qwen3:14b            # the model config.yaml expects (see llm.model)
   pip install -e ".[llm]"          # httpx (the async client OllamaProvider uses)
   ```
   `OllamaProvider` health-checks the daemon at boot and degrades clearly (warns,
@@ -86,6 +110,18 @@ The runtime loads the trained `.onnx` classifier(s) named in `config.yaml`
 `ASSISTANT_*` environment variable (nested keys use a double underscore, e.g.
 `ASSISTANT_LLM__MODEL=llama3.2:3b`). Audio `input`/`output` accept `null`
 (system default), an integer device index, or a substring of the device name.
+`default-config.yaml` documents every key with its default.
+
+**Calendar** (optional, off by default): `pip install -e ".[gcal]"`, create a
+Google Cloud service account with the Calendar API enabled, and drop its JSON
+key at `calendar.credentials_path`. Share your personal calendar with the
+service account read-only and a dedicated "Calcifer" calendar read-write
+(events the assistant creates go there), set the two `*_calendar_id`s, and
+flip `calendar.enabled: true`. `calendar.blocked_titles` (or the
+`calendar.hidden_tag` marker in an event's description) hides noisy events
+from queries and announcements; `calendar.watcher_*` tunes the upcoming-event
+announcer. `python verify_calendar.py` is a live smoke test of the whole
+setup (health check, listing, and a create→rename→delete round-trip).
 
 ## Monitor TUI
 

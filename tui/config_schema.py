@@ -74,7 +74,12 @@ def changed_fields(
 FIELDS: list[Field] = [
     Field(("wake", "model_paths"), "Wake models", "multiselect", discovery.wake_model_choices),
     Field(("wake", "threshold"), "Wake threshold", "number", lo=0.0, hi=1.0, step=0.05),
-    Field(("llm", "model"), "LLM model", "select", discovery.ollama_model_options),
+    # LLM identity (provider-aware): each pick persists to config.yaml + restarts,
+    # dropping any ASSISTANT_LLM__* env override that would shadow the new default.
+    Field(("llm", "provider"), "LLM provider", "select", discovery.llm_provider_options),
+    Field(("llm", "model"), "LLM model", "select", discovery.llm_model_options),
+    Field(("llm", "fallback"), "Fallback provider", "select", discovery.llm_fallback_options),
+    Field(("llm", "fallback_model"), "Fallback model", "select", discovery.llm_fallback_model_options),
     Field(("logging", "level"), "Log level", "select", discovery.log_levels),
     Field(("stt", "model"), "STT model", "select", discovery.stt_model_options),
     Field(("tts", "model_path"), "Voice", "select", discovery.voice_options),
@@ -83,8 +88,13 @@ FIELDS: list[Field] = [
     Field(("audio", "output_volume"), "Output volume", "number", lo=0.0, hi=1.0, step=0.05),
     Field(("recorder", "silence_ms"), "Silence (ms)", "number", lo=100, hi=3000, step=100),
     Field(("recorder", "aggressiveness"), "VAD aggressiveness", "number", lo=0, hi=3, step=1),
+    Field(("recorder", "max_ms"), "Max utterance (ms)", "number", lo=5000, hi=60000, step=1000),
+    Field(("agent", "turn_timeout_s"), "Turn budget (s)", "number", lo=10, hi=120, step=5),
     Field(("tts", "ack_delay_s"), "Ack delay (s)", "number", lo=0.0, hi=1.0, step=0.05),
-    Field(("conversation", "followup_cue_enabled"), "Follow-up cue", "toggle"),
-    Field(("conversation", "signoff_enabled"), "Sign-off", "toggle"),
-    Field(("conversation", "signoff_pause_s"), "Sign-off pause (s)", "number", lo=0.0, hi=2.0, step=0.1),
+    Field(("conversation", "decision_enabled"), "Follow-up chime", "toggle"),
+    # Verify loop (the five surfaced knobs; pre/post/max_tool_rounds/max_retries
+    # stay config.yaml-only — they're advanced/debugging).
+    Field(("verify", "enabled"), "Verify master", "toggle"),
+    Field(("verify", "spoken_feedback"), "Verify feedback", "toggle"),
+    Field(("verify", "max_verify_rounds"), "Verify rounds", "number", lo=0, hi=4, step=1),
 ]

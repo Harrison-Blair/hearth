@@ -30,3 +30,12 @@ class AudioIn(ABC):
         echo (captured while it played) isn't fed to STT as part of the command.
         Default no-op; stream-buffered implementations override it.
         """
+
+    def set_tap(self, tap) -> None:
+        """Install a synchronous per-frame observer that sees every mic frame,
+        even while ``stream()`` has no consumer (barge-in: the pipeline listens
+        for the wake word while it speaks). Default no-op; fan-out
+        implementations (MicHub) override it."""
+
+    def clear_tap(self) -> None:
+        """Remove the tap installed by ``set_tap``. Default no-op."""

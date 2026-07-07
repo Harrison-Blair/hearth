@@ -165,6 +165,89 @@ async def ollama_model_options(host: str = DEFAULT_HOST, **_: object) -> list[tu
     return options
 
 
+# ---- OpenCode Zen (OpenAI-compatible gateway) ------------------------------
+
+
+def llm_provider_options(**_: object) -> list[str]:
+    """Selectable primary LLM providers."""
+    return ["ollama", "opencode-zen"]
+
+
+def llm_fallback_options(**_: object) -> list[str]:
+    """Selectable fallback providers; the empty string means no fallback."""
+    return ["", "ollama", "opencode-zen"]
+
+
+async def zen_health(base_url: str = "", api_key: str = "", **_: object) -> bool:
+    """True if the OpenCode Zen gateway answers at {base_url}/models. Polled often,
+    so failures log at debug level."""
+    if not base_url:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{base_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            resp.raise_for_status()
+            return True
+    except (httpx.HTTPError, _json.JSONDecodeError) as exc:
+        log.debug("OpenCode Zen not reachable at %s (%s)", base_url, exc)
+        return False
+
+
+async def zen_model_options(
+    base_url: str = "", api_key: str = "", **_: object
+) -> list[tuple[str, str]]:
+    """(id, id) pairs for the Zen model picker. Zen's /v1/models returns only ids
+    (no sizes/params), so label == value. [] on any error; the picker prepends
+    the current value so it's never empty."""
+    if not base_url:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{base_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except (httpx.HTTPError, _json.JSONDecodeError) as exc:
+        log.warning("OpenCode Zen model listing failed (%s); is the gateway up?", exc)
+        return []
+    models = data.get("data", []) if isinstance(data, dict) else []
+    return [
+        (m["id"], m["id"])
+        for m in models
+        if isinstance(m, dict) and m.get("id")
+    ]
+
+
+async def llm_model_options(
+    *, host: str = DEFAULT_HOST, provider: str = "ollama",
+    base_url: str = "", api_key: str = "", **_: object,
+) -> list[tuple[str, str]]:
+    """Model picker options for the PRIMARY provider: route by ``provider``.
+
+    Ollama lists pulled models with size/params; Zen lists server-side ids."""
+    if provider == "opencode-zen":
+        return await zen_model_options(base_url=base_url, api_key=api_key)
+    return await ollama_model_options(host=host)
+
+
+async def llm_fallback_model_options(
+    *, host: str = DEFAULT_HOST, fallback: str = "",
+    base_url: str = "", api_key: str = "", **_: object,
+) -> list[tuple[str, str]]:
+    """Model picker options for the FALLBACK provider: route by ``fallback``
+    (the fallback's identity, not the primary's). Shares the one configured
+    host/base_url/api_key — there are no separate fallback connection params."""
+    if fallback == "opencode-zen":
+        return await zen_model_options(base_url=base_url, api_key=api_key)
+    # "" (no fallback) or "ollama": list local models so a fallback can be chosen.
+    return await ollama_model_options(host=host)
+
+
 async def delete_model(host: str, name: str) -> bool:
     """Remove a pulled model via DELETE {host}/api/delete. True on success."""
     try:

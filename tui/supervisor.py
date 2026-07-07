@@ -9,6 +9,7 @@ utterances, live volume) are written to the child's stdin (see core/control.py).
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import logging
 import os
 import re
@@ -20,6 +21,25 @@ from urllib.parse import urlparse
 from tui import envfile
 
 log = logging.getLogger(__name__)
+
+_PR_SET_PDEATHSIG = 1  # <sys/prctl.h>
+
+
+def _die_with_parent() -> None:
+    """Ask the kernel to SIGTERM this child when the TUI (its parent) exits.
+
+    Runs in the forked child before exec. Without this a TUI that is killed or
+    crashes (so ``on_unmount`` never runs) orphans the daemon to init, and the
+    next launch spawns a second daemon alongside it — two mics, two voices.
+    Linux-only; a no-op elsewhere (the deploy target is a Raspberry Pi 5).
+    """
+    if sys.platform != "linux":
+        return
+    try:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM)
+    except OSError:
+        pass
 
 # Frozen: sys.executable is the onefile binary (which defaults to the daemon).
 # From source: spawn the daemon module under the interpreter.
@@ -109,6 +129,7 @@ class DaemonSupervisor:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            preexec_fn=_die_with_parent,
         )
         log.debug("daemon started pid=%s", self._proc.pid)
 

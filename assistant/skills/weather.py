@@ -1,8 +1,8 @@
 """Weather skill: fetch an Open-Meteo forecast and speak a short answer.
 
-Routing is keyphrase-gated for the common "here" case; the LLM tool path fills a
-`location` slot when the user names a place ("weather in Tokyo"), which the skill
-resolves via geocoding. The provider returns current conditions plus a multi-day
+The LLM tool path fills an optional `location` slot when the user names a place
+("weather in Tokyo"), which the skill resolves via geocoding; when it's absent the
+skill defaults to the configured home coordinates. The provider returns current conditions plus a multi-day
 daily table; one LLM call turns that data plus today's date into a one- or
 two-sentence spoken answer to the user's specific question — "today", "tomorrow",
 "this weekend", "will it rain Friday" all handled without in-skill date parsing.
@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Callable
 
 from assistant.core.events import Command, Intent, SkillResult
+from assistant.core.persona import with_persona
 from assistant.llm.base import LLMProvider
 from assistant.skills.base import Skill, local_now
 from assistant.weather.base import Forecast, WeatherProvider
@@ -30,7 +31,8 @@ _WEATHER_SYSTEM = (
     "You are a voice assistant answering a weather question aloud. Use the forecast "
     "data provided to answer the user's specific question — the day or days they "
     "asked about. Reply in one or two short, plain spoken sentences, stating "
-    "temperatures with their unit (e.g. '72 degrees'). No markdown, lists, or emoji."
+    "temperatures with their unit (e.g. '72 degrees'). No markdown, lists, or emoji. "
+    "Lead directly with the forecast — no greeting, acknowledgement, or preamble."
 )
 
 _WEATHER_PROMPT = (
@@ -73,6 +75,7 @@ class WeatherSkill(Skill):
         home_lon: float,
         home_name: str,
         now: Callable[[], datetime] = local_now,
+        persona_suffix: str = "",
     ) -> None:
         self._weather = weather
         self._llm = llm
@@ -80,6 +83,7 @@ class WeatherSkill(Skill):
         self._home_lon = home_lon
         self._home_name = home_name
         self._now = now
+        self._system = with_persona(_WEATHER_SYSTEM, persona_suffix)
 
     async def handle(self, cmd: Command, intent: Intent) -> SkillResult:
         try:
@@ -108,7 +112,7 @@ class WeatherSkill(Skill):
             body=self._format(forecast),
             question=cmd.text,
         )
-        answer = await self._llm.complete(prompt, system=_WEATHER_SYSTEM, label="weather")
+        answer = await self._llm.complete(prompt, system=self._system, label="weather")
         if not answer:
             return SkillResult("I couldn't put the forecast into words.", success=False)
         return SkillResult(speech=answer, data={"location": forecast.location})

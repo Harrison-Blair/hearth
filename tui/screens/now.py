@@ -25,6 +25,7 @@ LABELS = {
     "speaking": "Speaking",
     "no_speech": "No speech",
     "error": "Error",
+    "paused": "Standing down",
 }
 
 # state -> (button label, control verb, button variant)
@@ -35,9 +36,19 @@ CONTEXT = {
     "listening": ("Cancel", "CANCEL", "error"),
     "thinking": ("Cancel", "CANCEL", "error"),
     "speaking": ("Stop", "STOP", "warning"),
+    "paused": ("Resume", "RESUME", "success"),
 }
 
 DEFAULT_BANNERS = {"no_speech": "Didn't catch that", "error": "Something went wrong"}
+
+
+def paused_banner(remaining: float | None) -> str:
+    """Banner text while standing down. The TUI may not import assistant.nlu, so
+    the little humanization lives here."""
+    if not remaining:
+        return "Tap Resume to wake"
+    mins = round(remaining / 60)
+    return f"Back in {mins} min" if mins >= 1 else f"Back in {round(remaining)} s"
 
 METER_CELLS = 30  # single VU row; fits inside 40 cols with padding
 
@@ -55,6 +66,7 @@ class NowScreen(Screen):
     NowScreen #now-indicator.state-speaking { background: $success; color: $text; }
     NowScreen #now-indicator.state-no_speech { background: $error; color: $text; }
     NowScreen #now-indicator.state-error { background: $error; color: $text; }
+    NowScreen #now-indicator.state-paused { background: $secondary; color: $text; }
     NowScreen #now-meter { height: 1; content-align: center middle; }
     NowScreen #now-transcript { height: 4; padding: 0 1; }
     NowScreen #now-banner { height: 2; padding: 0 1; content-align: center middle; }

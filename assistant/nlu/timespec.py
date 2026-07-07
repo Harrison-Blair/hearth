@@ -38,6 +38,13 @@ _DURATION_RE = re.compile(
     rf"(?:\b(?:in|for|after)\s+)?({_NUM})(?:[ -]({_ONES}))?\s+({_UNIT})s?\b", re.IGNORECASE
 )
 
+# A recurring cadence ("every 15 minutes", "every hour", "every 30 seconds"). The
+# count is optional — "every minute" means every 1 minute. Checked before the
+# one-shot duration regex, which would otherwise match the "15 minutes" inside it.
+_EVERY_RE = re.compile(
+    rf"\bevery\s+(?:({_NUM})(?:[ -]({_ONES}))?\s+)?({_UNIT})s?\b", re.IGNORECASE
+)
+
 # A clock time anywhere in the request ("at 6 pm", "9:30", "8 o'clock", "noon").
 # When present, the duration regex must not win: "a 10 minute workout at 6 pm" is
 # a 6 pm reminder, not a 10-minute one — defer to the LLM, which disambiguates.
@@ -48,6 +55,16 @@ _CLOCK_RE = re.compile(
 
 # Prefixes peeled off (longest first) to recover the bare reminder message.
 _MESSAGE_PREFIXES = ("remind me to", "remind me", "to")
+
+
+@dataclass
+class ReminderSpec:
+    """A parsed reminder request: when to first fire, what to say, and — for a
+    recurring reminder — the repeat ``interval`` in seconds (None for one-shot)."""
+
+    due_at: float
+    message: str
+    interval: float | None = None
 
 
 @dataclass
@@ -70,16 +87,27 @@ def parse_duration(text: str) -> float | None:
 
 async def extract_reminder(
     text: str, llm: LLMProvider, now: datetime
-) -> tuple[float, str] | None:
-    """Return (due_at_epoch, message) for a reminder request, or None if the
-    time couldn't be determined."""
+) -> ReminderSpec | None:
+    """Return a ``ReminderSpec`` for a reminder request, or None if the time
+    couldn't be determined."""
     lowered = text.lower()
+
+    # Recurring ("every 15 minutes") is checked first: the one-shot duration regex
+    # below would otherwise match the interval's "15 minutes" and drop the repeat.
+    every = _EVERY_RE.search(lowered)
+    if every:
+        message = _strip_message(lowered[: every.start()] + " " + lowered[every.end() :])
+        if not message:
+            return None
+        interval = _match_interval(every)
+        return ReminderSpec(now.timestamp() + interval, message, interval)
+
     match = _DURATION_RE.search(lowered)
     if match and not _CLOCK_RE.search(lowered):
         message = _strip_message(lowered[: match.start()] + " " + lowered[match.end() :])
         if not message:
             return None
-        return now.timestamp() + _match_seconds(match), message
+        return ReminderSpec(now.timestamp() + _match_seconds(match), message)
     return await _extract_via_llm(text, llm, now)
 
 
@@ -93,6 +121,20 @@ def humanize(seconds: float) -> str:
     else:
         n, unit = seconds // 3600, "hour"
     return f"in {n} {unit}{'' if n == 1 else 's'}"
+
+
+def humanize_interval(seconds: float) -> str:
+    """A spoken-friendly cadence phrase, e.g. 'every 15 minutes', 'every hour'."""
+    seconds = int(round(seconds))
+    if seconds < 60:
+        n, unit = seconds, "second"
+    elif seconds < 3600:
+        n, unit = seconds // 60, "minute"
+    elif seconds < 86400:
+        n, unit = seconds // 3600, "hour"
+    else:
+        n, unit = seconds // 86400, "day"
+    return f"every {unit}" if n == 1 else f"every {n} {unit}s"
 
 
 def _coerce_index(value) -> int | None:
@@ -117,6 +159,17 @@ def _match_seconds(match: re.Match) -> float:
     return float(count * _UNIT_SECONDS[unit])
 
 
+def _match_interval(match: re.Match) -> float:
+    """Seconds for an ``_EVERY_RE`` match; a missing count means 1 ("every minute")."""
+    count_tok, ones_tok, unit = match.group(1), match.group(2), match.group(3).lower()
+    count = 1
+    if count_tok:
+        count = int(count_tok) if count_tok.isdigit() else _WORD_NUMBERS[count_tok.lower()]
+    if ones_tok:
+        count += _WORD_NUMBERS[ones_tok.lower()]
+    return float(count * _UNIT_SECONDS[unit])
+
+
 def _strip_message(remainder: str) -> str:
     s = " ".join(remainder.split()).strip(".?!,").strip()
     for prefix in _MESSAGE_PREFIXES:
@@ -128,20 +181,23 @@ def _strip_message(remainder: str) -> str:
 
 async def _extract_via_llm(
     text: str, llm: LLMProvider, now: datetime
-) -> tuple[float, str] | None:
+) -> ReminderSpec | None:
     prompt = (
         f"The current local time is {now:%Y-%m-%d %H:%M (%A)}.\n"
         "Extract when to remind the user and the message from their request.\n"
         "Reply with ONLY a JSON object: "
         '{"delay_seconds": <int or null>, "at_time": "<HH:MM 24-hour or null>", '
-        '"message": "<the thing to be reminded of>"}.\n'
+        '"interval_seconds": <int or null>, "message": "<the thing to be reminded of>"}.\n'
         "Rules: use delay_seconds ONLY for explicit relative durations like "
         '"in 10 minutes". Use at_time for any clock time like "5 pm" or "half past '
-        'eight" (a clock time is NOT a delay). Set the unused field to null.\n'
+        'eight" (a clock time is NOT a delay). Use interval_seconds for a repeating '
+        'cadence like "every 15 minutes" or "every day" (86400). Set unused fields to null.\n'
         'Example: "remind me in 10 minutes to stretch" -> '
-        '{"delay_seconds": 600, "at_time": null, "message": "stretch"}\n'
+        '{"delay_seconds": 600, "at_time": null, "interval_seconds": null, "message": "stretch"}\n'
         'Example: "remind me at 9 am to take pills" -> '
-        '{"delay_seconds": null, "at_time": "09:00", "message": "take pills"}\n'
+        '{"delay_seconds": null, "at_time": "09:00", "interval_seconds": null, "message": "take pills"}\n'
+        'Example: "remind me every day at 9 am to take pills" -> '
+        '{"delay_seconds": null, "at_time": "09:00", "interval_seconds": 86400, "message": "take pills"}\n'
         f'Request: "{text}"'
     )
     try:
@@ -154,10 +210,17 @@ async def _extract_via_llm(
     if not message:
         return None
 
+    raw_interval = data.get("interval_seconds")
+    interval = float(raw_interval) if isinstance(raw_interval, (int, float)) and raw_interval > 0 else None
     due = resolve_time(
         now, delay_seconds=data.get("delay_seconds"), at_time=data.get("at_time")
     )
-    return (due, message) if due is not None else None
+    # A recurring reminder with no explicit start fires one interval from now.
+    if due is None and interval is not None:
+        due = now.timestamp() + interval
+    if due is None:
+        return None
+    return ReminderSpec(due, message, interval)
 
 
 def resolve_time(

@@ -33,8 +33,12 @@ class RecorderConfig(BaseModel):
     # WebRTC VAD end-of-utterance tuning; sensitive to mic and room.
     aggressiveness: int = 2  # VAD speech/silence sensitivity (0-3)
     silence_ms: int = 1500  # trailing silence that ends an utterance (forgiving of mid-command pauses)
-    max_ms: int = 10000  # hard cap on utterance length
+    max_ms: int = 30000  # hard cap; long enough for multi-clause utterances + the verify loop
     start_timeout_ms: int = 5000  # give up if no speech starts after wake
+    # Cumulative voiced ms before a capture counts as speech; rejects one-frame
+    # VAD blips (a chair creak) that would otherwise open an utterance. Keep low
+    # enough that a bare "no" still registers.
+    min_speech_ms: int = 150
     preroll_frames: int = 6  # frames kept before wake, recovering a clipped command
 
 
@@ -52,6 +56,9 @@ class WakeConfig(BaseModel):
     # Consecutive scored frames over threshold required to fire; >1 debounces a
     # single noisy frame from spuriously waking the assistant. 1 = original trigger.
     trigger_frames: int = 1
+    # Scores at/above this speak a confident acknowledgement (tts.ack_phrases);
+    # between `threshold` and this, an unsure one (tts.unsure_ack_phrases).
+    confident_threshold: float = 0.85
 
     def model_refs(self) -> list[str]:
         """Models to load, most specific first: a series, else a single path,
@@ -77,6 +84,29 @@ class SttConfig(BaseModel):
     vad_filter: bool = False  # strip non-speech/silence before decode
     condition_on_previous_text: bool = False  # commands are independent one-shots
     initial_prompt: str | None = None  # optional vocabulary/spelling bias
+    # Segments whose no-speech probability exceeds this are dropped (whisper's own
+    # skip additionally requires a low avg logprob, which confident hallucinations
+    # dodge). Lower = stricter silence rejection.
+    no_speech_threshold: float = 0.6
+    log_prob_threshold: float = -1.0  # discard decodes with avg logprob below this
+    # Known whisper hallucinations on (near-)silent audio. A low-energy capture
+    # whose whole transcript is only these phrases is treated as silence.
+    hallucination_phrases: list[str] = [
+        "thank you",
+        "thanks for watching",
+        "thank you for watching",
+        "thank you so much for watching",
+        "please subscribe",
+        "subscribe to my channel",
+        "see you next time",
+        "see you in the next video",
+        "bye",
+        "bye bye",
+        "you",
+    ]
+    # The phrase filter only applies to captures quieter than this raw int16 RMS
+    # (real speech is louder and passes through untouched). 0 = filter off.
+    hallucination_max_rms: float = 300.0
 
 
 class LlmConfig(BaseModel):
@@ -93,16 +123,36 @@ class LlmConfig(BaseModel):
     # local `ollama serve` as a child (no sudo); systemd users can point it at
     # e.g. ["systemctl", "--user", "restart", "ollama"].
     serve_cmd: list[str] = ["ollama", "serve"]
+    # OpenCode Zen provider (provider: "opencode-zen"). The bearer token is read
+    # from the ASSISTANT_LLM__API_KEY env var — never commit it to config.yaml.
+    # base_url defaults to the public Zen gateway; any OpenAI-compatible endpoint
+    # works.
+    api_key: str = ""
+    base_url: str = "https://opencode.ai/zen/v1"
+    # Secondary provider used when the primary raises (transport failure,
+    # timeout, malformed response). Empty = no fallback. ``fallback_model``
+    # defaults to ``model`` when blank, so the same model id can serve both.
+    fallback: str = ""
+    fallback_model: str = ""
+    # Retries on transient (429/5xx/transport, malformed 200 body) LLM failures.
+    # 4xx-auth is never retried. Advanced — config.yaml only, not in the TUI.
+    max_retries: int = 2
     # Answers are spoken aloud, so steer the model toward short, plain replies.
     system_prompt: str = (
         "You are a helpful voice assistant. Answers are read aloud, so reply in "
-        "one or two short, plain sentences. No markdown, lists, or emoji."
+        "one or two short, plain sentences. No markdown, lists, or emoji. Lead "
+        "directly with the answer — never start with acknowledgements, preambles, "
+        "or a restatement of the question (no 'Sure', 'Okay', 'Great question', "
+        "'Here's')."
     )
 
 
-class NluConfig(BaseModel):
-    command_keyphrase: str = "tool"
-    command_aliases: dict[str, str] = {}
+class PersonaConfig(BaseModel):
+    # On by default: the Calcifer voice on final spoken replies (general answers,
+    # weather, web-search summaries) only — never tool selection, argument
+    # formatting, or JSON structured output. Set false for the plain voice.
+    enabled: bool = True
+    strength: str = "terse"  # terse | expansive
 
 
 class AgentConfig(BaseModel):
@@ -110,8 +160,20 @@ class AgentConfig(BaseModel):
     # "json" = prompt-coerced JSON only, "auto" = native then JSON on failure.
     tool_mode: str = "auto"
     max_tool_rounds: int = 3  # safety cap on tool-call rounds before answering directly
-    fast_path: bool = True  # LLM-free keyphrase/command shortcut for cheap commands
-    turn_timeout_s: float = 20.0  # whole-turn budget; on expiry, answer from general knowledge
+    turn_timeout_s: float = 45.0  # whole-turn budget; fits the verify loop + one reject re-loop
+
+
+class VerifyConfig(BaseModel):
+    # Follow-up verification loop: an LLM "assess" call reviews the model's tool
+    # pick (pre-stage) and its drafted answer (post-stage) before speech, with
+    # optional spoken fillers ("let me double check that") on a reject. Off =
+    # today's single-pass behavior. The judgment prompt is a hard-coded constant
+    # in verify.py (not a config field) — it encodes the safety structure.
+    enabled: bool = True          # master kill switch; off = today's behavior
+    pre: bool = True              # pre-tool gate: review pick+args before the skill runs
+    post: bool = True             # post-tool check: review the answer before speech
+    max_verify_rounds: int = 2    # per-stage sub-cap (rejects) within max_tool_rounds
+    spoken_feedback: bool = True  # speak "let me double check" fillers on a reject
 
 
 class TtsConfig(BaseModel):
@@ -119,10 +181,12 @@ class TtsConfig(BaseModel):
     model_path: str | None = None
     # Piper speaking rate (length_scale): >1 slower, <1 faster; None = voice default.
     length_scale: float | None = None
-    # Pool of wake-acknowledgement phrases; one is chosen at random per wake. Kept
-    # to espeak-friendly interjections so Piper says a natural cue rather than
-    # spelling the letters (e.g. "Mm-hm" -> "em-em-aitch-em").
-    ack_phrases: list[str] = ["hmm?", "uh huh?", "hmm hmm?"]
+    # Pool of wake-acknowledgement phrases; one is chosen at random per wake.
+    # Spoken when the wake score is at/above wake.confident_threshold.
+    ack_phrases: list[str] = ["Hello!", "What can I help you with?", "Yes?"]
+    # Spoken instead when the wake score lands between wake.threshold and
+    # wake.confident_threshold, signalling the pickup was uncertain.
+    unsure_ack_phrases: list[str] = ["Did you say something?", "What was that?"]
     # Beat of silence before the wake ack plays, so "hmm?" isn't instant/robotic. 0 = off.
     ack_delay_s: float = 0.3
 
@@ -161,41 +225,70 @@ class WeatherConfig(BaseModel):
     geocoding_endpoint: str = "https://geocoding-api.open-meteo.com/v1/search"
 
 
+class CalendarConfig(BaseModel):
+    enabled: bool = False  # gates skill registration and the watcher entirely
+    # Google service-account JSON; ~ is expanded where the file is read.
+    credentials_path: str = "~/.config/calcifer/google-service-account.json"
+    personal_calendar_id: str = ""  # read-only for the service account
+    calcifer_calendar_id: str = ""  # read-write; events Calcifer creates live here
+    timeout: float = 10.0
+    watcher_enabled: bool = True  # watcher's state at boot; voice toggle overrides at runtime
+    watcher_poll_seconds: float = 300.0  # how often the watcher polls the calendars
+    watcher_lead_minutes: int = 15  # announce events starting within this window
+    # Title patterns never surfaced in queries or announcements (substring,
+    # case/emoji-insensitive); the "stop bringing up ..." voice command adds more.
+    blocked_titles: list[str] = []
+    # Events whose description contains this marker are hidden the same way.
+    hidden_tag: str = "[hidden]"
+
+
 class ConversationConfig(BaseModel):
     enabled: bool = True  # keep listening for follow-ups after the assistant speaks
     followup_window_ms: int = 6000  # silence after which a conversation closes
     max_history_turns: int = 12  # messages kept in-session (user + assistant each 1)
-    # When the mic reopens for a follow-up, speak a short cue generated from the
-    # conversation so far (e.g. "anything else?") instead of replaying the wake
-    # ack. Generated while the reply is spoken so it adds no mic-open latency;
-    # falls back to a silent reopen (the close tone still marks mic state) if the
-    # LLM misses the budget or is offline.
-    followup_cue_enabled: bool = True
-    followup_cue_timeout_s: float = 4.0  # cue must be ready by mic-open or it's dropped
-    followup_cue_prompt: str = (
-        "You are re-opening the microphone to hear a possible follow-up after "
-        "answering. Reply with at most three everyday words inviting more, or an "
-        "empty reply if nothing fits. Plain spoken words only: no punctuation "
-        "except a final question mark, no emoji, no abbreviations, no letters read aloud."
+    # After each completed reply the LLM decides what happens next: keep
+    # listening silently (the reply asked a question), check in once (a soft
+    # ready-tone at mic-open — at most once per conversation), or end the
+    # conversation. Nothing is ever spoken at a conversation boundary. Decided
+    # while the reply is spoken so it adds no mic-open latency; falls back to a
+    # silent reopen (the silence-closed loop) if the LLM misses the budget or
+    # is offline.
+    decision_enabled: bool = True
+    decision_timeout_s: float = 4.0  # decision must land by mic-open or it's dropped
+    decision_prompt: str = (
+        "You decide what a voice assistant does right after speaking its reply. "
+        "Read the conversation and reply with ONLY a JSON object: "
+        '{"action": "listen" | "confirm" | "end"}. '
+        "Choose listen when the assistant's last reply asks the user a question "
+        "or clearly expects an answer. "
+        "Choose confirm when the request was completed and no answer is expected "
+        "but a follow-up is plausible (a brief ready-tone will play). "
+        "Choose end when the conversation is clearly over (the user was wrapping "
+        "up or declining more help). "
+        "When unsure, choose listen."
     )
-    # When the user explicitly ends the conversation (an end phrase below, e.g.
-    # "goodbye" / "I'm done"), speak a short, context-aware farewell instead of
-    # closing wordlessly. A conversation that ends on plain silence still closes
-    # with just the descending tone — no farewell. Silent fallback on LLM
-    # timeout/failure keeps the offline-first behavior.
-    signoff_enabled: bool = True
-    signoff_timeout_s: float = 4.0  # tight budget; on miss the ending stays silent
-    signoff_pause_s: float = 0.5  # silent "breath" before the farewell is spoken; 0 = off
-    signoff_prompt: str = (
-        "You are ending a short spoken conversation because the user said goodbye. "
-        "Reply with a brief, warm farewell of at most four everyday words. Plain "
-        "spoken words only: no punctuation except a final period, no emoji, no "
-        "abbreviations, no letters or symbols read aloud. Examples: Talk soon. "
-        "Anytime. Take care."
-    )
+    # Follow-ups that decline the check-in tone and end the conversation.
+    # Matched exactly against the normalized transcript, and only on the turn
+    # right after a check-in.
+    decline_phrases: list[str] = [
+        "no",
+        "nope",
+        "nah",
+        "no thanks",
+        "no thank you",
+        "nothing",
+        "nothing else",
+        "that's it",
+        "that is it",
+        "i'm good",
+        "i am good",
+        "all good",
+        "we're good",
+        "we are good",
+    ]
     # Follow-up utterances that explicitly close the conversation (matched as a
-    # normalized substring). A match triggers the farewell above and ends the turn
-    # without routing to a skill.
+    # normalized substring). A match ends the turn without routing to a skill —
+    # the descending mic-close tone is the only acknowledgment.
     end_phrases: list[str] = [
         "goodbye",
         "bye",
@@ -210,8 +303,40 @@ class ConversationConfig(BaseModel):
     ]
 
 
+class AecConfig(BaseModel):
+    # Speex acoustic echo cancellation: subtracts what the speaker is playing
+    # from the mic stream, so barge-in can hear the wake word over the
+    # assistant's own voice. Needs the optional native extra:
+    #   sudo apt install libspeexdsp-dev && pip install -e ".[aec]"
+    # When disabled or the import fails, the mic passes through unchanged.
+    enabled: bool = False
+    frame_ms: int = 20  # speex processes 10-20 ms frames
+    filter_length_ms: int = 200  # echo tail the canceller adapts over
+    extra_delay_ms: int = 0  # output-path latency compensation; tune on-device
+
+
+class BargeInConfig(BaseModel):
+    # Speaking the wake word over the assistant's reply cuts playback and reopens
+    # the mic. Off by default until echo cancellation is validated on-device:
+    # without AEC the mic hears the assistant's own reply, and the gates below
+    # are the only guard against self-triggering.
+    enabled: bool = False
+    # Extra score gate applied to wake events while we speak (>= wake.threshold).
+    threshold: float = 0.80
+    # Consecutive gated events required to barge (self-echo debounce).
+    trigger_frames: int = 3
+    # Also barge into reminder/calendar announcements (phase 3c).
+    announcements: bool = False
+
+
 class LoggingConfig(BaseModel):
-    level: str = "INFO"
+    level: str = "INFO"  # console (stderr) level; the TUI parses that format
+    dir: str = "logs"  # per-run log files land here (gitignored)
+    file_enabled: bool = True  # write per-run plain-text + JSONL files
+    file_level: str = "INFO"  # file handlers' level; set DEBUG when deep-debugging
+    rotate_max_bytes: int = 10_485_760  # size cap per file within a run (10 MiB)
+    rotate_backups: int = 3  # rotated chunks kept per file within a run
+    runs_to_keep: int = 20  # runs retained at boot; older pruned (0 = keep all)
 
 
 class Config(BaseSettings):
@@ -227,14 +352,18 @@ class Config(BaseSettings):
     wake: WakeConfig = WakeConfig()
     stt: SttConfig = SttConfig()
     llm: LlmConfig = LlmConfig()
-    nlu: NluConfig = NluConfig()
+    persona: PersonaConfig = PersonaConfig()
     agent: AgentConfig = AgentConfig()
+    verify: VerifyConfig = VerifyConfig()
     tts: TtsConfig = TtsConfig()
     storage: StorageConfig = StorageConfig()
     scheduling: SchedulingConfig = SchedulingConfig()
     web_search: WebSearchConfig = WebSearchConfig()
     weather: WeatherConfig = WeatherConfig()
+    calendar: CalendarConfig = CalendarConfig()
     conversation: ConversationConfig = ConversationConfig()
+    aec: AecConfig = AecConfig()
+    barge_in: BargeInConfig = BargeInConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @classmethod

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from assistant.core.events import Command, Intent, SkillResult
+from assistant.core.persona import with_persona
 from assistant.llm.base import LLMProvider
 from assistant.skills.base import Skill
 
@@ -20,11 +21,14 @@ class GeneralSkill(Skill):
         # call), so it must not be offered as a callable tool.
         return []
 
-    def __init__(self, llm: LLMProvider, system_prompt: str) -> None:
+    def __init__(self, llm: LLMProvider, system_prompt: str, persona_suffix: str = "") -> None:
         self._llm = llm
-        self._system = system_prompt
+        self._system = with_persona(system_prompt, persona_suffix)
 
     async def handle(self, cmd: Command, intent: Intent) -> SkillResult:
+        draft = intent.slots.get("draft")
+        if draft:
+            return await self._restyle(draft)
         messages = [{"role": t.role, "content": t.content} for t in cmd.history]
         messages.append({"role": "user", "content": cmd.text})
         try:
@@ -35,3 +39,21 @@ class GeneralSkill(Skill):
         if not answer:
             return SkillResult(speech="Sorry, I don't have an answer for that.", success=False)
         return SkillResult(speech=answer)
+
+    async def _restyle(self, draft: str) -> SkillResult:
+        """Re-voice the model's own direct answer in persona without changing its
+        meaning. The draft is ground truth: a refusal must stay a refusal, never be
+        turned into a confirmation. On any LLM error, speak the draft verbatim rather
+        than lose it."""
+        prompt = (
+            "Rephrase the following answer in your own voice. Keep every fact exactly "
+            "as stated; do not add information, and never confirm or deny anything the "
+            "answer does not. If it declines or says it cannot do something, your "
+            f"rephrasing must decline too.\n\nAnswer: {draft}"
+        )
+        try:
+            styled = await self._llm.complete(prompt, system=self._system, label="restyle")
+        except Exception as exc:  # noqa: BLE001 - never crash the loop on an LLM error
+            log.error("LLM restyle failed: %s", exc)
+            return SkillResult(speech=draft)
+        return SkillResult(speech=styled.strip() if styled and styled.strip() else draft)

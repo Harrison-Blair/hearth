@@ -12,8 +12,8 @@ class FakeStore:
     def __init__(self):
         self.added = []
 
-    def add(self, due_at, speech, *, created_at):
-        self.added.append((due_at, speech, created_at))
+    def add(self, due_at, speech, *, created_at, kind="reminder", label=None, interval=None):
+        self.added.append((due_at, speech, created_at, interval))
         return len(self.added)
 
 
@@ -34,44 +34,40 @@ def _skill(store, llm=None):
     return ReminderSkill(store, llm or FakeLLM(), now=lambda: NOW)
 
 
-async def test_timer_sets_and_confirms():
-    store = FakeStore()
-    res = await _skill(store).handle(Command("set a timer for 5 minutes"), Intent("timer"))
-    assert res.success
-    assert res.speech == "Okay, timer set for 5 minutes."
-    due, speech, _ = store.added[0]
-    assert speech == "Your timer is done."
-    assert due == NOW.timestamp() + 300
-
-
-async def test_timer_uses_duration_slot_when_text_lacks_it():
-    store = FakeStore()
-    res = await _skill(store).handle(
-        Command("set a five-minute timer going"),
-        Intent(type="timer", slots={"duration": "5 minutes"}),
-    )
-    assert res.success
-    due, speech, _ = store.added[0]
-    assert speech == "Your timer is done."
-    assert due == NOW.timestamp() + 300
-
-
-async def test_timer_failure_when_no_duration():
-    store = FakeStore()
-    res = await _skill(store).handle(Command("set a timer"), Intent("timer"))
-    assert not res.success
-    assert store.added == []
-
-
 async def test_relative_reminder():
     store = FakeStore()
     res = await _skill(store).handle(
         Command("remind me in 30 seconds to stretch"), Intent("reminder")
     )
     assert res.speech == "Okay, I'll remind you to stretch in 30 seconds."
-    due, speech, _ = store.added[0]
+    due, speech, _, interval = store.added[0]
     assert speech == "Reminder: stretch."
     assert due == NOW.timestamp() + 30
+    assert interval is None  # one-shot
+
+
+async def test_recurring_reminder_stores_interval_and_confirms():
+    store = FakeStore()
+    res = await _skill(store).handle(
+        Command("remind me every 15 minutes to stretch"), Intent("reminder")
+    )
+    assert res.speech == "Okay, I'll remind you to stretch every 15 minutes."
+    due, speech, _, interval = store.added[0]
+    assert speech == "Reminder: stretch."
+    assert interval == 900.0
+    assert due == NOW.timestamp() + 900  # first fire one interval out
+
+
+async def test_list_recurring_reminder_describes_cadence():
+    store = ReminderStore(":memory:")
+    store.add(
+        NOW.timestamp() + 900, "Reminder: stretch.", created_at=NOW.timestamp(), interval=900.0
+    )
+    res = await _list_skill(store).handle(
+        Command("my reminders"), Intent("list_reminders")
+    )
+    assert res.speech == "You have 1 reminder: stretch every 15 minutes."
+    store.close()
 
 
 async def test_reminder_failure_when_no_time():
@@ -105,24 +101,28 @@ async def test_list_single_reminder():
     store.close()
 
 
-async def test_list_reminder_and_timer_ordered():
+async def test_list_excludes_timers():
     store = ReminderStore(":memory:")
     store.add(NOW.timestamp() + 300, "Reminder: call mom.", created_at=NOW.timestamp())
-    store.add(NOW.timestamp() + 30, "Your timer is done.", created_at=NOW.timestamp())
+    store.add(
+        NOW.timestamp() + 30, "Your timer is done.", created_at=NOW.timestamp(), kind="timer"
+    )
     res = await _list_skill(store).handle(
         Command("do I have any reminders"), Intent("list_reminders")
     )
-    assert res.speech == (
-        "You have 2 reminders: a timer in 30 seconds, and call mom in 5 minutes."
-    )
+    assert res.speech == "You have 1 reminder: call mom in 5 minutes."
     store.close()
 
 
 def _managed_store():
-    """Two pending reminders, soonest first: index 1 = timer, index 2 = call mom."""
+    """Two pending reminders, soonest first (index 1 = stretch, index 2 = call mom),
+    plus a timer that every manage flow must leave alone."""
     store = ReminderStore(":memory:")
     store.add(NOW.timestamp() + 300, "Reminder: call mom.", created_at=NOW.timestamp())
-    store.add(NOW.timestamp() + 30, "Your timer is done.", created_at=NOW.timestamp())
+    store.add(NOW.timestamp() + 30, "Reminder: stretch.", created_at=NOW.timestamp())
+    store.add(
+        NOW.timestamp() + 60, "Your timer is done.", created_at=NOW.timestamp(), kind="timer"
+    )
     return store
 
 
@@ -149,17 +149,57 @@ async def test_bulk_cancel_confirms_before_deleting():
     assert res.expects_reply
     assert res.speech == "That will cancel all 2 reminders. Should I go ahead?"
     assert llm.calls == []  # bulk cancel never touches the LLM
-    assert len(store.pending(NOW.timestamp())) == 2  # nothing deleted yet
+    assert len(store.pending(NOW.timestamp())) == 3  # nothing deleted yet
     store.close()
 
 
-async def test_bulk_cancel_reply_affirmative_deletes():
+async def test_bulk_cancel_bare_plural_without_all():
+    # "clear my reminders" names no specific target, so it means all of them even
+    # without the literal word "all".
+    store = _managed_store()
+    skill, llm = _manage(store)
+    res = await skill.handle(Command("clear my reminders"), Intent("manage_reminders"))
+    assert res.expects_reply
+    assert res.speech == "That will cancel all 2 reminders. Should I go ahead?"
+    assert llm.calls == []  # bulk cancel never touches the LLM
+    assert len(store.pending(NOW.timestamp())) == 3  # nothing deleted yet
+    store.close()
+
+
+async def test_bulk_cancel_get_rid_of_phrase():
+    store = _managed_store()
+    skill, llm = _manage(store)
+    res = await skill.handle(
+        Command("get rid of my existing reminders"), Intent("manage_reminders")
+    )
+    assert res.expects_reply
+    assert res.speech == "That will cancel all 2 reminders. Should I go ahead?"
+    assert llm.calls == []
+    assert len(store.pending(NOW.timestamp())) == 3
+    store.close()
+
+
+async def test_targeted_plural_is_not_bulk():
+    # Plural "reminders" with a qualifier after it names a specific target, so it
+    # must go to the LLM single-target path, not delete everything.
+    store = _managed_store()
+    skill, llm = _manage(store, json.dumps({"action": "cancel", "target_index": 1}))
+    await skill.handle(
+        Command("delete the reminders about the meeting"), Intent("manage_reminders")
+    )
+    assert llm.calls != []  # not bulk: the LLM resolved the target
+    assert len(store.pending(NOW.timestamp(), kind="reminder")) == 1  # one removed, not all
+    store.close()
+
+
+async def test_bulk_cancel_reply_affirmative_deletes_reminders_not_timers():
     store = _managed_store()
     skill, _ = _manage(store)
     await skill.handle(Command("cancel all my reminders"), Intent("manage_reminders"))
     res = await skill.handle_reply(Command("yes go ahead"))
     assert res.speech == "Okay, I've cancelled all 2 of your reminders."
-    assert store.pending(NOW.timestamp()) == []
+    assert store.pending(NOW.timestamp(), kind="reminder") == []
+    assert len(store.pending(NOW.timestamp(), kind="timer")) == 1  # timer survives
     store.close()
 
 
@@ -169,7 +209,7 @@ async def test_bulk_cancel_reply_negative_aborts():
     await skill.handle(Command("cancel all my reminders"), Intent("manage_reminders"))
     res = await skill.handle_reply(Command("no leave them"))
     assert res.speech == "Okay, I'll leave them."
-    assert len(store.pending(NOW.timestamp())) == 2
+    assert len(store.pending(NOW.timestamp())) == 3
     store.close()
 
 
@@ -179,7 +219,7 @@ async def test_bulk_cancel_reply_empty_aborts():
     await skill.handle(Command("cancel all my reminders"), Intent("manage_reminders"))
     res = await skill.handle_reply(Command(""))
     assert res.speech == "Okay, I'll leave them."
-    assert len(store.pending(NOW.timestamp())) == 2
+    assert len(store.pending(NOW.timestamp())) == 3
     store.close()
 
 
@@ -192,7 +232,7 @@ async def test_hyphenated_all_is_not_a_bulk_cancel():
         Command("cancel the all-hands reminder"), Intent("manage_reminders")
     )
     assert llm.calls != []  # not bulk: the LLM resolved the target
-    assert len(store.pending(NOW.timestamp())) == 1  # only one removed, not all
+    assert len(store.pending(NOW.timestamp(), kind="reminder")) == 1  # one removed, not all
     store.close()
 
 
@@ -203,15 +243,20 @@ async def test_specific_cancel_by_index():
         Command("cancel my reminder to call mom"), Intent("manage_reminders")
     )
     assert res.speech == "Okay, I've cancelled your reminder to call mom."
-    assert [r.speech for r in store.pending(NOW.timestamp())] == ["Your timer is done."]
+    assert [r.speech for r in store.pending(NOW.timestamp(), kind="reminder")] == [
+        "Reminder: stretch."
+    ]
+    assert len(store.pending(NOW.timestamp(), kind="timer")) == 1  # timer untouched
     store.close()
 
 
-async def test_cancel_timer_phrasing():
+async def test_cancel_by_index_ignores_timers_in_numbering():
+    # Index 1 = the soonest *reminder* (stretch); the sooner-due timer must not
+    # shift the numbering the LLM resolved against.
     store = _managed_store()
     skill, _ = _manage(store, json.dumps({"action": "cancel", "target_index": 1}))
     res = await skill.handle(Command("cancel the first one"), Intent("manage_reminders"))
-    assert res.speech == "Okay, I've cancelled the timer."
+    assert res.speech == "Okay, I've cancelled your reminder to stretch."
     store.close()
 
 
@@ -264,5 +309,5 @@ async def test_unresolved_target_message():
     )
     assert not res.success
     assert res.speech == "I couldn't tell which reminder you meant."
-    assert len(store.pending(NOW.timestamp())) == 2  # nothing removed
+    assert len(store.pending(NOW.timestamp())) == 3  # nothing removed
     store.close()

@@ -7,8 +7,10 @@ a specific model is pulled.
 
 from __future__ import annotations
 
+import asyncio
 import json as _json
 import logging
+import random
 import time
 
 import httpx
@@ -23,6 +25,16 @@ def _clip(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n] + "…"
 
 
+class LLMResponseError(Exception):
+    """A reached-but-unusable LLM response: non-JSON body, empty choices, or a
+    missing message. ``retryable`` flags transient gateway hiccups (a 200 with a
+    truncated body) vs. auth/config bugs (400/401/403), which are non-retryable."""
+
+    def __init__(self, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
 class OpenCodeZenProvider(LLMProvider):
     def __init__(
         self,
@@ -31,11 +43,17 @@ class OpenCodeZenProvider(LLMProvider):
         base_url: str = "https://opencode.ai/zen/v1",
         timeout: float = 60.0,
         health_timeout: float = 5.0,
+        max_retries: int = 2,
+        retry_backoff_s: float = 0.5,
     ) -> None:
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._health_timeout = health_timeout
+        # Retries on transient failures (429/5xx, transport errors, malformed 200
+        # bodies). 4xx-auth (400/401/403) is never retried — it's a config bug.
+        self._max_retries = max(0, max_retries)
+        self._retry_backoff_s = retry_backoff_s
         # One pooled client reused across every call (a voice turn makes 2+);
         # a fresh client per request loses keep-alive entirely.
         self._client = httpx.AsyncClient(
@@ -153,8 +171,55 @@ class OpenCodeZenProvider(LLMProvider):
         return True
 
     async def _post(self, payload: dict) -> tuple[int, dict]:
+        """POST /chat/completions, retrying transient failures.
+
+        Retries 429/5xx, transport/timeout errors, and retryable malformed 200
+        bodies (non-JSON, empty choices, missing message). Never retries
+        4xx-auth (400/401/403) — those are config bugs, and retrying only burns
+        the budget. Raises ``LLMResponseError`` once retries are exhausted on a
+        malformed body; ``HTTPStatusError`` propagates for a non-retryable or
+        exhausted 4xx/5xx."""
+        delay = self._retry_backoff_s
+        for attempt in range(self._max_retries + 1):
+            try:
+                return await self._post_once(payload)
+            except LLMResponseError as exc:
+                if not exc.retryable or attempt == self._max_retries:
+                    raise
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                retryable = status == 429 or 500 <= status < 600
+                if not retryable or attempt == self._max_retries:
+                    raise
+            except httpx.TransportError:
+                if attempt == self._max_retries:
+                    raise
+            # Transient: back off with up to 25% jitter before the next attempt.
+            await asyncio.sleep(delay + random.uniform(0.0, delay * 0.25))
+            delay = min(delay * 2.0, 2.0)
+        raise LLMResponseError("retries exhausted", retryable=False)
+
+    async def _post_once(self, payload: dict) -> tuple[int, dict]:
         t0 = time.perf_counter()
         resp = await self._client.post(f"{self._base_url}/chat/completions", json=payload)
-        resp.raise_for_status()
+        resp.raise_for_status()  # HTTPStatusError on 4xx/5xx (classified in _post)
+        try:
+            data = resp.json()
+        except _json.JSONDecodeError as exc:
+            raise LLMResponseError(f"non-JSON response body: {exc}", retryable=True) from exc
+        self._validate_choices(data)
         latency_ms = round((time.perf_counter() - t0) * 1000)
-        return latency_ms, resp.json()
+        return latency_ms, data
+
+    @staticmethod
+    def _validate_choices(data: object) -> None:
+        """Guard the response shape so a truncated/empty 200 raises a clean
+        retryable error instead of a KeyError/IndexError escaping the caller."""
+        if not isinstance(data, dict):
+            raise LLMResponseError("response body is not a JSON object", retryable=True)
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise LLMResponseError("response has no choices", retryable=True)
+        first = choices[0]
+        if not isinstance(first, dict) or "message" not in first:
+            raise LLMResponseError("response choice has no message", retryable=True)

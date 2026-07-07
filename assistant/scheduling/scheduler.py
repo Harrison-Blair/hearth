@@ -16,6 +16,7 @@ from typing import Callable
 
 from assistant.audio.base import AudioOut
 from assistant.core.arbiter import AudioArbiter
+from assistant.core.standdown import StandDown
 from assistant.storage.reminders import ReminderStore
 from assistant.tts.base import TextToSpeech
 
@@ -24,6 +25,11 @@ log = logging.getLogger(__name__)
 # Spoken once on boot when the app was off as several reminders came due, so the
 # user hears one "while I was away" recap instead of a burst of separate alerts.
 _AWAY_PREAMBLE = "While I was away, {n} reminders came due."
+
+# After the retry budget is spent (e.g. audio held by a long conversation), defer
+# instead of deleting: a failure to *speak* must never destroy the reminder.
+# Bounded log noise (~one burst per window) beats data loss.
+_RETRY_DEFER_SECONDS = 60.0
 
 
 class ReminderScheduler:
@@ -37,6 +43,7 @@ class ReminderScheduler:
         poll_seconds: float = 1.0,
         max_attempts: int = 3,
         now: Callable[[], float] = time.time,
+        standdown: StandDown | None = None,
     ) -> None:
         self._store = store
         self._tts = tts
@@ -45,6 +52,9 @@ class ReminderScheduler:
         self._poll_seconds = poll_seconds
         self._max_attempts = max_attempts
         self._now = now
+        # While standing down, polls are skipped entirely — due reminders stay in
+        # the store and fire on the first poll after resume (delayed, never lost).
+        self._standdown = standdown or StandDown()
         # Per-reminder failure counter: a transient audio error retries on the next
         # poll instead of losing the reminder, but only up to _max_attempts so an
         # un-speakable one can't loop forever.
@@ -56,13 +66,14 @@ class ReminderScheduler:
     async def run(self) -> None:
         log.info("Reminder scheduler started (poll=%.1fs)", self._poll_seconds)
         while True:
-            due = self._store.due(self._now())
-            if self._first_poll and len(due) > 1:
-                await self._fire_summary(due)
-            else:
-                for reminder in due:
-                    await self._fire(reminder)
-            self._first_poll = False
+            if not self._standdown.active:
+                due = self._store.due(self._now())
+                if self._first_poll and len(due) > 1:
+                    await self._fire_summary(due)
+                else:
+                    for reminder in due:
+                        await self._fire(reminder)
+                self._first_poll = False
             await asyncio.sleep(self._poll_seconds)
 
     async def _fire(self, reminder) -> None:
@@ -73,14 +84,25 @@ class ReminderScheduler:
         except Exception as exc:  # noqa: BLE001 - one failure must not kill the loop
             log.error("Failed to fire reminder %s: %s", reminder.id, exc)
             self._attempts[reminder.id] = self._attempts.get(reminder.id, 0) + 1
-            # Retry on the next poll until we've exhausted the budget; only then drop
-            # the row, so a permanently un-speakable reminder can't loop forever.
+            # Retry on the next poll until we've exhausted the budget; only then
+            # defer the row, so a stuck reminder can't loop on every poll but is
+            # never lost — it self-heals the moment audio recovers.
             if self._attempts[reminder.id] >= self._max_attempts:
-                self._store.delete(reminder.id)
+                self._store.update_due(reminder.id, self._now() + _RETRY_DEFER_SECONDS)
                 del self._attempts[reminder.id]
         else:
-            self._store.delete(reminder.id)
+            self._settle(reminder)
             self._attempts.pop(reminder.id, None)
+
+    def _settle(self, reminder) -> None:
+        """After a successful fire, re-arm a recurring reminder to its next interval;
+        one-shot reminders are removed. Recurrence advances from *now*, so a reminder
+        that came due while the app was down fires once and re-arms to the future
+        rather than replaying every missed slot."""
+        if reminder.interval:
+            self._store.update_due(reminder.id, self._now() + reminder.interval)
+        else:
+            self._store.delete(reminder.id)
 
     async def _fire_summary(self, due) -> None:
         try:
@@ -94,4 +116,4 @@ class ReminderScheduler:
             log.error("Failed to announce catch-up summary: %s", exc)
         else:
             for reminder in due:
-                self._store.delete(reminder.id)
+                self._settle(reminder)

@@ -46,6 +46,16 @@ def descending(sample_rate: int) -> bytes:
     )
 
 
+def checkin(sample_rate: int) -> bytes:
+    """A soft two-note rising inflection: 'still here — anything else?'.
+
+    Played when the follow-up mic opens after a completed request. Gentler and
+    higher than the wake chime so it reads as a question, not a new session."""
+    return tone(sample_rate, freq=740.0, ms=150, amplitude=0.18) + tone(
+        sample_rate, freq=880.0, ms=120, amplitude=0.16
+    )
+
+
 def no_speech(sample_rate: int) -> bytes:
     """A single soft low note for 'woke but heard nothing' — gentle and neutral,
     distinct from the descending 'got it' cue so the two aren't confused."""

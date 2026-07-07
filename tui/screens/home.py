@@ -35,7 +35,7 @@ class HomeScreen(Screen):
             with Horizontal():
                 yield Button("Stop", id="btn-toggle-daemon", variant="error")
                 yield Button("Restart", id="btn-restart")
-            with Horizontal():
+            with Horizontal(id="row-ollama-restart"):
                 yield Button("Restart LLM", id="btn-ollama-restart", variant="warning")
             with Horizontal():
                 yield Button("Mute", id="vol-mute", variant="warning")

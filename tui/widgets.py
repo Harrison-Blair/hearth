@@ -240,7 +240,7 @@ class Stepper(Horizontal):
 
 
 class NavBar(Horizontal):
-    """Height-3 top bar: back button, screen title, daemon/ollama status dots."""
+    """Height-3 top bar: back button, screen title, daemon/LLM status dots."""
 
     DEFAULT_CSS = """
     NavBar { dock: top; height: 3; }
@@ -258,10 +258,10 @@ class NavBar(Horizontal):
         yield Static(self._title, classes="nav-title")
         yield Static("", classes="nav-dots")
 
-    def set_dots(self, daemon_up: bool, ollama_up: bool) -> None:
+    def set_dots(self, daemon_up: bool, llm_tier: str) -> None:
         dots = Text()
         dots.append("●", style="green" if daemon_up else "red")
-        dots.append("●", style="green" if ollama_up else "red")
+        dots.append("●", style={"up": "green", "degraded": "yellow"}.get(llm_tier, "red"))
         self.query_one(".nav-dots", Static).update(dots)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
