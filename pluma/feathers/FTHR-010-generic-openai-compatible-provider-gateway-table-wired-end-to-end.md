@@ -2,7 +2,7 @@
 id: FTHR-010
 title: "Generic OpenAI-compatible provider + gateway table, wired end-to-end"
 plumage: PLM-004
-status: pipping
+status: fledged
 priority: P2
 depends_on: []
 oversight: merge
