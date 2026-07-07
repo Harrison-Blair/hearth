@@ -104,6 +104,9 @@ async def test_happy_path_answers_with_attribution_and_progress():
     assert search.queries == ["latest news"]  # used the refined query, one round
     assert result.data["rounds"] == 1
     assert speaker.spoken == ["Searching for latest news."]
+    # The assess call's system prompt carries no persona today -> unvoiced, so it
+    # still passes through the pipeline's Revoicer seam.
+    assert not result.voiced
 
 
 async def test_insufficient_results_trigger_retry_with_new_query_and_remark():
@@ -146,6 +149,7 @@ async def test_assess_bad_json_falls_back_to_plain_summary():
     )
     assert result.success
     assert result.speech == "Fallback summary, according to bbc.com."
+    assert result.voiced  # the summary system prompt already carries persona
     # The fallback call is the plain (non-json) summarize path, and it must
     # still see the user's question so the summary answers it.
     summary_prompt, system = llm.prompts[-1]

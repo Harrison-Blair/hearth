@@ -113,14 +113,17 @@ class ScriptedLLM:
 
 
 class SayRecorder:
-    """An on_say channel that records spoken fillers and can fake a barge-in."""
+    """An on_say channel that records spoken fillers (and their voiced flag) and
+    can fake a barge-in."""
 
     def __init__(self, barged=False):
         self.spoken: list[str] = []
+        self.voiced: list[bool] = []
         self._barged = barged
 
-    async def __call__(self, text: str) -> bool:
+    async def __call__(self, text: str, *, voiced: bool = False) -> bool:
         self.spoken.append(text)
+        self.voiced.append(voiced)
         return self._barged
 
 
@@ -195,6 +198,7 @@ async def test_pre_reject_speaks_filler_and_redecides():
     result, skill = await orch.handle("echo hi", [], spoken=True, on_say=rec)
     assert result.speech == "echoed"
     assert rec.spoken == ["let me double check that"]  # only the reject filler
+    assert rec.voiced == [True]  # verify's feedback is already persona-flavored
     assert echo.calls == 1  # skill ran once (on the re-decide)
     assert llm.chat_tools_calls == 2
 
@@ -216,6 +220,7 @@ async def test_post_reject_speaks_filler_and_redecides():
     result, skill = await orch.handle("echo hi", [], spoken=True, on_say=rec)
     assert result.speech == "echoed"
     assert rec.spoken == ["that's not right"]
+    assert rec.voiced == [True]  # verify's feedback is already persona-flavored
     assert echo.calls == 2  # ran on iter0 and the re-decide
 
 
@@ -235,6 +240,7 @@ async def test_filler_silent_on_approve_and_rewrite():
     result, skill = await orch.handle("echo hi", [], spoken=True, on_say=rec)
     assert result.speech == "corrected answer"
     assert rec.spoken == []  # rewrite is a silent self-correction
+    assert result.voiced  # rewritten_speech is already persona-flavored
 
 
 async def test_pre_rewrite_replaces_the_pick():
@@ -270,6 +276,7 @@ async def test_post_rewrite_replaces_speech():
     orch = Orchestrator(llm, reg, tool_mode="native", verify=VerifyConfig())
     result, _ = await orch.handle("echo hi", [], spoken=True, on_say=SayRecorder())
     assert result.speech == "corrected answer"
+    assert result.voiced  # rewritten_speech is already persona-flavored
 
 
 async def test_pre_reject_barge_aborts_turn():
@@ -283,6 +290,7 @@ async def test_pre_reject_barge_aborts_turn():
     orch = Orchestrator(llm, reg, tool_mode="native", verify=VerifyConfig())
     result, skill = await orch.handle("echo hi", [], spoken=True, on_say=rec)
     assert rec.spoken == ["hold on"]
+    assert rec.voiced == [True]  # verify's feedback is already persona-flavored
     assert result.speech == ""  # aborted: nothing more spoken
     assert skill is None
     assert echo.calls == 0  # skill never ran

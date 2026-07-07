@@ -34,6 +34,7 @@ async def test_returns_llm_answer():
     )
     assert result.speech == "Paris."
     assert result.success
+    assert result.voiced  # the system prompt already carries persona -> skip revoicing
     # Empty history -> a single user message.
     assert llm.calls == [([{"role": "user", "content": "capital of France"}], "be brief")]
 
@@ -55,6 +56,7 @@ async def test_history_precedes_current_text():
 async def test_empty_answer_is_unsuccessful():
     result = await GeneralSkill(FakeLLM(""), "x").handle(Command("?"), Intent("general"))
     assert not result.success
+    assert not result.voiced  # the offline-failure string carries no persona
 
 
 async def test_llm_error_is_handled():
@@ -62,6 +64,7 @@ async def test_llm_error_is_handled():
     result = await skill.handle(Command("?"), Intent("general"))
     assert not result.success
     assert "couldn't reach" in result.speech.lower()
+    assert not result.voiced
 
 
 async def test_draft_is_restyled_not_reanswered():
@@ -71,6 +74,7 @@ async def test_draft_is_restyled_not_reanswered():
     intent = Intent("general", slots={"draft": "I cannot set recurring reminders."})
     result = await GeneralSkill(llm, "be brief").handle(Command("remind me every 15 min"), intent)
     assert result.speech == "Ugh, no — I can't do recurring reminders."
+    assert result.voiced  # restyled through the persona system prompt
     assert llm.complete_calls  # restyled via complete()
     assert llm.calls == []  # never re-answered via chat()
     # The draft (ground truth) is carried into the restyle prompt.
@@ -82,6 +86,7 @@ async def test_restyle_falls_back_to_draft_on_error():
     intent = Intent("general", slots={"draft": "I can't reach your calendar right now."})
     result = await GeneralSkill(llm, "x").handle(Command("what's on my calendar"), intent)
     assert result.speech == "I can't reach your calendar right now."  # verbatim, never lost
+    assert not result.voiced  # restyle failed -> the draft was never actually persona'd
 
 
 async def test_restyle_empty_falls_back_to_draft():
@@ -89,3 +94,4 @@ async def test_restyle_empty_falls_back_to_draft():
     intent = Intent("general", slots={"draft": "I cannot set recurring reminders."})
     result = await GeneralSkill(llm, "x").handle(Command("remind me every 15 min"), intent)
     assert result.speech == "I cannot set recurring reminders."
+    assert not result.voiced  # restyle came back blank -> the draft was never persona'd
