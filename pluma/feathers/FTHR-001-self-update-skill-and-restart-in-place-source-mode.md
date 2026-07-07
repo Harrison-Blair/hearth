@@ -122,19 +122,19 @@ reason, then made to pass.
   Fails now: module doesn't exist. (FC-6, FC-7 standalone)
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: A spoken update command (and at least one paraphrase) and the same command
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: A spoken update command (and at least one paraphrase) and the same command
       typed both route to the `update_self` intent and produce a confirmation prompt
       (`expects_reply=True`), not an immediate restart. (PLM-001 FC-1, FC-2, FC-3)
-- [ ] AC-3: An affirmative confirmation yields a non-empty in-character sign-off and
+- [x] AC-3: An affirmative confirmation yields a non-empty in-character sign-off and
       causes the pipeline to invoke the injected restart callable, strictly after the
       sign-off has been spoken. (PLM-001 FC-4)
-- [ ] AC-4: A negative, unrelated, or silent confirmation reply performs no restart
+- [x] AC-4: A negative, unrelated, or silent confirmation reply performs no restart
       (injected callable never called) and returns the assistant to normal listening.
       (PLM-001 FC-5)
-- [ ] AC-5: `restart_in_place()` re-execs the source-mode target
+- [x] AC-5: `restart_in_place()` re-execs the source-mode target
       `[sys.executable, "-m", "assistant.app"]` and the exercised path makes no
       network, git, or subprocess call. (PLM-001 FC-6, FC-7 standalone)
-- [ ] AC-6: The restart mechanism is injected into `VoicePipeline` (not hard-wired),
+- [x] AC-6: The restart mechanism is injected into `VoicePipeline` (not hard-wired),
       and `os.execv` is never called during the test suite. (testability seam)
-- [ ] AC-7: `pytest` is green and `ruff check assistant tests` is clean.
+- [x] AC-7: `pytest` is green and `ruff check assistant tests` is clean.
