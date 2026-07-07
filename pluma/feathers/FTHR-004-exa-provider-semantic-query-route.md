@@ -2,7 +2,7 @@
 id: FTHR-004
 title: "Exa provider + semantic query route"
 plumage: PLM-002
-status: hatching
+status: fledged
 priority: P1
 depends_on: [FTHR-003]
 oversight: merge
