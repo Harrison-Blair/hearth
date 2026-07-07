@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from assistant.core.events import Command, Intent, SkillResult
-from assistant.core.persona import with_persona
+from assistant.core.persona import canned, with_persona
 from assistant.llm.base import LLMProvider
 from assistant.skills.base import Skill
 
@@ -21,9 +21,16 @@ class GeneralSkill(Skill):
         # call), so it must not be offered as a callable tool.
         return []
 
-    def __init__(self, llm: LLMProvider, system_prompt: str, persona_suffix: str = "") -> None:
+    def __init__(
+        self,
+        llm: LLMProvider,
+        system_prompt: str,
+        persona_suffix: str = "",
+        persona_enabled: bool = False,
+    ) -> None:
         self._llm = llm
         self._system = with_persona(system_prompt, persona_suffix)
+        self._persona_enabled = persona_enabled
 
     async def handle(self, cmd: Command, intent: Intent) -> SkillResult:
         draft = intent.slots.get("draft")
@@ -35,9 +42,17 @@ class GeneralSkill(Skill):
             answer = await self._llm.chat(messages, system=self._system, label="answer")
         except Exception as exc:  # noqa: BLE001 - never crash the loop on an LLM error
             log.error("LLM completion failed: %s", exc)
-            return SkillResult(speech="Sorry, I couldn't reach my language model.", success=False)
+            return SkillResult(
+                speech=canned("llm_offline", enabled=self._persona_enabled),
+                success=False,
+                voiced=True,
+            )
         if not answer:
-            return SkillResult(speech="Sorry, I don't have an answer for that.", success=False)
+            return SkillResult(
+                speech=canned("no_answer", enabled=self._persona_enabled),
+                success=False,
+                voiced=True,
+            )
         return SkillResult(speech=answer, voiced=True)  # self._system already carries persona
 
     async def _restyle(self, draft: str) -> SkillResult:

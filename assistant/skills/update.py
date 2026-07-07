@@ -2,8 +2,8 @@
 
 Confirm-then-act, modeled on ReminderSkill's bulk-cancel round: ``handle()``
 never restarts directly, it only asks; ``handle_reply()`` acts on an
-affirmative. Sign-off lines are canned in Calcifer's voice — deliberately not
-an LLM call, since generating persona text in the moment before the process is
+affirmative. The sign-off is a canned() registry lookup — deliberately not an
+LLM call, since generating persona text in the moment before the process is
 replaced would be fragile and slow (see FTHR-001).
 """
 
@@ -12,17 +12,12 @@ from __future__ import annotations
 import random
 
 from assistant.core.events import Command, Intent, SkillResult
+from assistant.core.persona import canned
 from assistant.skills.base import Skill
 
 _NO_ARGS = {"type": "object", "properties": {}}
 
 _AFFIRMATIONS = ("yes", "yeah", "yep", "confirm", "do it", "go ahead", "sure")
-
-_SIGNOFFS = (
-    "Ugh, fine — dousing myself. Don't let the logs go cold.",
-    "Right, going dark for a second. Try not to miss me.",
-    "Fine, fine — reloading. Don't touch my wood while I'm gone.",
-)
 
 
 class UpdateSkill(Skill):
@@ -35,6 +30,12 @@ class UpdateSkill(Skill):
         },
     }
 
+    def __init__(
+        self, persona_enabled: bool = False, rng: random.Random | None = None
+    ) -> None:
+        self.persona_enabled = persona_enabled
+        self._rng = rng
+
     async def handle(self, cmd: Command, intent: Intent) -> SkillResult:
         return SkillResult(
             "I'll need to restart to pick up the update. Go ahead?",
@@ -45,4 +46,5 @@ class UpdateSkill(Skill):
         lowered = cmd.text.lower()
         if not any(word in lowered for word in _AFFIRMATIONS):
             return SkillResult("Okay, staying lit for now.")
-        return SkillResult(random.choice(_SIGNOFFS), restart=True)
+        signoff = canned("update_signoff", enabled=self.persona_enabled, rng=self._rng)
+        return SkillResult(signoff, restart=True, voiced=True)

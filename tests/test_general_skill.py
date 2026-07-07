@@ -1,3 +1,4 @@
+from assistant.core import persona
 from assistant.core.events import Command, Intent, Turn
 from assistant.skills.general import GeneralSkill
 
@@ -56,15 +57,34 @@ async def test_history_precedes_current_text():
 async def test_empty_answer_is_unsuccessful():
     result = await GeneralSkill(FakeLLM(""), "x").handle(Command("?"), Intent("general"))
     assert not result.success
-    assert not result.voiced  # the offline-failure string carries no persona
+    assert result.speech == "Sorry, I don't have an answer for that."
+    # FTHR-007: canned() at the speak site marks it voiced -> the Revoicer
+    # seam never tries to restyle a template.
+    assert result.voiced
 
 
 async def test_llm_error_is_handled():
     skill = GeneralSkill(FakeLLM(exc=RuntimeError("boom")), "x")
     result = await skill.handle(Command("?"), Intent("general"))
     assert not result.success
-    assert "couldn't reach" in result.speech.lower()
-    assert not result.voiced
+    assert result.speech == "Sorry, I couldn't reach my language model."
+    assert result.voiced
+
+
+async def test_llm_error_persona_enabled_carries_registry_variant():
+    skill = GeneralSkill(FakeLLM(exc=RuntimeError("boom")), "x", persona_enabled=True)
+    result = await skill.handle(Command("?"), Intent("general"))
+    assert not result.success
+    assert result.voiced
+    assert result.speech in persona._CANNED["llm_offline"][1]
+
+
+async def test_no_answer_persona_enabled_carries_registry_variant():
+    skill = GeneralSkill(FakeLLM(""), "x", persona_enabled=True)
+    result = await skill.handle(Command("?"), Intent("general"))
+    assert not result.success
+    assert result.voiced
+    assert result.speech in persona._CANNED["no_answer"][1]
 
 
 async def test_draft_is_restyled_not_reanswered():

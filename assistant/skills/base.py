@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 
 from assistant.core.events import Command, Intent, SkillResult
+from assistant.core.persona import canned
 
 
 def local_now() -> datetime:
@@ -33,6 +34,10 @@ class Skill(ABC):
     # {intent: {"description": str, "parameters": <JSON schema>}}. An intent with
     # no entry here still gets a generic single-text-argument tool so it routes.
     tool_specs: dict[str, dict] = {}
+    # Whether this skill instance should speak canned() persona variants; a
+    # skill that wants persona-flavored fallbacks sets this per instance (the
+    # same mechanism app.py already uses for persona_suffix).
+    persona_enabled: bool = False
 
     @abstractmethod
     async def handle(self, cmd: Command, intent: Intent) -> SkillResult:
@@ -61,7 +66,11 @@ class Skill(ABC):
 
         Only skills that ask for a reply need to override this; the default is a
         generic failure so a stray reply never silently succeeds."""
-        return SkillResult(speech="Sorry, I wasn't expecting a reply.", success=False)
+        return SkillResult(
+            speech=canned("unexpected_reply", enabled=self.persona_enabled),
+            success=False,
+            voiced=True,
+        )
 
 
 class SkillRegistry:
