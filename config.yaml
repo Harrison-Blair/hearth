@@ -94,6 +94,9 @@ web_search:
   max_snippet_chars: 500
   max_rounds: 2
   progress_updates: true
+  tavily_api_key: ""
+  tavily_endpoint: https://api.tavily.com/search
+  exa_api_key: ""
 weather:
   latitude: 33.749
   longitude: -84.38798

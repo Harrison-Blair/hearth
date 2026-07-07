@@ -118,6 +118,9 @@ web_search:
   max_snippet_chars: 500  # truncate each result body
   max_rounds: 2           # agentic search rounds before giving up
   progress_updates: true  # speak "searching..." style updates mid-turn
+  tavily_api_key: ""      # set via ASSISTANT_WEB_SEARCH__TAVILY_API_KEY, not here
+  tavily_endpoint: "https://api.tavily.com/search"
+  exa_api_key: ""         # reserved for FTHR-004, set via env var, not here
 
 weather:
   latitude: 33.749                    # home location (Atlanta, GA)

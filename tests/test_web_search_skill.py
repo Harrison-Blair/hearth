@@ -1,8 +1,11 @@
 import asyncio
 import json
 
+import httpx
+
 from assistant.core.events import Command, Intent
 from assistant.search.base import SearchResult
+from assistant.search.tavily import TavilySearch
 from assistant.skills.web_search import _ROUTE_FALLBACK_NOTICE, WebSearchSkill
 
 
@@ -355,6 +358,41 @@ async def test_no_keyed_provider_configured_is_keyless_only_with_no_notice():
     assert keyless.queries == ["latest news"]
     assert _ROUTE_FALLBACK_NOTICE not in speaker.spoken
     assert speaker.spoken == ["Searching for latest news."]
+
+
+async def test_stubbed_tavily_response_end_to_end_produces_sourced_answer(monkeypatch):
+    # PLM-002 AC-1 path: a factual query through the real TavilySearch provider
+    # (httpx stubbed, no network/keys) end-to-end through WebSearchSkill.
+    orig = httpx.AsyncClient
+
+    def handler(request):
+        return httpx.Response(200, json={
+            "answer": "The Eiffel Tower is 330 meters tall.",
+            "results": [{
+                "title": "Eiffel Tower",
+                "url": "https://en.wikipedia.org/wiki/Eiffel_Tower",
+                "content": "The Eiffel Tower stands 330 meters tall.",
+            }],
+        })
+
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kw: orig(transport=httpx.MockTransport(handler), **kw),
+    )
+    tavily = TavilySearch(api_key="test-key")
+    llm = FakeLLM([
+        _refine("eiffel tower height", "factual"),
+        _answer("It's 330 meters tall, according to tavily."),
+    ])
+    result = await _skill(FakeSearch([]), llm, routes={"factual": tavily}).handle(
+        Command("search the web for the eiffel tower height"), Intent("web_search")
+    )
+    assert result.success
+    assert "according to" in result.speech.lower()
+    # The assess prompt saw both the page result and the synthesized answer block.
+    assess_prompt = next(p for p in llm.prompts if p[1] is not None)[0]
+    assert "en.wikipedia.org" in assess_prompt
+    assert "source: tavily" in assess_prompt
 
 
 async def test_tavily_answer_block_injection_is_neutralized_in_assess_prompt():
