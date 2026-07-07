@@ -38,7 +38,7 @@ class GeneralSkill(Skill):
             return SkillResult(speech="Sorry, I couldn't reach my language model.", success=False)
         if not answer:
             return SkillResult(speech="Sorry, I don't have an answer for that.", success=False)
-        return SkillResult(speech=answer)
+        return SkillResult(speech=answer, voiced=True)  # self._system already carries persona
 
     async def _restyle(self, draft: str) -> SkillResult:
         """Re-voice the model's own direct answer in persona without changing its
@@ -56,4 +56,6 @@ class GeneralSkill(Skill):
         except Exception as exc:  # noqa: BLE001 - never crash the loop on an LLM error
             log.error("LLM restyle failed: %s", exc)
             return SkillResult(speech=draft)
-        return SkillResult(speech=styled.strip() if styled and styled.strip() else draft)
+        if styled and styled.strip():
+            return SkillResult(speech=styled.strip(), voiced=True)  # persona system prompt used
+        return SkillResult(speech=draft)

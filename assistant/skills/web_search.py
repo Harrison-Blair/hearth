@@ -271,6 +271,7 @@ class WebSearchSkill(Skill):
         return SkillResult(
             speech=summary,
             data={"query": query, "results": [r.url for r in results]},
+            voiced=True,  # self._summary_system already carries persona
         )
 
     async def _say_soon(self, text: str) -> None:

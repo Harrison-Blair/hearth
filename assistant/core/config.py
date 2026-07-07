@@ -153,6 +153,11 @@ class PersonaConfig(BaseModel):
     # formatting, or JSON structured output. Set false for the plain voice.
     enabled: bool = True
     strength: str = "terse"  # terse | expansive
+    # Live-restyle a plain (non-persona'd) skill reply in the persona's voice at
+    # the pipeline's speak choke point (core/revoice.py:Revoicer). False = plain
+    # replies stay plain even with persona enabled.
+    revoice_enabled: bool = True
+    revoice_timeout_s: float = 5.0  # bounds the live revoice LLM call
 
 
 class AgentConfig(BaseModel):

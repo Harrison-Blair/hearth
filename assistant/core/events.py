@@ -60,3 +60,8 @@ class SkillResult:
     success: bool = True
     expects_reply: bool = False
     restart: bool = False
+    # True when ``speech`` is already persona-flavored (e.g. an LLM call whose
+    # system prompt carries the persona suffix) and must not be re-styled by the
+    # pipeline's Revoicer seam. False (the default) means plain/deterministic
+    # text that still needs revoicing when persona is on.
+    voiced: bool = False

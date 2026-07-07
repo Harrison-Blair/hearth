@@ -86,7 +86,7 @@ class Orchestrator:
         history: list[Turn],
         *,
         spoken: bool,
-        on_say: Callable[[str], Awaitable[bool]] | None = None,
+        on_say: Callable[..., Awaitable[bool]] | None = None,
     ) -> tuple[SkillResult | None, Skill | None]:
         """Route one utterance to a spoken result. Returns ``(result, skill)`` where
         ``skill`` is the handler (so the caller can route a follow-up to it), or
@@ -255,6 +255,9 @@ class Orchestrator:
                                     data=result.data,
                                     success=result.success,
                                     expects_reply=result.expects_reply,
+                                    # rewritten_speech is already persona-flavored
+                                    # (see core/verify.py) -> skip the Revoicer seam.
+                                    voiced=True,
                                 )
                                 best_draft = result.speech
                             # approve (or fail-open None / empty rewrite) -> speak result.speech
@@ -298,7 +301,7 @@ class Orchestrator:
         return await self._fall_back_turn(text, history, spoken=spoken)
 
     async def _speak_filler(
-        self, verdict: Verdict, on_say: Callable[[str], Awaitable[bool]] | None
+        self, verdict: Verdict, on_say: Callable[..., Awaitable[bool]] | None
     ) -> bool:
         """Speak a reject's filler via the mid-turn channel; return True if the user
         barged in (the caller aborts the turn). Silent when spoken feedback is off,
@@ -307,7 +310,9 @@ class Orchestrator:
             return False
         if not verdict.feedback or on_say is None:
             return False
-        return bool(await on_say(verdict.feedback))
+        # feedback is already persona-flavored (see core/verify.py) -> skip the
+        # pipeline's Revoicer seam.
+        return bool(await on_say(verdict.feedback, voiced=True))
 
     async def _fall_back_turn(
         self, text: str, history: list[Turn], *, spoken: bool, draft: str | None = None
