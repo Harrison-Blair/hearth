@@ -50,6 +50,29 @@ class FakeOut:
         self.played.append(audio)
 
 
+class FakeRevoicer:
+    """Records the plain text it was asked to restyle and returns a fixed reply."""
+
+    def __init__(self, styled="STYLED"):
+        self.styled = styled
+        self.calls = []
+
+    async def revoice(self, text):
+        self.calls.append(text)
+        return self.styled
+
+
+class FallbackRevoicer:
+    """Mimics a Revoicer whose circuit is open: always falls back to plain text."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def revoice(self, text):
+        self.calls.append(text)
+        return text
+
+
 def _watcher(provider, state, tts=None, out=None, *, enabled=True, now=lambda: NOW, **kw):
     kw.setdefault("blocklist", EventBlocklist(state, config_patterns=[]))
     return CalendarWatcher(
@@ -274,6 +297,40 @@ async def test_standdown_skips_announcements(tmp_path):
     except asyncio.CancelledError:
         pass
     assert tts.spoke == ["You have Dentist in 5 minutes."]
+    state.close()
+
+
+async def test_announcement_is_revoiced_before_tts(tmp_path):
+    state = CalendarStateStore(str(tmp_path / "s.db"))
+    tts = FakeTTS()
+    revoicer = FakeRevoicer(styled="Arr, Dentist be in ten minutes!")
+    provider = FakeProvider([_event("ev1", "Dentist", NOW + timedelta(minutes=10))])
+    await _run_polls(_watcher(provider, state, tts, revoicer=revoicer))
+    assert revoicer.calls == ["You have Dentist in 10 minutes."]
+    assert tts.spoke == ["Arr, Dentist be in ten minutes!"]
+    state.close()
+
+
+async def test_no_revoicer_is_byte_identical_to_today(tmp_path):
+    state = CalendarStateStore(str(tmp_path / "s.db"))
+    tts = FakeTTS()
+    provider = FakeProvider([_event("ev1", "Dentist", NOW + timedelta(minutes=10))])
+    await _run_polls(_watcher(provider, state, tts))
+    assert tts.spoke == ["You have Dentist in 10 minutes."]
+    state.close()
+
+
+async def test_dedupe_unaffected_when_revoice_falls_back_to_plain(tmp_path):
+    # A failing/circuit-open revoicer falls back to the plain text; the event must
+    # still be marked announced so it is not repeated on the next poll.
+    state = CalendarStateStore(str(tmp_path / "s.db"))
+    tts = FakeTTS()
+    revoicer = FallbackRevoicer()
+    provider = FakeProvider([_event("ev1", "Dentist", NOW + timedelta(minutes=10))])
+    watcher = _watcher(provider, state, tts, revoicer=revoicer)
+    await _run_polls(watcher, n=2)
+    assert tts.spoke == ["You have Dentist in 10 minutes."]  # spoken once, not repeated
+    assert state.was_announced("ev1", (NOW + timedelta(minutes=10)).timestamp())
     state.close()
 
 

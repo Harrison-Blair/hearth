@@ -22,6 +22,18 @@ class FakeOut:
         self.played.append(audio)
 
 
+class FakeRevoicer:
+    """Records the plain text it was asked to restyle and returns a fixed reply."""
+
+    def __init__(self, styled="STYLED"):
+        self.styled = styled
+        self.calls = []
+
+    async def revoice(self, text):
+        self.calls.append(text)
+        return self.styled
+
+
 async def _run_until(predicate, *, tries=20, delay=0.02):
     for _ in range(tries):
         if predicate():
@@ -319,4 +331,83 @@ async def test_standdown_preserves_boot_catchup():
 
     assert len(out.played) == 1  # one combined announcement, not two
     assert tts.spoke[0].startswith("While I was away, 2 reminders came due.")
+    store.close()
+
+
+async def test_due_reminder_is_revoiced_before_tts():
+    store = ReminderStore(":memory:")
+    store.add(50.0, "past", created_at=0.0)
+    tts, out = FakeTTS(), FakeOut()
+    revoicer = FakeRevoicer(styled="Ahoy, past be due!")
+    sched = ReminderScheduler(
+        store, tts, out, AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0,
+        revoicer=revoicer,
+    )
+
+    task = asyncio.create_task(sched.run())
+    await _run_until(lambda: out.played)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert revoicer.calls == ["past"]
+    assert tts.spoke == ["Ahoy, past be due!"]
+    assert out.played == [b"Ahoy, past be due!"]
+    store.close()
+
+
+async def test_catch_up_summary_revoiced_exactly_once():
+    store = ReminderStore(":memory:")
+    store.add(10.0, "Reminder: call mom.", created_at=0.0)
+    store.add(20.0, "Your timer is done.", created_at=0.0)
+    tts, out = FakeTTS(), FakeOut()
+    revoicer = FakeRevoicer(styled="Ahoy, ye missed two reminders!")
+    sched = ReminderScheduler(
+        store, tts, out, AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0,
+        revoicer=revoicer,
+    )
+
+    task = asyncio.create_task(sched.run())
+    await _run_until(lambda: out.played)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    # Exactly one revoice call over the composed summary, not one per reminder.
+    assert len(revoicer.calls) == 1
+    composed = revoicer.calls[0]
+    assert composed.startswith("While I was away, 2 reminders came due.")
+    assert "Reminder: call mom." in composed
+    assert "Your timer is done." in composed
+    assert tts.spoke == ["Ahoy, ye missed two reminders!"]
+    store.close()
+
+
+async def test_no_revoicer_is_byte_identical_to_today():
+    # revoicer=None must keep spoken output exactly what it was before this feather.
+    store = ReminderStore(":memory:")
+    store.add(10.0, "Reminder: call mom.", created_at=0.0)
+    store.add(20.0, "Your timer is done.", created_at=0.0)
+    tts, out = FakeTTS(), FakeOut()
+    sched = ReminderScheduler(
+        store, tts, out, AudioArbiter(), poll_seconds=0.01, now=lambda: 100.0,
+    )
+
+    task = asyncio.create_task(sched.run())
+    await _run_until(lambda: out.played)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert len(out.played) == 1
+    summary = tts.spoke[0]
+    assert summary.startswith("While I was away, 2 reminders came due.")
+    assert "Reminder: call mom." in summary
+    assert "Your timer is done." in summary
     store.close()

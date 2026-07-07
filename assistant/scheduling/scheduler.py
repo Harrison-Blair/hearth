@@ -16,6 +16,7 @@ from typing import Callable
 
 from assistant.audio.base import AudioOut
 from assistant.core.arbiter import AudioArbiter
+from assistant.core.revoice import Revoicer
 from assistant.core.standdown import StandDown
 from assistant.storage.reminders import ReminderStore
 from assistant.tts.base import TextToSpeech
@@ -44,6 +45,7 @@ class ReminderScheduler:
         max_attempts: int = 3,
         now: Callable[[], float] = time.time,
         standdown: StandDown | None = None,
+        revoicer: Revoicer | None = None,
     ) -> None:
         self._store = store
         self._tts = tts
@@ -52,6 +54,7 @@ class ReminderScheduler:
         self._poll_seconds = poll_seconds
         self._max_attempts = max_attempts
         self._now = now
+        self._revoicer = revoicer
         # While standing down, polls are skipped entirely — due reminders stay in
         # the store and fire on the first poll after resume (delayed, never lost).
         self._standdown = standdown or StandDown()
@@ -79,8 +82,11 @@ class ReminderScheduler:
     async def _fire(self, reminder) -> None:
         try:
             log.info("Reminder due: %r", reminder.speech)
+            text = reminder.speech
+            if self._revoicer is not None:
+                text = await self._revoicer.revoice(text)
             async with self._arbiter.hold("reminder"):
-                await self._audio_out.play(await self._tts.synthesize(reminder.speech))
+                await self._audio_out.play(await self._tts.synthesize(text))
         except Exception as exc:  # noqa: BLE001 - one failure must not kill the loop
             log.error("Failed to fire reminder %s: %s", reminder.id, exc)
             self._attempts[reminder.id] = self._attempts.get(reminder.id, 0) + 1
@@ -108,6 +114,8 @@ class ReminderScheduler:
         try:
             log.info("Catch-up: %d reminders came due while away", len(due))
             text = _AWAY_PREAMBLE.format(n=len(due)) + " " + " ".join(r.speech for r in due)
+            if self._revoicer is not None:
+                text = await self._revoicer.revoice(text)
             async with self._arbiter.hold("reminder"):
                 await self._audio_out.play(await self._tts.synthesize(text))
         except Exception as exc:  # noqa: BLE001 - one failure must not kill the loop
