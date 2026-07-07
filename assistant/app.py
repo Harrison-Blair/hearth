@@ -37,6 +37,7 @@ from assistant.scheduling.scheduler import ReminderScheduler
 from assistant.search.base import SearchProvider
 from assistant.search.ddgs_provider import DdgsSearch
 from assistant.search.multi import MultiSearch
+from assistant.search.tavily import TavilySearch
 from assistant.search.wikipedia import WikipediaSearch
 from assistant.skills.base import SkillRegistry
 from assistant.skills.calendar import CalendarSkill
@@ -57,9 +58,11 @@ from assistant.weather.open_meteo import OpenMeteoWeather
 log = logging.getLogger("assistant")
 
 
-def _build_search(cfg: WebSearchConfig) -> SearchProvider:
-    """Construct the configured provider fan-out. Unknown names are skipped with
-    a warning; an empty list falls back to Wikipedia so search never disappears."""
+def _build_search(cfg: WebSearchConfig) -> tuple[SearchProvider, dict[str, SearchProvider]]:
+    """Construct the keyless provider fan-out (unchanged) plus the routed
+    keyed-provider map: query_type -> AI-first provider (Tavily now, Exa via
+    FTHR-004). A route is present only when its API key is configured; an
+    empty map means keyless-only behavior, identical to today."""
     factories = {
         "wikipedia": lambda: WikipediaSearch(
             language=cfg.language,
@@ -88,9 +91,22 @@ def _build_search(cfg: WebSearchConfig) -> SearchProvider:
     log.info(
         "Web search: %s (agentic, max_rounds=%d)", "+".join(names), cfg.max_rounds
     )
-    if len(providers) == 1:
-        return providers[0]
-    return MultiSearch(providers, max_results=cfg.max_results)
+    keyless = providers[0] if len(providers) == 1 else MultiSearch(providers, max_results=cfg.max_results)
+
+    routes: dict[str, SearchProvider] = {}
+    if cfg.tavily_api_key:
+        routes["factual"] = TavilySearch(
+            api_key=cfg.tavily_api_key,
+            endpoint=cfg.tavily_endpoint,
+            timeout=cfg.timeout,
+            max_snippet_chars=cfg.max_snippet_chars,
+        )
+    if not routes:
+        log.warning(
+            "No web search API keys configured (tavily_api_key empty); using "
+            "keyless search only"
+        )
+    return keyless, routes
 
 
 def _build_llm(cfg: LlmConfig) -> LLMProvider:
@@ -227,7 +243,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
                 config.llm.model,
             )
     store = ReminderStore(config.storage.db_path)
-    search = _build_search(config.web_search)
+    search, search_routes = _build_search(config.web_search)
     weather = OpenMeteoWeather(
         forecast_endpoint=config.weather.forecast_endpoint,
         geocoding_endpoint=config.weather.geocoding_endpoint,
@@ -254,6 +270,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         speaker=Speaker(tts, out),
         progress_updates=config.web_search.progress_updates,
         persona_suffix=persona_suffix,
+        routes=search_routes,
     ))
     registry.register(WeatherSkill(
         weather,
@@ -451,6 +468,8 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
             calendar_state.close()
         await llm.aclose()
         await search.aclose()
+        for route_provider in search_routes.values():
+            await route_provider.aclose()
         await weather.aclose()
         if calendar_provider is not None:
             await calendar_provider.aclose()

@@ -43,9 +43,16 @@ _MAX_REMARK_CHARS = 140  # a remark is spoken aloud: cap the sink
 
 _RETRY_REMARK = "That wasn't quite it — let me try again."
 
+# Spoken when a routed keyed provider fails (backend error, missing key) and the
+# turn falls back to the keyless tier within the same round.
+_ROUTE_FALLBACK_NOTICE = "That search is having trouble — let me check elsewhere."
+
 _REFINE_PROMPT = (
-    "Rewrite the user's spoken request as a concise web search query. "
-    'Reply with ONLY a JSON object: {{"query": "<query>"}}.\n'
+    "Rewrite the user's spoken request as a concise web search query and classify "
+    "it. Reply with ONLY a JSON object: "
+    '{{"query": "<query>", "query_type": "factual" or "semantic"}}. '
+    '"factual" is for concrete facts, current events, or prices; "semantic" is '
+    "for open-ended or opinion-based questions.\n"
     'Request: "{text}"'
 )
 
@@ -146,13 +153,17 @@ class WebSearchSkill(Skill):
         speaker: Speaker | None = None,
         progress_updates: bool = True,
         persona_suffix: str = "",
+        routes: dict[str, SearchProvider] | None = None,
     ) -> None:
-        self._search = search
+        self._search = search  # the keyless tier: always tried when no route applies
         self._llm = llm
         self._count = count
         self._max_rounds = max(1, max_rounds)
         self._speaker = speaker if progress_updates else None
         self._pending_speech: asyncio.Task | None = None
+        # query_type -> keyed provider (e.g. "factual" -> Tavily). "semantic"
+        # falls back to "factual" until FTHR-004 registers Exa there.
+        self._routes = routes or {}
         # Persona rides only the plain-text fallback summary. The primary answer
         # comes from the JSON `_assess` call, which must stay structured/neutral.
         self._summary_system = with_persona(_SUMMARY_SYSTEM, persona_suffix)
@@ -167,12 +178,13 @@ class WebSearchSkill(Skill):
             await self._flush_speech()
 
     async def _handle(self, cmd: Command) -> SkillResult:
-        query = await self._refine(cmd.text)
+        query, query_type = await self._refine(cmd.text)
+        route = query_type if query_type in self._routes else "factual"
         progress = f"Searching for {query}."
         results: list[SearchResult] = []
         for round_no in range(1, self._max_rounds + 1):
             await self._say_soon(progress)
-            results = await self._search.search(query, count=self._count)
+            results = await self._routed_search(query, route)
             if not results:
                 break
             verdict = await self._assess(cmd.text, results)
@@ -195,6 +207,21 @@ class WebSearchSkill(Skill):
         if not results:
             return SkillResult("I couldn't find anything about that.", success=False)
         return SkillResult("I couldn't find a good answer to that.", success=False)
+
+    async def _routed_search(self, query: str, route: str) -> list[SearchResult]:
+        """Search the routed keyed provider first; on failure (backend error,
+        missing key), speak a brief notice and retry the same query on the
+        keyless tier within this round. No keyed provider configured for the
+        route -> keyless tier directly, no notice (identical to today)."""
+        provider = self._routes.get(route)
+        if provider is None:
+            return await self._search.search(query, count=self._count)
+        try:
+            return await provider.search(query, count=self._count)
+        except Exception as exc:  # noqa: BLE001 - fall back to the keyless tier
+            log.warning("Routed search provider %r failed: %s", route, exc)
+            await self._say_soon(_ROUTE_FALLBACK_NOTICE)
+            return await self._search.search(query, count=self._count)
 
     async def _assess(self, question: str, results: list[SearchResult]) -> _Verdict | None:
         prompt = _ASSESS_PROMPT.format(question=question, blocks=self._result_blocks(results))
@@ -253,7 +280,7 @@ class WebSearchSkill(Skill):
             task, self._pending_speech = self._pending_speech, None
             await task
 
-    async def _refine(self, text: str) -> str:
+    async def _refine(self, text: str) -> tuple[str, str]:
         try:
             data = json.loads(
                 await self._llm.complete(
@@ -261,11 +288,14 @@ class WebSearchSkill(Skill):
                 )
             )
             query = data.get("query")
+            query_type = data.get("query_type")
+            if query_type not in ("factual", "semantic"):
+                query_type = "factual"
             if isinstance(query, str) and query.strip():
-                return query.strip()
+                return query.strip(), query_type
         except Exception as exc:  # noqa: BLE001 - refine is best-effort; fall back to raw text
             log.warning("Query refine failed: %s; using raw transcript", exc)
-        return self._strip_triggers(text)
+        return self._strip_triggers(text), "factual"
 
     @staticmethod
     def _strip_triggers(text: str) -> str:

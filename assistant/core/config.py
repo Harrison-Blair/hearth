@@ -209,6 +209,11 @@ class WebSearchConfig(BaseModel):
     max_snippet_chars: int = 500  # truncate each result body (latency + injection surface)
     max_rounds: int = 2  # agentic search rounds before giving up
     progress_updates: bool = True  # speak "searching..." style updates mid-turn
+    # AI-first providers (keyed). Empty = disabled, keyless-only fan-out above.
+    # Real keys arrive only via ASSISTANT_WEB_SEARCH__TAVILY_API_KEY / __EXA_API_KEY.
+    tavily_api_key: str = ""
+    tavily_endpoint: str = "https://api.tavily.com/search"
+    exa_api_key: str = ""  # reserved for FTHR-004
 
 
 class WeatherConfig(BaseModel):
