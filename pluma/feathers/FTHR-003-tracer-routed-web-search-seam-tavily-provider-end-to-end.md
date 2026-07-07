@@ -97,16 +97,16 @@ unchanged code and confirm they FAIL for the expected reason; (3) implement unti
 they pass.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and
+- [x] AC-1: The tests listed above were observed failing before implementation and
       pass after.
-- [ ] AC-2: With a stubbed Tavily response, a factual query end-to-end through
+- [x] AC-2: With a stubbed Tavily response, a factual query end-to-end through
       `WebSearchSkill` produces a spoken answer with source attribution, consuming
       the Tavily results + fenced answer block (PLM-002 AC-1 path).
-- [ ] AC-3: Routed-provider failure yields the spoken notice and a same-round
+- [x] AC-3: Routed-provider failure yields the spoken notice and a same-round
       keyless-tier answer; with no keys configured behavior matches today's plus
       the one-time boot warning (PLM-002 AC-4).
-- [ ] AC-4: Injection content in Tavily answer/snippets is neutralized before the
+- [x] AC-4: Injection content in Tavily answer/snippets is neutralized before the
       assess prompt (PLM-002 AC-5).
-- [ ] AC-5: No key appears in any committed file; keys land via env only
+- [x] AC-5: No key appears in any committed file; keys land via env only
       (PLM-002 AC-6); `ruff check assistant tests` and the full suite pass with no
       network (PLM-002 AC-7).
