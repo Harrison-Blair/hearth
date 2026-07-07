@@ -1,42 +1,42 @@
 ---
-generated: 2026-07-07T07:06:00Z
-commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
+generated: 2026-07-07T22:56:23Z
+commit: 58fb2ba9bbeefc5db7d530261bcb3450573048fa
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Context Index
 
-Regenerated context for `personal-assistant` — an offline-first voice assistant (daemon `assistant/` + monitor TUI `tui/`). This regeneration gives the **web-search capability** special attention (providers in `assistant/search/`, the agentic `WebSearchSkill`, `WebSearchConfig`, `_build_search` wiring, and the search test seams) because upcoming work adds AI-first search adapters. Load docs by the `Read this when:` lines below.
+Regenerated context for the offline-first voice assistant ("Calcifer") + monitor TUI at commit `58fb2ba`. Reflects the three most recent plumages: PLM-001 (self-update/restart-in-place), PLM-002 (AI-first web search: Tavily/Exa + query routing), PLM-003 (persona-flavored revoice seam + canned templates). The upcoming feature targets the **LLM provider path** (`assistant/llm/`, `app.py:_build_llm`, `LlmConfig`); that path is given first-class coverage in architecture, modules, conventions, and data-model.
 
 ## architecture.md
-Explains the single async pipeline loop, interface-per-capability, `app.py` as sole composition root, the LLM tool-calling router + verification loop, remote-as-accelerator fallback chains, shared `StandDown`/`AudioArbiter` state, and the one-directional TUI supervisor. Includes a dedicated section on the web-search capability's architecture and how a new provider slots in.
-Read this when: you need the mental model of how components fit, why the graph stays acyclic, or where the search path sits in the whole system before changing it.
+The runtime as a whole: the async pipeline loop (wake→record→STT→route→skill→speak), the orchestrator tool-calling loop, the single composition root, the interface-per-capability seams, shared runtime state, and how PLM-001/002/003 thread through it — plus a dedicated LLM-path section (the three providers + `_build_llm` dispatch).
+Read this when: you need the big picture, how subsystems connect, why a seam exists, or where the LLM/routing/persona flow lives before making a cross-cutting change.
 
 ## modules.md
-Directory-by-directory map (root, `assistant/` broken into app/core/audio/io/search/skills/services/stubs, `tui/`, `training/`+`models/`, `packaging/`, `pluma/`+`docs/`, `tests/`, `.github/`) with key files and a "Look here for:" pointer each. Calls out `assistant/search/` and `assistant/skills/web_search.py` as the search focus.
-Read this when: you know what you need to change but not which files/directory hold it.
+Directory-by-directory map of both packages (`assistant/`, `tui/`) plus training, packaging, planning specs, and docs — each with purpose, key files, and a "look here for" pointer. The `assistant/llm/` entry is flagged high-priority.
+Read this when: you need to locate the file/module that owns a concern, or orient before diving into one subsystem.
 
 ## conventions.md
-The rules a change must follow: async-everywhere, ABC-in-`base.py`, `app.py`-only wiring, primitives-not-`Config`, config-as-single-source-of-truth, graceful degradation, remote-behind-interface, skill plug-in routing, prompt-injection defense for web content, persona-scoped-to-speech, logging/`@@STATE`, and the 40×30 touch-first TUI rules.
-Read this when: you are writing code and want it to match existing style/patterns — especially the injection-defense and provider conventions a new search backend must honor.
+The rules to follow: async-everywhere, DI-by-primitives with `app.py` as the only wiring point, config-as-source-of-truth with `ASSISTANT_*` overrides, fail-open degradation, the LLM provider conventions (pooled httpx, retry classification, fallback semantics), the persona/revoice invariants (persona-free routing, digit guard, `voiced` bypass), storage/scheduling patterns, and TUI/style/tooling rules.
+Read this when: writing or reviewing code — especially adding an LLM provider, a skill, a config field, or anything touching persona/revoice.
 
 ## data-model.md
-Every core type and schema: `core/events.py` records, `Verdict`, `ChatResponse`, the **`SearchResult`/`SearchProvider` seam**, NLU/calendar/weather dataclasses, the SQLite `reminders`/`announced_events`/`blocked_titles` schemas, and all `*Config` models — with `WebSearchConfig` fields fully enumerated.
-Read this when: you need exact field names/types/defaults — particularly to shape a new `SearchResult` mapping or add a keyed-provider config field.
+Every core type: `core/events.py` pipeline records (`SkillResult` with `restart`/`voiced`), the LLM contract (`LLMProvider`, `ChatResponse`, `LLMResponseError.retryable`, provider constructor signatures), verify/verdict, capability payloads (search/weather/calendar/timespec), the full `Config`/`LlmConfig` field lists, and the two SQLite schemas.
+Read this when: you need a field name, a constructor signature, the exact `LlmConfig` surface, or a DB table shape.
 
 ## dependencies.md
-Third-party libs, external services, and system tools with usage notes, organized by concern and mapped to the per-capability optional extras. Includes a "web-search dependency picture" (today ddgs+httpx, keyless; AI-first adds httpx calls + an API key per provider, SearXNG noted as a roadmap keyless option).
-Read this when: you are adding/removing a dependency, choosing how a new provider makes HTTP calls, or reasoning about extras/packaging impact.
+Third-party libs deduplicated by the per-capability extras table (tts/wake/stt/vad/llm/nlu/scheduling/search/gcal/aec/tui), external services (Ollama, OpenCode Zen, Tavily/Exa, Google Calendar, Open-Meteo) as optional accelerators behind local fallbacks, native/system deps, PyInstaller packaging, and the isolated ROCm training stack. Python pinned to 3.12.
+Read this when: adding a dependency, choosing an extra, wiring a new external service, or debugging a native/build/version issue.
 
 ## entry-points.md
-How to run/build/test the project (daemon, TUI, install, PyInstaller release, CI) and the public interfaces execution flows through: `VoicePipeline`, `Orchestrator`, `SkillRegistry`/`Skill`, `LLMProvider`, control channel, and the **web-search interfaces (`SearchProvider` ABC, `WebSearchSkill`, and `_build_search` — the function a new provider must be added to)**.
-Read this when: you need to run something, or you need the signature/entry seam for the pipeline, a skill, or the search capability.
+How to run/test/build/provision (commands), the daemon composition path (`main`/`_run`/`_build_llm` — where a new LLM provider is registered), the capability ABCs to implement, the skill interface, scheduling/storage/self-update entry points, TUI supervision, and training CLIs.
+Read this when: running or building the project, or you need the exact function/interface where execution enters a subsystem you're changing.
 
 ## testing.md
-Suite structure, `asyncio_mode=auto`, and the `httpx.MockTransport`/`FakeX` stubbing patterns; the core/capabilities/TUI/eval groupings; the 40-column overflow gate; and the offline eval harness. Devotes a section to the **four search test files and the exact seam-contract a new provider's tests must satisfy**.
-Read this when: you are writing or running tests — above all when adding a search provider and need to mirror `test_wikipedia_provider.py`/`test_multi_search.py`/`test_web_search_skill.py`.
+pytest + `asyncio_mode=auto`, offline-by-stub. The httpx.MockTransport wire pattern and the specific LLM provider test seams (`test_zen_provider(_guards)`, `test_ollama_provider`, `test_fallback_provider`, `tests/eval/`), the spy-TTS persona-flavor invariant, the 40×30 TUI overflow gate, and coverage by area — plus the test-first discipline every feather follows.
+Read this when: writing tests for a change (start from the nearest existing pattern), especially LLM-provider or persona work, or verifying what's already covered.
 
 ## domain.md
-Glossary of the project's vocabulary — voice pipeline, routing/reasoning, calendar/scheduling, wake-word training, deployment/specs — with a dedicated **web-search cluster** (AI-first search, fan-out, round-robin merge, assess loop, injection neutralization, SearXNG).
-Read this when: a term in the code or a spec is unfamiliar, or you want precise language for a plan.
+Glossary: the Calcifer persona/revoice model, voice-pipeline terms (wake/VAD/preroll/barge-in/AEC/stand-down), LLM/routing vocabulary (tool call, verify loop, tier, retryable, Zen, think), search/calendar/time terms, self-update terms, wake-training terms, the fledge planning vocabulary (plumage/feather/fledged), and reference-architecture concepts from `docs/`.
+Read this when: you hit an unfamiliar term in code, specs, or these docs, or need the precise meaning of a persona/LLM/pipeline concept.

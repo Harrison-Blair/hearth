@@ -1,92 +1,87 @@
 ---
-generated: 2026-07-07T07:06:00Z
-commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
+generated: 2026-07-07T22:56:23Z
+commit: 58fb2ba9bbeefc5db7d530261bcb3450573048fa
 agent: fledge-forager
 fledge_version: unknown
 ---
 
-# Domain Glossary
+# Domain
 
-Business/domain vocabulary used throughout the codebase, with brief definitions and where each concept lives.
+Glossary of the project's domain vocabulary — voice-pipeline concepts, the persona/character model, the LLM/routing terms, and the fledge planning history that explains why several seams exist.
+
+## The assistant & its character
+
+- **Calcifer** — the assistant's persona/character (the wake word and persona are themed on the fire demon). "Penguin" and "fire demon" are also trained wake phrases.
+- **Persona** — a text flavor applied to how a reply *sounds*, never to which tool runs or which facts are stated. Applied via a suffix baked into skill system prompts and via the revoicer. Two strengths: **terse** and **expansive**. Forbidden on routing/judgment prompts; permitted on spoken outputs only.
+- **Revoice / Revoicer** — a live LLM call that restyles a plain (deterministic) skill reply into Calcifer's voice at the pipeline's `_speak` choke point. Bounded timeout, circuit-breaker cooldown after failure, and a **digit-preservation guard** (any digit change discards the revoice and speaks plain). PLM-003.
+- **voiced flag** — `SkillResult.voiced=True` marks output already persona-flavored by an LLM (or a canned line) so it bypasses the revoice seam and avoids double-processing.
+- **canned() / template registry** — a lookup of LLM-free spoken lines (error messages, offline notices, update sign-off) with 2–3 seeded-random variants per key; used when the LLM is down or a reply must be immediate. `canned()` output is always `voiced=True`.
+- **Persona v2** — updated character guidance (`_CALCIFER_V2_*` blocks) that keeps replies in-character-but-brief; versioned so eval replays key on the new text.
 
 ## Voice pipeline
-- **Wake word** — spoken trigger phrase (e.g. "Calcifer", "Hey Penguin") detected by the ONNX classifier; fires when the score clears `threshold` for `trigger_frames` consecutive frames.
-- **Wake phrase** — human-readable phrase derived from a trained model's filename/manifest, never hand-maintained (`wake/registry.py`).
-- **Confident threshold** — a higher wake score cutoff (`confident_threshold`) that selects enthusiastic `ack_phrases` vs. uncertain `unsure_ack_phrases`.
-- **VAD (Voice Activity Detection)** — WebRTC classifier marking speech vs. silence at 10/20/30 ms; bounds an utterance (`silence_ms`, `start_timeout_ms`, `min_speech_ms`, `preroll_frames`).
-- **Preroll** — ~0.5 s of audio kept before the wake event so a command clipped by detection latency is recovered.
-- **Utterance / transcript** — the user's spoken (or typed) input, and its STT-decoded text.
-- **Hallucination phrase** — a known Whisper false-positive on silence (e.g. "thank you", a YouTube outro); dropped when capture RMS is below `hallucination_max_rms`.
-- **Earcon** — a short synthesized non-speech cue (chime, descending, checkin, no-speech) signaling a state transition (`audio/earcon.py`).
-- **Barge-in** — speaking the wake word over the assistant's reply, cutting playback and reopening the mic; needs AEC + the mic tap.
-- **AEC (Acoustic Echo Cancellation)** — subtracts speaker output (far-end reference) from the mic signal (near-end) so playback doesn't self-trigger; optional (`speexdsp`), passthrough if absent.
-- **Far-end / near-end** — playback audio fed to the canceller vs. microphone audio possibly contaminated by echo.
-- **Tap / drain** — a per-frame synchronous callback on the mic (enables barge-in wake scoring during playback) / discarding buffered frames so an earcon/TTS echo isn't transcribed.
 
-## Conversation & control
-- **Follow-up / conversation mode** — turns after the first wake without re-triggering the wake word, within `followup_window_ms`.
-- **Decision loop** — an LLM judgment after a reply on whether to end, check-in (confirm), or keep listening.
-- **Stand-down** — a timed or indefinite "stop listening" state (`StandDown`) that suppresses wake detection, reminders, and calendar announcements; polled cooperatively, cleared by TUI/timeout/restart.
-- **Barge / announcement barge** — cutting a proactive reminder/calendar announcement with the wake word.
-- **Control channel** — the daemon's stdin command interface from the TUI: TEXT, SET, SAY, LISTEN, CANCEL, STOP, RESUME.
-- **Audio arbiter** — the single lock serializing capture, playback, and announcements so they never collide.
+- **Wake word** — a spoken trigger detected during idle listening; fires a `WakeEvent`. Multiple ONNX models can load at once; phrases are *derived* from the manifest, never hard-coded.
+- **VAD (Voice Activity Detection)** — per-frame speech/silence classification (webrtcvad) used to bound recording; trailing silence closes an utterance.
+- **Preroll** — ~0.5s of frames held before the wake fires, recovered on capture so the command's start (clipped by detection latency) is restored.
+- **Barge-in** — speaking the wake word over the assistant's own reply cuts playback and reopens the mic; enabled by the MicHub *tap* keeping detection alive during playback, gated by a raised threshold + consecutive-event debounce.
+- **AEC (Acoustic Echo Cancellation)** — subtracts speaker output (far-end reference) from the mic (near-end) so the wake word stays audible during playback; optional (Speex).
+- **Hallucination** — a Whisper false-positive on near-silent audio (e.g. "thank you"), filtered by an RMS gate.
+- **Earcon** — a short synthetic tone/chime for terse audio feedback without speech synthesis.
+- **length_scale** — Piper speaking-rate multiplier (>1 slower, <1 faster); per-call override.
+- **Stand-down** — a "stop listening" state, engaged by voice/TUI for a duration or indefinitely; consumers poll `.active` on their tick, so it simply expires and a restart clears it.
+- **AudioArbiter** — a single async lock serializing capture, TTS playback, and proactive announcements so they never overlap.
 
-## Routing & reasoning
-- **Skill** — a plug-in handler for one or more intents (weather, reminder, web_search, …); a `Skill` subclass.
-- **Intent** — a semantic action routed to a skill; its `type` equals the tool name.
-- **Slot** — an extracted argument to an intent (e.g. `location`, `duration`, `query`).
-- **Tool call / tool-calling** — the LLM invoking a skill via a structured `ToolCall` (name + JSON arguments); arguments populate `Intent.slots`.
-- **Tool schema** — an OpenAI-style function definition exposed to the LLM (`SkillRegistry.tool_schemas()`).
-- **Orchestrator** — the tool-calling routing loop; native→JSON→general fallback.
-- **Direct answer** — the LLM answering with no tool call; either spoken verbatim or delegated to `GeneralSkill` for a persona re-voice.
-- **Default skill** — the fallback (`GeneralSkill`, `default=True`) used on no tool match, LLM failure, or timeout; exposes no tool.
-- **Tool-calling cliff** — (design lore) below ~7–9B params, tool-call accuracy drops sharply; motivates JSON fallback + small-model prompt tightening.
-- **Verification loop / Verdict** — an optional LLM re-review of the tool pick (pre) and drafted answer (post), returning approve/rewrite/reject; fails open, speaks filler only on reject, keeps the best draft on timeout.
-- **Persona** — the "Calcifer" (sardonic fire-demon) tone layer appended only to spoken outputs, never to routing/verdict fields.
-- **Health check / degradation / tier** — a provider readiness probe; on failure the system logs a warning and uses a fallback. The TUI shows an LLM tier: **up** (all healthy), **degraded** (some healthy), **down** (all failing).
+## LLM & routing
 
-## Web search (focus area)
-- **SearchProvider** — the ABC any web-search backend implements (`search`, `health`, `aclose`).
-- **SearchResult** — one hit: title, snippet, source (bare domain or label), url.
-- **Keyless vs. keyed provider** — no-API-key backends (DuckDuckGo scraper, Wikipedia) vs. keyed ones (Tavily/Exa/Brave — the planned AI-first additions).
-- **AI-first search** — a search API designed for LLM consumption (returns clean, synthesizable snippets), the direction the capability is being extended toward.
-- **Fan-out** — `MultiSearch` querying all providers concurrently rather than in sequence.
-- **Round-robin merge** — interleaving results by rank (top hit from each provider first) to preserve provider diversity.
-- **Deduplication** — dropping repeat results by normalized URL (or `source:title` when URL is empty).
-- **Agentic search loop** — the `WebSearchSkill` cycle: refine query → search → assess → answer or retry with a refined query, up to `max_rounds`.
-- **Assess** — the LLM judging whether results answer the question (`sufficient`) and, if not, proposing a `new_query` + spoken `remark`.
-- **Progress masking** — speaking "Searching for …" in a background task to overlap with network latency (`Speaker.say_soon`).
-- **Prompt injection / neutralization / fencing** — treating web snippets as untrusted: wrapping in `<<<…>>>`, regex-filtering imperative injections to `[filtered]`, and instructing the model to ignore instructions inside fences.
-- **SearXNG** — (roadmap, from user memory) a self-hosted metasearch engine with a JSON API (`format=json`, needs Redis) considered as a future keyless provider.
+- **Orchestrator / tool-calling loop** — the router: exposes skill intents as tool schemas and asks the LLM to call one tool (arguments → `Intent.slots`) or answer directly. `tool_mode` native/json/auto.
+- **Tool call / tool schema** — an OpenAI-style function definition per intent; the model's request to invoke a skill.
+- **Skill / intent / slot** — a plug-in handler for related intents (`Skill`); an intent is a routed request category; a slot is a parsed argument. `GeneralSkill` is the always-present `default` fallback.
+- **Verify loop** — optional two-stage LLM judgment: *pre* reviews the tool pick + args, *post* reviews the drafted answer; can approve/reject/rewrite. Fail-open on parse error. Bounded by `max_tool_rounds` / `max_verify_rounds`.
+- **Fallback (LLM)** — a secondary provider invoked when the primary fails (transport/timeout/parse); empty responses do not trigger it.
+- **LLM tier** (TUI) — health of the provider chain: **up** (primary ok), **degraded** (primary down, fallback up), **down** (both unavailable).
+- **think / thinking models** — reasoning models (e.g. qwen3) whose reasoning bloats voice latency and pollutes JSON; suppressed for JSON completions (Ollama-specific flag).
+- **retryable vs non-retryable** — transient failures (429/5xx/transport, malformed 200) retry with backoff; permanent config/auth errors (401/403) do not. `LLMResponseError.retryable` carries this.
+- **Zen / OpenCode Zen** — the OpenAI-compatible remote LLM gateway; free model ids end in `-free`.
 
-## Time & scheduling
-- **Reminder** — a stored one-shot or recurring spoken alert (`kind='reminder'`).
-- **Timer** — a named countdown, stored in the same table with `kind='timer'` + optional `label`.
-- **Timespec** — a parsed temporal specification (`due_at` epoch, message, optional `interval`).
-- **Management action** — a spoken edit to an existing reminder/event: cancel, reschedule, rename.
-- **Recurrence / interval** — the seconds a reminder waits to re-arm after firing (None = one-shot).
-- **Catch-up** — a single "while I was away…" summary on boot when multiple reminders came due offline.
-- **Retry budget** — a per-reminder attempt counter that defers (not deletes) after `max_attempts`, so transient TTS failures don't lose a reminder.
+## Search, calendar, time
 
-## Calendar
-- **Lead window** — the minutes before an event's start during which `CalendarWatcher` announces it (`watcher_lead_minutes`).
-- **Blocklist** — title patterns (voice-added, config, or a description `hidden_tag`) that suppress unprompted announcements; explicit queries still show blocked events.
-- **Dedupe** — announcing a given `(event_id, start_epoch)` only once; a reschedule (new start) re-announces.
-- **Service account** — the Google-authenticated principal (read personal calendar, read/write the "Calcifer" calendar).
-- **Speakable title** — an event title stripped of emoji/unspeakable symbols for clean TTS.
+- **Routed dispatch (PLM-002)** — query-type classification (factual→Tavily, semantic→Exa) picks the AI search provider; the keyless tier (Wikipedia/DuckDuckGo) is the fallback.
+- **Answer block** — Tavily's synthesized summary, embedded as the first `SearchResult` (source `"tavily"`). **Highlights** — Exa's priority excerpts, preferred over full text for a snippet.
+- **Agentic search** — the WebSearchSkill's refine→search→assess loop (up to `max_rounds`) with LLM-steered queries and injection defense.
+- **Speakable title** — an event/result title with TTS-hostile symbols (emoji, etc.) stripped.
+- **EventBlocklist / block pattern** — substring patterns (config + voice-added + a hidden tag) that suppress calendar events from unprompted queries and the watcher.
+- **Lead window / lead_minutes** — the interval `[now, now+lead_minutes]` over which the CalendarWatcher announces upcoming events.
+- **Dedupe** — marking an event announced by `(event_id, start_epoch)` so it isn't re-announced (a reschedule = new start = re-announce).
+- **Boot catch-up / away preamble** — the first scheduler poll after restart coalesces multiple due reminders into one "While I was away, N reminders came due" summary.
+- **Reminder kind / interval** — `kind` discriminates `reminder` vs `timer` in one table; `interval` sets recurrence (None = one-shot).
+
+## Self-update (PLM-001)
+
+- **Restart in place** — `os.execv` re-execution of the same Python process (same PID, inherited FDs); a fresh interpreter loads the on-disk code.
+- **Post-speak restart seam** — the pipeline honors `SkillResult.restart=True` only after `_speak()` completes, so the sign-off is audible before the process is replaced.
+- **pdeathsig** — `PR_SET_PDEATHSIG`; ensures the TUI-supervised daemon survives (and is reaped correctly across) the re-exec.
 
 ## Wake-word training
-- **FPPH (False Positives Per Hour)** — the false-wake rate; `livekit`'s `find_best_threshold` maximizes recall subject to a target FPPH gate.
-- **Gate passed** — `optimal_fpph <= target_fp_per_hour`; runtime should prefer gate-passing models.
-- **Adversarial hard negatives** — phonetically near phrases (1–2 phoneme edits, e.g. "classify" vs "calcifer") that sharpen discrimination.
-- **Smoke model** — a fast `_smoke`-suffixed training run proving the plumbing; the suffix is load-bearing (TUI cleanup keys on it).
-- **VITS / RIRs / MUSAN / ACAV100M** — the TTS synthesizer for positive clips / room-impulse-response, ambient-noise, and large negative corpora used for augmentation.
-- **ROCm / HIP / RDNA4 (gfx1201)** — the AMD GPU compute stack and architecture for the training venv (runtime needs no GPU).
 
-## Deployment & specs
-- **Composition root** — `app.py`, the one place concrete implementations are built and injected.
-- **Frozen app / `_MEIPASS`** — the PyInstaller single-file binary and its temporary extraction root; cwd is set there to preserve config resolution; writable state redirects to XDG.
-- **Wyoming protocol** — (reference-architecture lore) a Home-Assistant abstraction for swappable edge/server voice services.
-- **Plumage / Feather** — fledge spec artifacts: a plumage is an umbrella capability spec (e.g. PLM-001 self-update); a feather is a vertical implementation slice (FTHR-001/002).
-- **Restart-in-place** — the self-update capability: `os.execv` re-exec preserving PID and inherited pipes so the TUI supervisor sees no EOF.
-- **ReAct loop** — reason→action→observation agent pattern the orchestrator's design gestures at.
+- **FPPH (False Positives Per Hour)** — the false-wake rate; 0.1 FPPH (one spurious wake per 10h) is the target gate.
+- **Recall / optimal threshold** — fraction of true wakes detected; the score cutoff livekit's `find_best_threshold` picks to maximize recall subject to target FPPH.
+- **Adversarial negatives** — hard negatives (1–2 phoneme edits, e.g. "calcify" for "calcifer") to sharpen the classifier.
+- **conv_attention** — livekit's hybrid CNN-attention wake architecture. **ACAV100M / MUSAN / MIT RIRs** — negative and room-augmentation datasets. **SLERP** — spherical interpolation of Piper speaker embeddings for voice diversity.
+- **Slug / manifest** — normalized model name (phrase → lowercase underscores); `models.json` registry of trained models, phrases, eval metrics, and deployment paths. **Smoke run** — a tiny end-to-end pipeline check (`_smoke` suffix) before a production run.
+
+## Fledge planning vocabulary
+
+- **Plumage (PLM)** — a feature-level planning spec. Completed: **PLM-001** self-update/restart-in-place, **PLM-002** AI-first web search (Tavily/Exa + query routing), **PLM-003** persona-flavored revoice seam + canned templates.
+- **Feather (FTHR)** — a vertical implementation slice of a plumage (FTHR-001..009, all fledged). E.g. FTHR-003 Tavily seam, FTHR-004 Exa route, FTHR-005 revoicer seam, FTHR-006 persona v2 + registry, FTHR-009 hardening invariants (spy-TTS flavor guarantee + persona-free routing).
+- **fledged** — a spec whose implementation is merged and its acceptance criteria verified.
+- **Spy fixtures** — test doubles (stub LLM, spy TTS, tagging revoicer) that record calls / inject marker tags to verify invariants without side effects.
+- **Nest** — this `.fledge/nest/` context set. **Forager / scout** — the agents that regenerate it (a forager orchestrates per-module scouts).
+
+## Reference-architecture terms (from `docs/`)
+
+- **ReAct** — interleaved Thought→Action→Observation single-agent reasoning pattern (the default local agentic style).
+- **Tool-calling reliability cliff** — models <7–9B params drop sharply below ~66% BFCL; Qwen3/3.5 are the most reliable local tool-callers.
+- **Hybrid RAG** — vector+BM25 retrieval reranked by a cross-encoder to top-5.
+- **Deterministic fast-path** — routine commands routed to an intent parser before the LLM.
+- **Wyoming protocol** — Home Assistant's abstraction for swappable local voice services.
+- **MCP (Model Context Protocol)** — emerging tool-exposure standard; dominant risk is prompt injection (OWASP LLM Top-10 #1).

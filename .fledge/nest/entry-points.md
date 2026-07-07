@@ -1,94 +1,94 @@
 ---
-generated: 2026-07-07T07:06:00Z
-commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
+generated: 2026-07-07T22:56:23Z
+commit: 58fb2ba9bbeefc5db7d530261bcb3450573048fa
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Entry Points & Public Interfaces
 
-How to run and build the project, and the public interfaces execution flows through.
+How to run, build, and provision the project, and the public interfaces where execution enters each subsystem.
 
 ## Running the project
 
-### Daemon
-- `python -m assistant.app` → `assistant/app.py:main()` — boots the voice pipeline. Reads `Config`, selects audio devices, logs a boot diagnostic, then `asyncio.run(_run())`. `_run()` constructs every subsystem, starts them concurrently (`asyncio.gather`), and cleans up in a `finally` block. Also exposed as the `assistant` console script (`pyproject.toml [project.scripts]`).
-- `assistant doctor` / `python -m assistant.bootstrap` → `assistant/bootstrap.py:run()` — idempotent provisioning: ensure Ollama daemon + model present, pre-warm the STT model. Returns 0/1.
-
-### Monitor TUI
-- `python -m tui` → `tui/__main__.py:main()` → `tui/app.py:AssistantTUI().run()` — supervises the daemon as a child and provides touch config/logs/models/voices. Launched conveniently by `./start.sh` (activates venv, reaps orphan daemon).
-
-### Dev commands (`CLAUDE.md`)
 ```bash
 source .venv/bin/activate
-pip install -e ".[dev]"                              # core + pytest/pytest-asyncio/ruff
-pytest                                               # all tests
-pytest tests/test_pipeline.py                        # one file
-pytest tests/test_router.py -k route_falls_back      # one test
-ruff check assistant tests                           # lint
-python -m assistant.app                              # boot the daemon
+pip install -e ".[dev]"          # core + pytest/pytest-asyncio/ruff (no native extras needed for tests)
+python -m assistant.app          # boot the daemon (Ctrl-C to stop)
+python -m tui                    # launch the monitor TUI (supervises the daemon)
+./start.sh                       # TUI launcher: activate venv, reap orphan daemon, exec python -m tui
 ```
 
-### Install / build / release
-- `./install.sh [--minimal|--no-*|--systemd|--systemd-no-enable]` — platform detect, venv, pip extras, wake models, Piper voice, Ollama, optional systemd unit.
-- `make release` → `packaging/build.sh` → `dist/assistant-$(uname -m)` (PyInstaller single-file, native-arch only). Frozen entry: `packaging/entrypoint.py:main()` routes `--version` / `doctor`|`bootstrap` / `tui` / (default) daemon, chdir's to `sys._MEIPASS`, redirects writable state to `$XDG_DATA_HOME/assistant/`.
-- CI: `.github/workflows/release.yml` builds x86_64 + aarch64 on `v*` tags, smoke-tests the frozen import, attaches both binaries to the release.
-- Smoke utilities: `python verify_calendar.py`, `python verify_wikipedia.py`.
+Console script (from `pyproject.toml`): `assistant` → `assistant.app:main`.
 
-## Core internal interfaces
+## Testing & linting
 
-### VoicePipeline (`assistant/core/pipeline.py`)
-- `async run()` — the main loop (wake→record→transcribe→route→skill→speak; follow-ups, barge-in, continuation decisions).
-- `request_listen()` — tap-to-listen (start a turn with no wake word).
-- `cancel()` — abandon capture + stop playback.
-- `async submit_text(text)` — inject a typed command (from the control channel).
+```bash
+pytest                                            # all tests
+pytest tests/test_pipeline.py                     # one file
+pytest tests/test_router.py -k route_falls_back   # one test
+ruff check assistant tests                        # lint, line-length 100
+ASSISTANT_EVAL=1 pytest tests/eval/test_tool_eval.py   # opt-in live LLM tool-call eval
+```
 
-### Orchestrator (`assistant/core/orchestrator.py`)
-- `async handle(text, history, *, spoken, on_say) -> (SkillResult | None, Skill | None)` — route one utterance via the tool-calling loop with optional verify gates. Native→JSON→general fallback; degrades to `GeneralSkill`.
-- `_decide(messages) -> ChatResponse` — the raw routing decision (used directly by the eval harness).
+## Provisioning & smoke tests
 
-### SkillRegistry / Skill (`assistant/skills/base.py`)
-- `SkillRegistry.register(skill, *, default=False)`, `.get(intent_type) -> Skill | None`, `.tool_schemas() -> list[dict]`, `.intents` property.
-- `Skill`: `name`, `intents`, `tool_specs`; `async handle(cmd, intent) -> SkillResult`; `async handle_reply(cmd)` (for `expects_reply`); `tools()` (override to `[]` to answer directly).
+- `assistant doctor` / `assistant bootstrap` → `bootstrap.py:run(args)` — ensures Ollama, LLM model, and STT cache are present.
+- `./install.sh [--no-native|--no-venv|--no-pip|--no-wake|--no-piper-voice|--no-ollama] [--systemd]` — full host setup.
+- `python verify_calendar.py` — Google Calendar end-to-end smoke (health, list, create→patch→delete).
+- `python verify_wikipedia.py` — Wikipedia search smoke.
 
-### LLMProvider (`assistant/llm/base.py`)
-`async complete(prompt, *, system, json, label)`, `async chat(messages, *, system, label)`, `async chat_tools(messages, *, system, tools, label) -> ChatResponse`, `async health() -> bool`, `aclose()`.
+## Build & release
 
-### Control channel (`assistant/core/control.py:ControlChannel`)
-`async run()` reads stdin in a background thread; `async dispatch(line)` executes one verb. Verbs: `TEXT <utterance>`, `SET <key> <value>`, `SAY [rate|]<text>`, `LISTEN`, `CANCEL`, `STOP`, `RESUME`. This is the daemon side of the TUI supervisor pipe.
+- `make release` → `bash packaging/build.sh` → PyInstaller onefile `dist/assistant-$(uname -m)` (`PYTHON_BIN=python3.12` override supported).
+- Frozen binary CLI (`packaging/entrypoint.py`): `assistant --version|-V`, `assistant doctor|bootstrap`, `assistant tui`, bare `assistant` runs the daemon.
+- `.github/workflows/release.yml` — on `v*` tag: builds x86_64 + aarch64, smoke-tests (`--version`, DEBUG daemon start | head -40), uploads artifacts, creates the GitHub Release.
 
-### StandDown / AudioArbiter
-- `StandDown.engage(seconds)`, `.resume()`, `.active`, `.remaining` (`core/standdown.py`) — polled cooperative "stop listening" flag.
-- `AudioArbiter` — single `asyncio.Lock`; `hold()`-style acquisition serializes capture, playback, and announcements (`core/arbiter.py`).
+## Daemon composition & lifecycle (`assistant/app.py`)
 
-## Web-search capability interfaces (focus area)
+- `main()` — CLI entry; loads `Config()`, `select_devices()`, then `asyncio.run(_run(config, devices))`.
+- `_run(config, devices)` — the composition root: constructs every concrete provider, wires shared `StandDown`, runs boot health checks (LLM, calendar), and launches pipeline + `ReminderScheduler` + `CalendarWatcher` + `ControlChannel` via `asyncio.gather()`.
+- `_build_llm` / `_build_one_llm` — LLM provider dispatch: `provider == "opencode-zen"` → `OpenCodeZenProvider`, else `OllamaProvider`; wrapped in `FallbackLLMProvider` when `LlmConfig.fallback` is set and differs. **This is where a new LLM provider is registered.**
 
-### SearchProvider ABC (`assistant/search/base.py`) — the plug-in seam
-- `async search(query: str, *, count: int) -> list[SearchResult]`
-- `async health() -> bool`
-- `async aclose() -> None`
-Concrete: `DdgsSearch`, `WikipediaSearch`. Composite: `MultiSearch(providers, *, max_results)` implements the same `search`/`health`/`aclose` and fans out + merges.
+## Pipeline & routing interfaces (`core/`)
 
-### WebSearchSkill (`assistant/skills/web_search.py`)
-- Name `web_search`, single intent `web_search` with required `query` slot (tool description gates it to real-time info, not general knowledge or weather).
-- Entry: `handle()` → `_handle()` agentic loop: `_refine()` → `search()` → `_assess()` → answer/retry (≤ `max_rounds`); `_plain_summary()` fallback; `_say_soon()`/`_flush_speech()` for spoken progress; `_neutralize()`/`_result_blocks()` for injection-safe formatting.
+- `VoicePipeline.run()` — the main async loop. `.request_listen()` (tap-to-listen, skip wake), `.cancel()` (barge-in/stop), `.submit_text()` (TUI-typed command).
+- `Orchestrator.handle(text, history, *, spoken, on_say) -> (SkillResult, Skill)` — routing entry; internally `_decide()` makes the tool decision (the exact call the eval harnesses exercise). `_messages(utterance, history)` builds the chat message list.
+- `ControlChannel.run()` / `.dispatch(line)` — stdin verbs: `TEXT`, `SET key value`, `SAY [rate|]text`, `LISTEN`, `CANCEL`, `STOP`, `RESUME`.
 
-### Wiring (`assistant/app.py:_build_search`, ~lines 60–93)
-Reads `WebSearchConfig`, builds the provider list from `providers`, constructs `MultiSearch`, and injects it + `max_rounds` + `Speaker` into `WebSearchSkill`, which is registered in the `SkillRegistry`. **This is the function a new AI-first provider must be added to.**
+## Capability ABCs (implement these to add/swap a provider)
 
-## Capability provider interfaces
-- Wake: `WakeDetector.process(frame) -> WakeEvent | None`, `reset()`; registry `phrase_for(ref)` / `phrases_for(refs)`.
-- STT: `SpeechToText.transcribe(audio) -> str`.
-- TTS: `TextToSpeech.synthesize(text, length_scale=None) -> bytes`; `.sample_rate`.
-- Calendar: `CalendarProvider.list_events/create_event/update_event/delete_event/health/aclose` (`calendar/base.py`).
-- Weather: `WeatherProvider.geocode(place) -> Place | None`, `forecast(lat, lon, *, name) -> Forecast`, `health`, `aclose`.
-- Scheduling: `ReminderScheduler.run()`, `CalendarWatcher.run()` — async poll loops.
-- Storage: `ReminderStore.add/due/pending/delete/delete_pending/update_due/update_speech`; `CalendarStateStore.was_announced/mark/purge_before/add_blocked/remove_blocked/blocked_patterns`.
+- **LLM** (`llm/base.py:LLMProvider`) — `async complete/chat/chat_tools/health/aclose`; returns `str` or `ChatResponse`.
+- **STT** (`stt/base.py:SpeechToText`) — `async transcribe(audio: bytes) -> str`.
+- **TTS** (`tts/base.py:TextToSpeech`) — `async synthesize(text, length_scale=None) -> bytes`.
+- **Wake** (`wake/base.py:WakeDetector`) — `process(frame) -> WakeEvent | None`, `reset()`. Phrase lookup: `wake.registry.phrases_for(refs)`.
+- **Search** (`search/base.py:SearchProvider`) — `async search(query, *, count) -> list[SearchResult]`, `health`, `aclose`.
+- **Weather** (`weather/base.py:WeatherProvider`) — `async geocode`, `forecast`, `health`, `aclose`.
+- **Calendar** (`calendar/base.py:CalendarProvider`) — `async list_events/create_event/update_event/delete_event/health/aclose`.
+- **Audio** (`audio/base.py`) — `AudioIn.stream()/.drain()/.set_tap()/.clear_tap()`; `AudioOut.play()/.stop()`.
 
-## TUI supervisor interface (`tui/supervisor.py:DaemonSupervisor`)
-`start(overrides)`, `stop()`, `restart(overrides)`, `send(line)`, `lines()` async iterator, `running`/`returncode` properties. Spawns `python -m assistant.app`, merges `os.environ` + `.env` + session overrides, streams stdout, writes control verbs to stdin.
+## Skill interface (`skills/base.py`)
 
-## Eval harness entry points (`tests/eval/`)
-- `python -m tests.eval.extract <log> -o <capture>` — filter daemon JSONL to `turn`/`llm.*` records.
-- `python -m tests.eval.run_eval` — live tool-call eval against Ollama (exit 0 if ≥0.90).
-- `python -m tests.eval.run_replay` — offline replay against captures (exit 0 if ==1.0).
+- `Skill.handle(cmd: Command, intent: Intent) -> SkillResult` (abstract); `Skill.handle_reply(cmd) -> SkillResult` (two-phase follow-ups); `Skill.tools() -> list[dict]` (tool schemas from declared intents).
+- `SkillRegistry.register(skill, *, default=False)`, `.get(intent_type)`, `.intents`, `.tool_schemas()` — the orchestrator calls `tool_schemas()` to expose skills to the LLM; a tool call routes back to the matching skill's `handle()`. Register skills (and the single `default=True` `GeneralSkill`) in `app.py`.
+
+## Scheduling & storage entry points
+
+- `ReminderScheduler.run()`, `CalendarWatcher.run()` — async poll tasks launched from `app.py`.
+- `ReminderStore` — `add/due/pending/delete/delete_pending/update_due/update_speech/close`.
+- `CalendarStateStore` — `was_announced/mark/purge_before/add_blocked/remove_blocked/blocked_patterns/close`.
+
+## Self-update (PLM-001)
+
+`skills/update.py:UpdateSkill.handle()` → confirm (`expects_reply=True`); `handle_reply()` on affirmative sets `SkillResult.restart=True`; the pipeline honors it after `_speak()` and calls `core/selfupdate.py:restart_in_place()` (`os.execv(python, ["-m", "assistant.app"])`).
+
+## TUI entry points (`tui/`)
+
+- `python -m tui` → `__main__.py` → `app.main()` → `AssistantTUI().run()`; installs six screens (home, now, logs, config, models, voices) at mount.
+- `DaemonSupervisor.start(overrides)` / `.stop()` / `.restart()` / `.send(line)` / `.lines()` — child-process control over the stdin channel + stdout stream. Config edits apply as `ASSISTANT_*` env on restart, or persist via `configfile.write_fields(path, values)`.
+
+## Wake-word training (`training/`, isolated venv)
+
+- `bash training/bootstrap.sh` — build `.venv-train` (ROCm PyTorch).
+- `training/.venv-train/bin/python training/train.py [--smoke ...]` / `train_batch.py [phrases...]` — train/export ONNX to `models/wake/`.
+- `python training/manifest.py {upsert|list|regen|select}` — manage the model manifest and write `wake.model_paths` to `config.yaml`.

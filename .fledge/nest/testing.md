@@ -1,59 +1,59 @@
 ---
-generated: 2026-07-07T07:06:00Z
-commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
+generated: 2026-07-07T22:56:23Z
+commit: 58fb2ba9bbeefc5db7d530261bcb3450573048fa
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Testing
 
-How the suite is structured, run, and stubbed, with special attention to the seams a new web-search provider must satisfy. Tests live under `tests/` (plus `tests/eval/`).
+The suite is ~84 files under `tests/` (~26k LOC across the two core batches plus TUI and eval), run with **pytest + pytest-asyncio in `asyncio_mode = "auto"`** (from `pyproject.toml`) — so `async def test_...` needs no marker. Everything native (LLM, HTTP, audio devices, ONNX models, `os.execv`) is stubbed, so `pip install -e ".[dev]"` alone runs the whole suite offline.
 
-## Framework and running
-- **pytest + pytest-asyncio** with `asyncio_mode = auto` (`pyproject.toml`): `async def test_...` needs no marker.
-- Install with `pip install -e ".[dev]"` — **no native extras needed**; anything touching a model, device, or network is stubbed.
-- Run: `pytest` (all), `pytest tests/test_pipeline.py` (one file), `pytest tests/test_web_search_skill.py -k happy_path` (one test). Lint: `ruff check assistant tests`.
+## Running
 
-## Stubbing patterns (used everywhere)
-- **`httpx.MockTransport`** — every network provider test routes `httpx.AsyncClient` to a handler `fn(request) -> httpx.Response`. Shared `_patch_transport(monkeypatch, handler)` closure reused across Wikipedia, Open-Meteo, Google Calendar, Ollama, Zen, and voice-download tests.
-- **In-line `FakeX` classes** — `FakeLLM` (scripted JSON responses consumed in order, tracks prompts), `FakeProvider`/`FakeSearch` (search stubs), `FakeVoice`/`FakeWakeWordModel`/`FakeVad`/`FakeSd` (native-dep stubs), `FakeTTS`/`FakeOut`, `ScriptedLLM`/`DirectOrchestrator` (core), `FakeSupervisor` (TUI).
-- **SQLite** — `:memory:` for isolated tests; `tmp_path/"x.db"` + reopen to simulate a daemon restart / migration.
-- **Injection** — `monkeypatch.setattr(module, "Class", FakeClass)`; `monkeypatch.setenv("ASSISTANT_…", …)` for config precedence; injectable `now=lambda: …` clocks.
-- **Assertions on side effects** — fakes expose `.calls`/`.spoken`/`.plays`/`.queries`/`.received`; tests assert routing, speech, and persistence rather than internals.
+```bash
+pytest                                            # all
+pytest tests/test_pipeline.py                     # one file
+pytest tests/test_router.py -k route_falls_back   # one test
+ruff check assistant tests                        # lint
+ASSISTANT_EVAL=1 pytest tests/eval/test_tool_eval.py   # opt-in live LLM eval
+```
 
-## Test groups
+## Test-doubling patterns
 
-### Core (`tests/test_*` — pipeline/orchestrator/config/verify/infra)
-- `test_pipeline.py` (~1466 lines, 50+ tests): full wake→speak flow, earcons, silence/no-speech retry, hallucination gating, conversation follow-ups, decision loop (confirm/listen/end), barge-in, stand-down, `@@STATE` emission. Uses `_pipeline()` factory + `FakeAudioIn`/`ScriptedDetector`/`RecordingEmitter`.
-- `test_orchestrator.py` (16) + `test_orchestrator_verify.py` (22): tool dispatch, direct answers, native→JSON fallback, `max_tool_rounds`, timeouts, `_TOOL_REPEAT_CAP`, turn records; verify verdicts (approve/reject/rewrite), filler-only-on-reject, barge abort, best-draft-on-timeout, `max_verify_rounds` sub-cap, fail-open.
-- `test_verify.py` (20), `test_persona.py` (11), `test_config.py` (19, incl. `web_search` defaults), `test_control.py` (13), `test_conversation.py`, `test_standdown.py`, `test_state.py`, `test_logging.py`, plus training-adjacent `test_manifest.py`/`test_train_batch.py`.
+- **HTTP wire mocking** — `httpx.MockTransport` via a shared `_patch_transport(monkeypatch, handler)` helper that routes an `AsyncClient` through a handler `(httpx.Request) -> httpx.Response`. Handlers inspect URL/headers/JSON body (often capturing into a dict) and return crafted responses or raise `ConnectError`. Used for every LLM and web-search provider, weather, Google Calendar, and TUI discovery.
+- **Monkeypatch import stubbing** — `monkeypatch.setattr(module, "NativeClass", Fake)` replaces speexdsp, sounddevice, `piper.PiperVoice`, livekit wake model, `ddgs.DDGS` at import time.
+- **Fakes/spies** — inline classes prefixed `Fake*` or descriptive: `FakeLLM`/`ScriptedLLM` (scripted response queues that record `.calls`/`.prompts`/`.messages`; `IndexError` when exhausted fails the test), `FakeTTS`/spy-TTS (accumulates `.spoke`), `TaggingRevoicer` (marks revoiced output with `<<REVOICED>>`), `FakeClock` (`.now` + `advance(dt)`), `FakeProvider`/`FakeWeather`/`FakeSearch`/`FakeStore`, `FakeVad`/`FakeWakeWordModel`, `FakeSupervisor`/`FakePipeline`/`FakeOut` (TUI). Test skills: `EchoSkill`, `DataOnlySkill`, `FallbackSkill`, `OtherSkill`.
+- **Databases** — real SQLite against `:memory:` or `tmp_path`; reopened with a new instance to prove persistence/migration.
 
-### Capabilities (`tests/test_*` — providers & skills)
-Audio (`test_aec`, `test_audio_processing`, `test_devices`, `test_earcon`, `test_mic_hub`, `test_recorder`), calendar (6 files incl. `test_calendar_skill.py` ~45 tests, `test_calendar_watcher.py` ~15), weather (`test_open_meteo`, `test_weather_skill`), LLM (`test_ollama_provider`, `test_fallback_provider`, `test_zen_provider`, `test_zen_provider_guards` ~17 retry/guard tests, `test_replay_provider`), TTS/wake (`test_piper_tts`, `test_livekit_detector`, `test_wake_registry`, `test_voice_download`), skills (`test_clock`, `test_reminder`, `test_timer`, `test_stand_down`, `test_general`), storage/scheduling (`test_reminder_store`, `test_calendar_state_store`, `test_scheduler`, `test_timespec`).
+## LLM provider coverage (the next feature's safety net)
 
-### Search tests — the seam for a new AI-first provider (focus area)
-Four files define what any new backend must satisfy:
+- **`tests/test_zen_provider.py`** — `OpenCodeZenProvider` wire tests over `httpx.MockTransport` on `/chat/completions`: `complete`/`chat`/`chat_tools` shapes, `Bearer {key}` auth header (omitted when key is empty), `json=True` adds `response_format`, system message prepended to messages, null content→`""`, whitespace stripped, tool_calls rebuilt.
+- **`tests/test_zen_provider_guards.py`** — retry/guard policy: `LLMResponseError(retryable=…)` on empty choices / missing message / non-JSON / non-dict body; 429 and 503 and transport `ConnectError` retry (respecting `max_retries`); 401 does **not** retry (fails immediately); `retry_backoff_s=0.0` keeps tests fast.
+- **`tests/test_ollama_provider.py`** — `/api/generate` fields (model/prompt/system/think/num_ctx/format); `think=False` when `json=True`; labeled INFO trace logging with `latency_ms` in `record.data`.
+- **`tests/test_fallback_provider.py`** — primary→fallback delegation on raise; an empty `chat_tools` response does **not** fall back; `health()` ORs both providers.
+- **`tests/eval/`** — orchestrator routing accuracy. `run_eval.py` (live, opt-in `ASSISTANT_EVAL=1`, skips if Ollama down) scores each of 23 `dataset.py` cases on tool-name + required-arg correctness against a ≥0.90 gate. `run_replay.py` re-runs captured real turns through `Orchestrator._decide()` with `ReplayProvider` (responses keyed by SHA-256 of `(kind, label, payload)`, so any prompt/tool change misses and forces re-capture) asserting exact reproducibility (score == 1.0). `test_replay_eval.py` skips when `captures/` has no turn records; workflow is capture (`extract.py`) → curate → replay.
 
-- **`test_ddgs_provider.py`** (6): `FakeDDGS` intercepts the `DDGS` constructor + context manager + `.text()`, records init/query kwargs. Asserts row→`SearchResult` mapping (title/body/href → title/snippet/url, `domain()` source), snippet truncation to `max_snippet_chars`, region/timeout/count pass-through, backend error propagation, and `health()` both paths. Fixture is `autouse` monkeypatching `ddgs_provider.DDGS`.
-- **`test_multi_search.py`** (8): `FakeProvider(results, exc, healthy)` with async `search`/`health`/`aclose`. Asserts round-robin interleave, URL dedup (trailing-slash normalized), `max_results` cap, a failing provider skipped, all-fail re-raises the first, all-empty → `[]`, `health()` true if any child healthy, `aclose()` fans out. Helper `_r(url, source)` builds `SearchResult`.
-- **`test_wikipedia_provider.py`** (8): `httpx.MockTransport` handler returns the Action-API JSON. Asserts extract→snippet mapping + `"wikipedia"` source + URL from title, ordering by `index`, snippet truncation, empty/malformed → `[]`, `health()` true/false, custom `language` (de.wikipedia.org), `gsrlimit == count`.
-- **`test_web_search_skill.py`** (14): `FakeSearch` + `FakeLLM` + `FakeSpeaker`. Asserts the full agentic loop — happy path (refine JSON → assess `sufficient:true` → answer, one search, spoken "Searching for…"), insufficient→retry with `new_query`+`remark`, rounds-exhausted unsuccessful, assess-bad-JSON → plain-summary fallback, empty results / search error degrade gracefully, refine-parse-failure → stripped-transcript query, and the **prompt-injection defenses**: untrusted snippets fenced in `<<<…>>>`, imperative injection neutralized to `[filtered]` before fencing, stray fence markers can't break the boundary, benign text passes through, overlong `new_query`/`remark` rejected, `speaker=None` silent-and-works, pending progress speech awaited before return, refine call is JSON-only (no system prompt).
+## Core coverage by area
 
-**Net seam contract for a new provider:** implement `async search(query, *, count) -> list[SearchResult]` and `async health() -> bool` (+ `aclose()`); return `SearchResult` with a domain-ish `source` and dedup-able `url`; honor `count`, `timeout`, and `max_snippet_chars`; raise on backend error (let `MultiSearch` skip it). A test should mock the provider's HTTP via `httpx.MockTransport` in the same style, and — if wired into `WebSearchSkill` — nothing in the skill changes (it depends only on the ABC). Add a `test_<provider>_provider.py` mirroring `test_wikipedia_provider.py` and extend `test_multi_search.py` only if merge behavior changes.
+- **Config** (`test_config.py`, `test_configfile.py`) — pydantic defaults, env-override precedence (var > yaml > default), type coercion (bool/float/list-JSON), every config block; TUI persistence via `write_fields`.
+- **Pipeline/orchestrator** (`test_pipeline.py`, `test_orchestrator.py`, `test_orchestrator_verify.py`) — wake→record→STT→route→TTS with fake stages; followup windows; multi-round tool loops with data-only skills; fallback on LLM failure; verify pre/post approve/reject/rewrite; filler-on-reject only when persona + `spoken_feedback`; TimeoutError → best draft; per-stage `max_verify_rounds` subcap; disabled = byte-identical.
+- **Persona/revoice invariants** (`test_persona.py`, `test_revoice.py`, `test_speech_invariants.py`) — suffix/strength composition; revoice timeout/circuit/digit-preservation; **spy-TTS + `TaggingRevoicer` prove every string reaching TTS is either revoiced, `voiced=True`, or from `canned()`** — four path classes (deterministic→revoiced, persona-marked bypass, verify filler bypass, canned error bypass) plus the `_speak` default-`voiced=False` pin. This is the PLM-003/FTHR-009 hardening guarantee; each invariant test is demonstrated failing under a deliberate seam break.
+- **Skills** — per-skill tests with fakes: clock (ordinals/12h), reminder/timer (relative/recurring parse, LLM slot extraction, `kind`), weather (geocode+summary), calendar (CRUD + blocklist), web_search (refine→assess→retry, injection content passed unchanged), general (history order, error fallback), stand_down (duration/indefinite), update (confirm→restart + canned signoff).
+- **Search providers (PLM-002)** — `test_tavily_provider.py`/`test_exa_provider.py`/`test_wikipedia_provider.py` (httpx mock: result mapping, snippet truncation, api-key headers, answer-block synthesis, injection content unchanged, health), `test_ddgs_provider.py` (FakeDDGS context manager), `test_multi_search.py` (round-robin interleave, URL dedup, cap, skip-failed, all-fail reraise, any-healthy).
+- **Audio** (`test_aec`, `test_audio_processing`, `test_devices`, `test_earcon`, `test_mic_hub`, `test_piper_tts`, `test_recorder`) — subframe AEC pairing + missing-dep passthrough, normalization edges, device resolution, earcon distinctness, TTS length_scale plumbing, VAD end/timeout/cancel/min-speech/max-cap, MicHub tap/drain/overflow-drop.
+- **Wake** (`test_livekit_detector.py`) — window fill, ordered samples, threshold firing, `reset`, `score_interval` skip, `trigger_frames` consecutive-hit debounce, streak reset.
+- **Scheduling/storage/control/state** — scheduler (fire/delete/retry/defer, boot catch-up coalesce, arbiter, standdown, revoice), watcher (announce/dedupe-across-restart/reschedule/all-day-skip/blocklist/imminent/standdown/fallback-revoicer), reminder+calendar stores (migration, dedupe key, purge, reopen), control channel verbs, `StateEmitter` JSONL, conversation trim, standdown engage/resume/expiry, logging JSONL + `prune_runs`, selfupdate `os.execv` target.
 
-### TUI (`tests/test_tui_*`)
-16 files driven by Textual's pilot at fixed `SIZE=(40,30)`. **The gate:** `test_tui_screens.py:test_no_screen_overflows_40_columns` asserts `widget.region.right <= 40` and `max_scroll_x == 0` for every non-hidden widget on every screen — this is the hard constraint for the Pi 5 portrait display. Other files cover `AssistantTUI` health tiering, `DaemonSupervisor` start/stop/restart + env-override precedence, control channel (TEXT/SET), discovery (Ollama/Zen/registry/pull/cache-TTL, `test_tui_discovery.py` ~483 lines), config schema/file/env, log parse/color/collapse/reflow/runlog, widgets (Stepper/NavBar), and mouse selection.
+## TUI coverage (`tests/test_tui_*.py`, 16 files)
 
-### Eval harness (`tests/eval/`)
-Two offline gates that keep a fresh checkout green:
-- `test_tool_eval.py:test_tool_call_formatting` — **live** eval; skips unless `ASSISTANT_EVAL=1` and Ollama reachable. Runs ~20 `CASES` through the real orchestrator, asserts tool-name + required-arg score ≥ `PASS_THRESHOLD = 0.90`.
-- `test_replay_eval.py:test_replay_matches_baseline` — **replay** eval; skips when `tests/eval/captures/` has no scoreable turns (only `.gitkeep` on a fresh checkout). Replays captured turns through the orchestrator with `ReplayProvider` (content-hash keyed), asserts exact-match score == 1.0.
-- `build_orchestrator()` wires the real skill registry (Clock/Reminder/Timer/WebSearch/Weather/General) minus audio/TTS, using `:memory:` `ReminderStore`. Supporting unit tests: `test_eval_extract.py`, `test_replay_provider.py`.
+Textual's `app.run_test(size=SIZE)` async harness with a pilot for clicks/keys. **`SIZE = (40, 30)` and `test_tui_screens.py:_assert_fits_40_cols()` are the deployment gate**: every non-hidden widget must satisfy `region.right <= 40` and `max_scroll_x == 0` across all screens (portrait 320×480). Also: supervisor env-merge + pdeathsig survival across `os.execv` re-exec (multi-stage subprocess scripts), control TEXT/SET dispatch, LLM tier badges (up/degraded/down), Ollama/Zen discovery over httpx mock (health, model options, registry scrape + 72h cache, pull progress, delete), log parse/color/collapse/reflow, run-log rotation, config-schema field metadata + coercion, Stepper bounds, NavBar dots. Hermetic autouse fixture patches `discovery.current_config()` to typed defaults (never reads yaml).
 
-## Test-verification discipline
-Per repo/user convention: a new test must be shown to fail against the unfixed/stubbed behavior before it counts. The eval replay gate exists precisely as a regression gate — refactors to routing must reproduce identical decisions from identical model output.
+## Test-first discipline (PLM feathers)
+
+Every feather (FTHR-001..009) wrote its tests failing first against unchanged code, then confirmed passing; hardening tests (FTHR-009) verify invariants by deliberate seam breaks. No test invokes real network, native ML deps, or `os.execv`. Full green suite is an acceptance criterion on every feather. This matches the repo/user convention: a test only counts if it fails when the behavior breaks.
 
 ## Open Questions
-- `tests/eval/captures/` ships empty (`.gitkeep`), so the replay gate is inert on a fresh checkout by design; a real baseline must be captured+curated to activate it.
-- `test_web_search_skill.py` checks a remark length ≤150 while the skill's `_MAX_REMARK_CHARS` is 140 — the exact cap/where it's enforced is worth confirming before relying on it in new provider tests.
-- No end-to-end test exercises real Ollama/Piper/Whisper models; native extras are integration-only.
+
+- No cross-domain integration tests (e.g. calendar extraction → TTS → arbiter) or latency/performance gates were observed beyond unit coverage and the opt-in eval.
+- Whether any pre-recorded `tests/eval/captures/*.jsonl` are checked in, or must be recorded fresh per developer, is unresolved.
