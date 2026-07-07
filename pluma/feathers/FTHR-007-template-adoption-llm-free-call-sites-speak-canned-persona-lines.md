@@ -71,12 +71,12 @@ against unchanged code for the expected reason; (3) implement until they
 pass.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before
+- [x] AC-1: The tests listed above were observed failing before
       implementation and pass after.
-- [ ] AC-2: All FC-7 call sites speak registry variants when persona is
+- [x] AC-2: All FC-7 call sites speak registry variants when persona is
       enabled and the exact current literals when disabled (PLM-003 AC-5).
-- [ ] AC-3: Template lines never enter the revoice path — each is voiced at
+- [x] AC-3: Template lines never enter the revoice path — each is voiced at
       its source; a spy Revoicer records zero calls for them.
-- [ ] AC-4: No literal spoken string for these messages remains outside
+- [x] AC-4: No literal spoken string for these messages remains outside
       `persona.py` (grep-clean), and `ruff check assistant tests` plus the
       full suite pass.

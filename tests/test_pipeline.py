@@ -1,5 +1,6 @@
 from collections import deque
 
+from assistant.core import persona
 from assistant.core.arbiter import AudioArbiter
 from assistant.core.events import Command, Intent, SkillResult, Turn, WakeEvent
 from assistant.core.pipeline import VoicePipeline
@@ -98,6 +99,28 @@ class RaisingSkill(Skill):
         raise RuntimeError("skill boom")
 
 
+class RaisingReplySkill(Skill):
+    """Asks for a reply, then blows up handling it — exercises the
+    _dispatch_reply error_generic site."""
+
+    name = "raising_reply"
+    intents = {"general"}
+
+    async def handle(self, cmd, intent):
+        return SkillResult(speech="confirm?", expects_reply=True)
+
+    async def handle_reply(self, cmd):
+        raise RuntimeError("reply boom")
+
+
+class NoResultOrchestrator:
+    """Stand-in that mimics nothing being able to handle the turn (the
+    orchestrator returns (None, None))."""
+
+    async def handle(self, text, history, *, spoken, on_say=None):
+        return None, None
+
+
 class FakeSkill(Skill):
     name = "fake"
     intents = {"general"}
@@ -190,13 +213,14 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
               decline_phrases=None, confirm_earcon=b"", end_phrases=None,
               ack_delay_s=0.0, standdown=None, barge_in_enabled=False,
               barge_in_threshold=0.8, barge_in_trigger_frames=3,
-              barge_in_announcements=False, restart_in_place=None, revoicer=None):
+              barge_in_announcements=False, restart_in_place=None, revoicer=None,
+              orchestrator=None, persona_enabled=False):
     # Tests pass a single wake_earcon for convenience; the pipeline takes a pool.
     if wake_earcons is None:
         wake_earcons = [wake_earcon] if wake_earcon else []
     return VoicePipeline(
         audio_in, detector, recorder or FakeRecorder(), stt or FakeSTT(),
-        DirectOrchestrator(skill), tts, out, arbiter,
+        orchestrator or DirectOrchestrator(skill), tts, out, arbiter,
         no_speech_earcon=no_speech_earcon,
         wake_earcons=wake_earcons,
         unsure_wake_earcons=unsure_wake_earcons,
@@ -224,6 +248,7 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
         barge_in_announcements=barge_in_announcements,
         restart_in_place=restart_in_place,
         revoicer=revoicer,
+        persona_enabled=persona_enabled,
     )
 
 
@@ -688,6 +713,95 @@ async def test_skill_exception_is_spoken_and_loop_survives():
     assert tts.spoke == ["Sorry, something went wrong."]
     assert out.played == [b"AUDIO"]
     assert detector.resets == 1  # turn completed; loop kept going
+
+
+async def test_skill_exception_persona_enabled_speaks_canned_variant_voiced():
+    # FTHR-007: the error_generic template is voiced at its source, so a spy
+    # Revoicer must never see it (AC-3), and it must be one of the registry's
+    # in-character variants when persona is on (AC-2).
+    detector = FakeDetector()
+    tts = FakeTTS()
+    out = FakeOut()
+    revoicer = FakeRevoicer(styled="SHOULD NOT BE USED")
+    pipeline = _pipeline(
+        FakeAudioIn(3), detector, RaisingSkill(), tts, out, AudioArbiter(),
+        revoicer=revoicer, persona_enabled=True,
+    )
+
+    await pipeline.run()
+
+    # _speak splits multi-sentence text at sentence boundaries before TTS, so a
+    # multi-sentence variant lands as more than one tts.spoke entry; rejoin to
+    # compare against the registry's variant text.
+    assert " ".join(tts.spoke) in persona._CANNED["error_generic"][1]
+    assert revoicer.calls == []  # voiced at source -> the spy records zero calls
+
+
+async def test_cant_help_persona_disabled_is_byte_identical():
+    # Nothing could handle the turn (orchestrator returns (None, None)).
+    detector = FakeDetector()
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(
+        FakeAudioIn(3), detector, FakeSkill(), tts, out, AudioArbiter(),
+        orchestrator=NoResultOrchestrator(),
+    )
+
+    await pipeline.run()
+
+    assert tts.spoke == ["Sorry, I can't help with that yet."]
+
+
+async def test_cant_help_persona_enabled_speaks_canned_variant_voiced():
+    detector = FakeDetector()
+    tts = FakeTTS()
+    out = FakeOut()
+    revoicer = FakeRevoicer(styled="SHOULD NOT BE USED")
+    pipeline = _pipeline(
+        FakeAudioIn(3), detector, FakeSkill(), tts, out, AudioArbiter(),
+        orchestrator=NoResultOrchestrator(), revoicer=revoicer, persona_enabled=True,
+    )
+
+    await pipeline.run()
+
+    assert " ".join(tts.spoke) in persona._CANNED["cant_help"][1]
+    assert revoicer.calls == []  # voiced at source -> the spy records zero calls
+
+
+async def test_reply_error_generic_persona_disabled_is_byte_identical():
+    skill = RaisingReplySkill()
+    stt = FakeSTT(transcripts=["turn off for 20 minutes", "confirm"])
+    tts = FakeTTS()
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=False,
+    )
+
+    await pipeline.run()
+
+    assert tts.spoke == ["confirm?", "Sorry, something went wrong."]
+
+
+async def test_reply_error_generic_persona_enabled_speaks_canned_variant_voiced():
+    skill = RaisingReplySkill()
+    stt = FakeSTT(transcripts=["turn off for 20 minutes", "confirm"])
+    tts = FakeTTS()
+    revoicer = FakeRevoicer(styled="SHOULD NOT BE USED")
+    pipeline = _pipeline(
+        FakeAudioIn(6), FakeDetector(), skill, tts, FakeOut(), AudioArbiter(),
+        stt=stt, conversation_enabled=False, revoicer=revoicer, persona_enabled=True,
+    )
+
+    await pipeline.run()
+
+    # "confirm?" is unvoiced, so the spy Revoicer restyles it (first spoken
+    # entry); the canned error line is voiced at its source and is spoken
+    # untouched after it.
+    assert tts.spoke[0] == "SHOULD NOT BE USED"
+    assert " ".join(tts.spoke[1:]) in persona._CANNED["error_generic"][1]
+    # Only the unvoiced "confirm?" prompt reaches the revoicer; the canned
+    # error line never does.
+    assert revoicer.calls == ["confirm?"]
 
 
 async def test_empty_initial_capture_retries_once_then_routes():

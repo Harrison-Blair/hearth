@@ -283,7 +283,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     registry.register(ReminderSkill(store, llm))
     registry.register(TimerSkill(store))
     registry.register(StandDownSkill(standdown))
-    registry.register(UpdateSkill())
+    registry.register(UpdateSkill(persona_enabled=config.persona.enabled))
     registry.register(WebSearchSkill(
         search,
         llm,
@@ -353,7 +353,10 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
             calcifer_id=config.calendar.calcifer_calendar_id,
         ))
     registry.register(
-        GeneralSkill(llm, config.llm.system_prompt, persona_suffix=persona_suffix),
+        GeneralSkill(
+            llm, config.llm.system_prompt, persona_suffix=persona_suffix,
+            persona_enabled=config.persona.enabled,
+        ),
         default=True,
     )
     orchestrator = Orchestrator(
@@ -470,6 +473,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         barge_in_announcements=config.barge_in.announcements,
         restart_in_place=restart_in_place,
         revoicer=revoicer,
+        persona_enabled=config.persona.enabled,
     )
     scheduler = ReminderScheduler(
         store, tts, out, arbiter, poll_seconds=config.scheduling.poll_seconds,

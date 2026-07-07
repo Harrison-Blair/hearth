@@ -23,6 +23,7 @@ from assistant.core.arbiter import AudioArbiter
 from assistant.core.conversation import Conversation
 from assistant.core.events import Command, Turn, WakeEvent
 from assistant.core.orchestrator import Orchestrator
+from assistant.core.persona import canned
 from assistant.core.revoice import Revoicer
 from assistant.core.selfupdate import restart_in_place as _default_restart_in_place
 from assistant.core.standdown import StandDown
@@ -114,6 +115,7 @@ class VoicePipeline:
         barge_in_announcements: bool = False,
         restart_in_place: Callable[[], None] | None = None,
         revoicer: Revoicer | None = None,
+        persona_enabled: bool = False,
     ) -> None:
         self._audio_in = audio_in
         self._detector = detector
@@ -221,6 +223,9 @@ class VoicePipeline:
         # of _speak, before sentence splitting/TTS. None (persona off, or no LLM
         # wired) -> passthrough, identical to today's plain speech.
         self._revoicer = revoicer
+        # Selects the canned() template variant (or the plain disabled literal)
+        # for the LLM-free error/fallback lines below.
+        self._persona_enabled = persona_enabled
 
     def request_listen(self) -> None:
         """Start a turn now, skipping the wake word (tap-to-listen). No-op if a
@@ -553,11 +558,13 @@ class VoicePipeline:
         except Exception as exc:  # noqa: BLE001 - a skill/LLM crash must not kill the loop
             log.error("Orchestration failed: %s", exc)
             self._state_emitter.state("error", message="Something went wrong.")
-            await self._speak("Sorry, something went wrong.")
+            await self._speak(
+                canned("error_generic", enabled=self._persona_enabled), voiced=True
+            )
             return None, None
         if result is None:
             log.warning("Nothing could handle %r", transcript)
-            await self._speak("Sorry, I can't help with that yet.")
+            await self._speak(canned("cant_help", enabled=self._persona_enabled), voiced=True)
             return None, None
         log.info("Reply: %r", result.speech)
         if on_reply is not None:
@@ -576,7 +583,9 @@ class VoicePipeline:
             result = await skill.handle_reply(Command(transcript, history=conv.history()))
         except Exception as exc:  # noqa: BLE001 - a skill crash must not kill the loop
             log.error("Skill %r reply failed: %s", skill.name, exc)
-            await self._speak("Sorry, something went wrong.")
+            await self._speak(
+                canned("error_generic", enabled=self._persona_enabled), voiced=True
+            )
             return None
         log.info("Reply: %r", result.speech)
         if on_reply is not None:
