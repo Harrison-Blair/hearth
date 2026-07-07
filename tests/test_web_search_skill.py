@@ -5,6 +5,7 @@ import httpx
 
 from assistant.core.events import Command, Intent
 from assistant.search.base import SearchResult
+from assistant.search.exa import ExaSearch
 from assistant.search.tavily import TavilySearch
 from assistant.skills.web_search import _ROUTE_FALLBACK_NOTICE, WebSearchSkill
 
@@ -319,6 +320,18 @@ async def test_semantic_query_type_falls_back_to_factual_route_when_unregistered
     assert factual.queries == ["who should I vote for"]
 
 
+async def test_semantic_query_type_routes_to_the_semantic_provider_when_registered():
+    keyless = FakeSearch([_result()])
+    semantic = FakeSearch([_result(source="exa.ai")])
+    llm = FakeLLM([_refine("who should I vote for", "semantic"), _answer()])
+    result = await _skill(keyless, llm, routes={"semantic": semantic}).handle(
+        Command("search the web for opinions"), Intent("web_search")
+    )
+    assert result.success
+    assert semantic.queries == ["who should I vote for"]
+    assert keyless.queries == []
+
+
 async def test_routed_provider_failure_speaks_notice_and_falls_back_to_keyless():
     keyless = FakeSearch([_result(source="ddg.com")])
     factual = FailingSearch()
@@ -393,6 +406,38 @@ async def test_stubbed_tavily_response_end_to_end_produces_sourced_answer(monkey
     assess_prompt = next(p for p in llm.prompts if p[1] is not None)[0]
     assert "en.wikipedia.org" in assess_prompt
     assert "source: tavily" in assess_prompt
+
+
+async def test_stubbed_exa_response_end_to_end_produces_sourced_answer(monkeypatch):
+    # PLM-002 AC-2 path: a semantic query through the real ExaSearch provider
+    # (httpx stubbed, no network/keys) end-to-end through WebSearchSkill.
+    orig = httpx.AsyncClient
+
+    def handler(request):
+        return httpx.Response(200, json={
+            "results": [{
+                "title": "Places like the Eiffel Tower",
+                "url": "https://en.wikipedia.org/wiki/Eiffel_Tower",
+                "highlights": ["The Eiffel Tower stands 330 meters tall."],
+            }],
+        })
+
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kw: orig(transport=httpx.MockTransport(handler), **kw),
+    )
+    exa = ExaSearch(api_key="test-key")
+    llm = FakeLLM([
+        _refine("landmarks like the eiffel tower", "semantic"),
+        _answer("It's 330 meters tall, according to en.wikipedia.org."),
+    ])
+    result = await _skill(FakeSearch([]), llm, routes={"semantic": exa}).handle(
+        Command("search the web for landmarks like the eiffel tower"), Intent("web_search")
+    )
+    assert result.success
+    assert "according to" in result.speech.lower()
+    assess_prompt = next(p for p in llm.prompts if p[1] is not None)[0]
+    assert "en.wikipedia.org" in assess_prompt
 
 
 async def test_tavily_answer_block_injection_is_neutralized_in_assess_prompt():
