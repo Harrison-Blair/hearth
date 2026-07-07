@@ -33,7 +33,7 @@ from assistant.core.state import NullStateEmitter, StateEmitter
 from assistant.llm.base import LLMProvider
 from assistant.llm.fallback_provider import FallbackLLMProvider
 from assistant.llm.ollama_provider import OllamaProvider
-from assistant.llm.opencode_zen_provider import OpenCodeZenProvider
+from assistant.llm.openai_compatible_provider import GATEWAYS, OpenAICompatibleProvider
 from assistant.scheduling.calendar_watcher import CalendarWatcher
 from assistant.scheduling.scheduler import ReminderScheduler
 from assistant.search.base import SearchProvider
@@ -132,19 +132,22 @@ def _build_llm(cfg: LlmConfig) -> LLMProvider:
 
 
 def _build_one_llm(cfg: LlmConfig, provider: str, model: str) -> LLMProvider:
-    if provider == "opencode-zen":
+    if provider in GATEWAYS:
         if not cfg.api_key:
             log.warning(
-                "OpenCode Zen provider selected but llm.api_key is empty; set "
-                "ASSISTANT_LLM__API_KEY. Requests will fail with 401."
+                "%s provider selected but llm.api_key is empty; set "
+                "ASSISTANT_LLM__API_KEY. Requests will fail with 401.",
+                provider,
             )
-        return OpenCodeZenProvider(
+        gateway = GATEWAYS[provider]
+        return OpenAICompatibleProvider(
             model=model,
             api_key=cfg.api_key,
-            base_url=cfg.base_url,
+            base_url=cfg.base_url or gateway["base_url"],
             timeout=cfg.timeout,
             health_timeout=cfg.health_timeout,
             max_retries=cfg.max_retries,
+            extra_headers=gateway["extra_headers"],
         )
     if provider != "ollama":
         log.warning("Unknown llm.provider %r; defaulting to ollama", provider)

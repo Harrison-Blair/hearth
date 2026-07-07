@@ -1,4 +1,4 @@
-"""Guards + retry for ``OpenCodeZenProvider._post``.
+"""Guards + retry for ``OpenAICompatibleProvider._post``.
 
 A transient 200 with a truncated/empty body used to escape as a bare
 ``KeyError``/``IndexError``/``JSONDecodeError`` and trip the fallback on
@@ -12,7 +12,7 @@ import json
 import httpx
 import pytest
 
-from assistant.llm.opencode_zen_provider import LLMResponseError, OpenCodeZenProvider
+from assistant.llm.openai_compatible_provider import LLMResponseError, OpenAICompatibleProvider
 
 
 def _patch_transport(monkeypatch, handler):
@@ -33,7 +33,7 @@ async def test_empty_choices_raises_retryable(monkeypatch):
         return httpx.Response(200, json={"choices": []})
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=0)
     with pytest.raises(LLMResponseError) as exc_info:
         await provider.complete("hi")
     assert exc_info.value.retryable is True
@@ -45,7 +45,7 @@ async def test_missing_message_raises_retryable(monkeypatch):
         return httpx.Response(200, json={"choices": [{}]})
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=0)
     with pytest.raises(LLMResponseError) as exc_info:
         await provider.complete("hi")
     assert exc_info.value.retryable is True
@@ -57,7 +57,7 @@ async def test_non_json_body_raises_retryable(monkeypatch):
         return httpx.Response(200, text="<html>gateway lost the stream</html>")
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=0)
     with pytest.raises(LLMResponseError) as exc_info:
         await provider.complete("hi")
     assert exc_info.value.retryable is True
@@ -69,7 +69,7 @@ async def test_non_dict_body_raises_retryable(monkeypatch):
         return httpx.Response(200, json=[1, 2, 3])
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=0)
     with pytest.raises(LLMResponseError) as exc_info:
         await provider.complete("hi")
     assert exc_info.value.retryable is True
@@ -86,7 +86,7 @@ async def test_retries_on_429_then_succeeds(monkeypatch):
         return _ok("after retry")
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
     assert await provider.complete("hi") == "after retry"
     assert calls[0] == 2  # one failure, one success
     await provider.aclose()
@@ -102,7 +102,7 @@ async def test_retries_on_503_then_succeeds(monkeypatch):
         return _ok()
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
     assert await provider.complete("hi") == "ok"
     assert calls[0] == 2
     await provider.aclose()
@@ -118,7 +118,7 @@ async def test_retries_on_transport_error_then_succeeds(monkeypatch):
         return _ok()
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
     assert await provider.complete("hi") == "ok"
     assert calls[0] == 2
     await provider.aclose()
@@ -134,7 +134,7 @@ async def test_retries_on_malformed_body_then_succeeds(monkeypatch):
         return _ok("recovered")
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
     assert await provider.complete("hi") == "recovered"
     assert calls[0] == 2
     await provider.aclose()
@@ -148,7 +148,7 @@ async def test_no_retry_on_401(monkeypatch):
         return httpx.Response(401, text="unauthorized")
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
     with pytest.raises(httpx.HTTPStatusError) as exc_info:
         await provider.complete("hi")
     assert exc_info.value.response.status_code == 401
@@ -164,7 +164,7 @@ async def test_no_retry_on_403(monkeypatch):
         return httpx.Response(403, text="forbidden")
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
     with pytest.raises(httpx.HTTPStatusError):
         await provider.complete("hi")
     assert calls[0] == 1
@@ -179,7 +179,7 @@ async def test_no_retry_on_400(monkeypatch):
         return httpx.Response(400, text="bad request")
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
     with pytest.raises(httpx.HTTPStatusError):
         await provider.complete("hi")
     assert calls[0] == 1
@@ -194,7 +194,7 @@ async def test_persistent_429_exhausts_retries_and_raises(monkeypatch):
         return httpx.Response(429, text="rate limited")
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
     with pytest.raises(httpx.HTTPStatusError):
         await provider.complete("hi")
     assert calls[0] == 3  # initial + 2 retries
@@ -209,7 +209,7 @@ async def test_persistent_malformed_exhausts_retries_and_raises(monkeypatch):
         return httpx.Response(200, json={"choices": []})
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=2, retry_backoff_s=0.0)
     with pytest.raises(LLMResponseError) as exc_info:
         await provider.complete("hi")
     assert exc_info.value.retryable is True
@@ -225,7 +225,7 @@ async def test_max_retries_zero_is_one_attempt(monkeypatch):
         return httpx.Response(503, text="down")
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=0, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=0, retry_backoff_s=0.0)
     with pytest.raises(httpx.HTTPStatusError):
         await provider.complete("hi")
     assert calls[0] == 1
@@ -239,7 +239,7 @@ async def test_guard_does_not_fire_on_null_content(monkeypatch):
         return httpx.Response(200, json={"choices": [{"message": {"content": None}}]})
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=0)
     assert await provider.complete("hi") == ""
     await provider.aclose()
 
@@ -249,7 +249,7 @@ async def test_chat_tools_validates_choices(monkeypatch):
         return httpx.Response(200, json={"choices": []})
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=0)
     with pytest.raises(LLMResponseError):
         await provider.chat_tools([{"role": "user", "content": "hi"}])
     await provider.aclose()
@@ -265,7 +265,7 @@ async def test_retry_payload_unchanged_across_attempts(monkeypatch):
         return httpx.Response(503, text="down")
 
     _patch_transport(monkeypatch, handler)
-    provider = OpenCodeZenProvider("m", "k", max_retries=1, retry_backoff_s=0.0)
+    provider = OpenAICompatibleProvider("m", "k", max_retries=1, retry_backoff_s=0.0)
     with pytest.raises(httpx.HTTPStatusError):
         await provider.complete("hi", system="be brief")
     assert len(seen) == 2

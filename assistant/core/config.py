@@ -123,12 +123,13 @@ class LlmConfig(BaseModel):
     # local `ollama serve` as a child (no sudo); systemd users can point it at
     # e.g. ["systemctl", "--user", "restart", "ollama"].
     serve_cmd: list[str] = ["ollama", "serve"]
-    # OpenCode Zen provider (provider: "opencode-zen"). The bearer token is read
-    # from the ASSISTANT_LLM__API_KEY env var — never commit it to config.yaml.
-    # base_url defaults to the public Zen gateway; any OpenAI-compatible endpoint
-    # works.
+    # OpenAI-compatible gateway providers (provider: "opencode-zen" |
+    # "openrouter"). The bearer token is read from the ASSISTANT_LLM__API_KEY env
+    # var — never commit it to config.yaml. base_url blank uses that provider's
+    # gateway default (see llm/openai_compatible_provider.py:GATEWAYS); any
+    # OpenAI-compatible endpoint can be set explicitly to override it.
     api_key: str = ""
-    base_url: str = "https://opencode.ai/zen/v1"
+    base_url: str = ""
     # Secondary provider used when the primary raises (transport failure,
     # timeout, malformed response). Empty = no fallback. ``fallback_model``
     # defaults to ``model`` when blank, so the same model id can serve both.

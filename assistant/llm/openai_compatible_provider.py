@@ -1,8 +1,9 @@
-"""LLM completions via OpenCode Zen (OpenAI-compatible /chat/completions).
+"""LLM completions via a generic OpenAI-compatible gateway (/chat/completions).
 
 Same ``LLMProvider`` contract as ``OllamaProvider``; differs only in wire shape.
 Models live server-side, so ``health`` just checks the gateway answers, not that
-a specific model is pulled.
+a specific model is pulled. ``GATEWAYS`` maps a config provider name to its base
+URL + any extra headers the gateway needs beyond bearer auth.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class LLMResponseError(Exception):
         self.retryable = retryable
 
 
-class OpenCodeZenProvider(LLMProvider):
+class OpenAICompatibleProvider(LLMProvider):
     def __init__(
         self,
         model: str,
@@ -45,6 +46,7 @@ class OpenCodeZenProvider(LLMProvider):
         health_timeout: float = 5.0,
         max_retries: int = 2,
         retry_backoff_s: float = 0.5,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         self._model = model
         self._base_url = base_url.rstrip("/")
@@ -59,6 +61,7 @@ class OpenCodeZenProvider(LLMProvider):
         # omitted when the key is blank — httpx rejects a bare ``Bearer `` (empty
         # token) as an illegal header value before the request is even sent.
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        headers = {**headers, **extra_headers} if extra_headers else headers
         self._client = httpx.AsyncClient(timeout=timeout, headers=headers)
 
     async def aclose(self) -> None:
@@ -166,7 +169,7 @@ class OpenCodeZenProvider(LLMProvider):
             )
             resp.raise_for_status()
         except (httpx.HTTPError, _json.JSONDecodeError) as exc:
-            log.warning("OpenCode Zen health check failed: %s", exc)
+            log.warning("OpenAI-compatible gateway health check failed: %s", exc)
             return False
         return True
 
@@ -223,3 +226,11 @@ class OpenCodeZenProvider(LLMProvider):
         first = choices[0]
         if not isinstance(first, dict) or "message" not in first:
             raise LLMResponseError("response choice has no message", retryable=True)
+
+
+# Known OpenAI-compatible gateways: config provider name -> base URL + any
+# headers needed beyond bearer auth. Add an entry here to support a new gateway.
+GATEWAYS: dict[str, dict] = {
+    "opencode-zen": {"base_url": "https://opencode.ai/zen/v1", "extra_headers": {}},
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "extra_headers": {}},
+}
