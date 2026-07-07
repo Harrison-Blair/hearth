@@ -52,6 +52,15 @@ llm:
   fallback: ollama
   fallback_model: qwen3:14b
   max_retries: 2
+  # OpenRouter's free router (provider: "openrouter", model: "openrouter/free")
+  # filters to a capable model at $0 cost among currently-free models. Caveats: an
+  # API key is still required (OpenRouter has no anonymous tier); free models are
+  # rate-limited and rotate over time, so availability isn't guaranteed.
+  # llm:
+  #   provider: "openrouter"
+  #   model: "openrouter/free"
+  #   api_key: ""           # set via ASSISTANT_LLM__API_KEY, not here
+  #   fallback: "ollama"
 persona:
   enabled: true
   strength: terse

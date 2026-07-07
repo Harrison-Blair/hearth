@@ -50,7 +50,7 @@ stt:
   hallucination_max_rms: 300.0
 
 llm:
-  provider: "ollama"      # ollama | opencode-zen
+  provider: "ollama"      # ollama | opencode-zen | openrouter
   model: "qwen2.5:3b-instruct"
   host: "http://localhost:11434"
   timeout: 60.0
@@ -58,15 +58,27 @@ llm:
   num_ctx: 8192           # context window passed to Ollama (options.num_ctx)
   think: false            # keep thinking-model reasoning off on chat paths (voice latency)
   serve_cmd: ["ollama", "serve"]   # command the TUI runs to (re)start the LLM server
-  # OpenCode Zen (provider: "opencode-zen"). Token read from ASSISTANT_LLM__API_KEY —
-  # never commit it here. Any OpenAI-compatible endpoint works as base_url.
+  # OpenCode Zen (provider: "opencode-zen") or OpenRouter (provider: "openrouter").
+  # Token read from ASSISTANT_LLM__API_KEY — never commit it here.
   api_key: ""             # set via env var, not here
-  base_url: "https://opencode.ai/zen/v1"
+  # Blank = use the selected provider's default base URL from the GATEWAYS table
+  # (assistant/llm/openai_compatible_provider.py). Set only to override that default
+  # (e.g. a self-hosted OpenAI-compatible endpoint).
+  base_url: ""
   # Secondary provider used when the primary raises (transport failure/timeout).
   # Empty = no fallback. fallback_model defaults to model when blank.
   fallback: ""            # e.g. "ollama" to fall back to local when Zen is down
   fallback_model: ""
   max_retries: 2          # retries on transient (429/5xx/transport) LLM failures; 4xx-auth never retried
+  # OpenRouter's free router (provider: "openrouter", model: "openrouter/free")
+  # filters to a capable model at $0 cost among currently-free models. Caveats: an
+  # API key is still required (OpenRouter has no anonymous tier); free models are
+  # rate-limited and rotate over time, so availability isn't guaranteed.
+  # llm:
+  #   provider: "openrouter"
+  #   model: "openrouter/free"
+  #   api_key: ""           # set via ASSISTANT_LLM__API_KEY, not here
+  #   fallback: "ollama"
 
 persona:
   enabled: true           # on = Calcifer character on final spoken replies only; false = neutral voice
