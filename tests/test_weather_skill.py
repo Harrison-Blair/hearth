@@ -67,6 +67,7 @@ async def test_home_path_uses_home_coords_no_geocode():
     )
     assert result.success
     assert result.speech == llm.answer
+    assert result.voiced  # the system prompt already carries persona -> skip revoicing
     assert weather.geocoded == []  # no location slot -> home, no geocoding
     assert weather.forecasts == [(33.749, -84.388, "Atlanta")]
     # The LLM prompt carries today's date and the daily table.
@@ -95,6 +96,7 @@ async def test_unknown_location_apologizes():
     assert not result.success
     assert "couldn't find nowheresville" in result.speech.lower()
     assert weather.forecasts == []  # never fetched a forecast
+    assert not result.voiced
 
 
 async def test_provider_error_degrades_gracefully():
@@ -104,3 +106,4 @@ async def test_provider_error_degrades_gracefully():
     )
     assert not result.success
     assert "couldn't get the weather" in result.speech.lower()
+    assert not result.voiced

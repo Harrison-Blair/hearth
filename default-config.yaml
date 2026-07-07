@@ -71,6 +71,8 @@ llm:
 persona:
   enabled: true           # on = Calcifer character on final spoken replies only; false = neutral voice
   strength: "terse"       # terse | expansive: 1–2 sentence quip vs. a bit more room
+  revoice_enabled: true   # live-restyle plain skill replies in persona at the pipeline's speak choke point
+  revoice_timeout_s: 5.0  # bounds the live revoice LLM call
 
 agent:
   tool_mode: "auto"       # native | json | auto: native Ollama tool-calling, JSON fallback

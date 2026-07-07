@@ -115,7 +115,8 @@ class WeatherSkill(Skill):
         answer = await self._llm.complete(prompt, system=self._system, label="weather")
         if not answer:
             return SkillResult("I couldn't put the forecast into words.", success=False)
-        return SkillResult(speech=answer, data={"location": forecast.location})
+        # self._system already carries persona.
+        return SkillResult(speech=answer, data={"location": forecast.location}, voiced=True)
 
     @staticmethod
     def _format(forecast: Forecast) -> str:

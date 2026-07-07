@@ -103,7 +103,7 @@ class FakeSkill(Skill):
     intents = {"general"}
 
     def __init__(self, speech="it is noon", expects_reply=False,
-                 reply_speech="reply handled", reply_restart=False):
+                 reply_speech="reply handled", reply_restart=False, voiced=False):
         self.handled = []
         self.histories = []
         self.spokens = []
@@ -112,16 +112,31 @@ class FakeSkill(Skill):
         self._expects_reply = expects_reply
         self._reply_speech = reply_speech
         self._reply_restart = reply_restart
+        self._voiced = voiced
 
     async def handle(self, cmd, intent):
         self.handled.append((cmd.text, intent.type))
         self.histories.append(cmd.history)
         self.spokens.append(cmd.spoken)
-        return SkillResult(speech=self._speech, expects_reply=self._expects_reply)
+        return SkillResult(
+            speech=self._speech, expects_reply=self._expects_reply, voiced=self._voiced
+        )
 
     async def handle_reply(self, cmd):
         self.replies.append(cmd.text)
         return SkillResult(speech=self._reply_speech, restart=self._reply_restart)
+
+
+class FakeRevoicer:
+    """Records the plain text it was asked to restyle and returns a fixed reply."""
+
+    def __init__(self, styled="STYLED"):
+        self.styled = styled
+        self.calls = []
+
+    async def revoice(self, text):
+        self.calls.append(text)
+        return self.styled
 
 
 class FakeTTS:
@@ -175,7 +190,7 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
               decline_phrases=None, confirm_earcon=b"", end_phrases=None,
               ack_delay_s=0.0, standdown=None, barge_in_enabled=False,
               barge_in_threshold=0.8, barge_in_trigger_frames=3,
-              barge_in_announcements=False, restart_in_place=None):
+              barge_in_announcements=False, restart_in_place=None, revoicer=None):
     # Tests pass a single wake_earcon for convenience; the pipeline takes a pool.
     if wake_earcons is None:
         wake_earcons = [wake_earcon] if wake_earcon else []
@@ -208,6 +223,7 @@ def _pipeline(audio_in, detector, skill, tts, out, arbiter, *, stt=None,
         barge_in_trigger_frames=barge_in_trigger_frames,
         barge_in_announcements=barge_in_announcements,
         restart_in_place=restart_in_place,
+        revoicer=revoicer,
     )
 
 
@@ -250,6 +266,48 @@ async def test_speak_single_sentence_plays_once():
 
     assert tts.spoke == ["It is noon."]
     assert out.played == [b"AUDIO"]
+
+
+async def test_unvoiced_reply_is_revoiced_before_tts():
+    skill = FakeSkill(speech="it is noon", voiced=False)
+    tts = FakeTTS()
+    out = FakeOut()
+    revoicer = FakeRevoicer(styled="Ha, it is noon!")
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, tts, out, AudioArbiter(), revoicer=revoicer,
+    )
+
+    await pipeline.run()
+
+    assert revoicer.calls == ["it is noon"]
+    assert tts.spoke == ["Ha, it is noon!"]
+
+
+async def test_voiced_reply_bypasses_revoicer():
+    skill = FakeSkill(speech="it is noon", voiced=True)
+    tts = FakeTTS()
+    out = FakeOut()
+    revoicer = FakeRevoicer(styled="SHOULD NOT BE USED")
+    pipeline = _pipeline(
+        FakeAudioIn(3), FakeDetector(), skill, tts, out, AudioArbiter(), revoicer=revoicer,
+    )
+
+    await pipeline.run()
+
+    assert revoicer.calls == []  # already persona'd -> never sent through the revoicer
+    assert tts.spoke == ["it is noon"]  # byte-identical to the skill's own reply
+
+
+async def test_no_revoicer_is_byte_identical_regardless_of_voiced():
+    # persona disabled -> app.py injects no Revoicer -> passthrough, unvoiced or not.
+    skill = FakeSkill(speech="it is noon", voiced=False)
+    tts = FakeTTS()
+    out = FakeOut()
+    pipeline = _pipeline(FakeAudioIn(3), FakeDetector(), skill, tts, out, AudioArbiter())
+
+    await pipeline.run()
+
+    assert tts.spoke == ["it is noon"]
 
 
 class BusyThenFreeIn:

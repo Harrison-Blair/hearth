@@ -55,6 +55,8 @@ llm:
 persona:
   enabled: true
   strength: terse
+  revoice_enabled: true
+  revoice_timeout_s: 5.0
 agent:
   tool_mode: auto
   max_tool_rounds: 3

@@ -91,19 +91,19 @@ Implementation order is fixed: (1) write the tests; (2) confirm they FAIL
 against unchanged code for the expected reason; (3) implement until they pass.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before
+- [x] AC-1: The tests listed above were observed failing before
       implementation and pass after.
-- [ ] AC-2: End-to-end with persona enabled, an unvoiced skill reply is
+- [x] AC-2: End-to-end with persona enabled, an unvoiced skill reply is
       revoiced before TTS with all digit sequences intact; with persona
       disabled the spoken text is byte-identical to today (PLM-003 AC-1).
-- [ ] AC-3: Timeout, error, empty output, and open-circuit cases all speak
+- [x] AC-3: Timeout, error, empty output, and open-circuit cases all speak
       the plain string — bounded by `revoice_timeout_s`, immediate when the
       circuit is open, warning logged, no reply ever dropped (PLM-003 AC-3).
-- [ ] AC-4: A revoiced output missing/mutating any digit sequence is
+- [x] AC-4: A revoiced output missing/mutating any digit sequence is
       discarded for the plain string (PLM-003 AC-4).
-- [ ] AC-5: `revoice_enabled` and `revoice_timeout_s` are typed
+- [x] AC-5: `revoice_enabled` and `revoice_timeout_s` are typed
       `PersonaConfig` fields mirrored in both yamls; `revoice_enabled: false`
       makes zero revoice LLM calls while LLM-skill replies stay flavored
       (PLM-003 AC-6).
-- [ ] AC-6: `ruff check assistant tests` and the full suite pass without
+- [x] AC-6: `ruff check assistant tests` and the full suite pass without
       native extras or network (PLM-003 AC-8).

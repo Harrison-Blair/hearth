@@ -7,6 +7,7 @@ from assistant.core.config import (
     ConversationConfig,
     LlmConfig,
     LoggingConfig,
+    PersonaConfig,
     RecorderConfig,
     SttConfig,
     TtsConfig,
@@ -244,3 +245,22 @@ def test_llm_max_retries_default_and_override(monkeypatch):
     assert LlmConfig().max_retries == 2
     monkeypatch.setenv("ASSISTANT_LLM__MAX_RETRIES", "0")
     assert Config().llm.max_retries == 0
+
+
+def test_revoice_defaults():
+    assert PersonaConfig().revoice_enabled is True
+    assert PersonaConfig().revoice_timeout_s == 5.0
+
+
+def test_revoice_loads_from_yaml():
+    cfg = Config()  # both mirrored in config.yaml
+    assert cfg.persona.revoice_enabled is True
+    assert cfg.persona.revoice_timeout_s == 5.0
+
+
+def test_revoice_env_override(monkeypatch):
+    monkeypatch.setenv("ASSISTANT_PERSONA__REVOICE_ENABLED", "false")
+    monkeypatch.setenv("ASSISTANT_PERSONA__REVOICE_TIMEOUT_S", "2.5")
+    cfg = Config()
+    assert cfg.persona.revoice_enabled is False
+    assert cfg.persona.revoice_timeout_s == 2.5

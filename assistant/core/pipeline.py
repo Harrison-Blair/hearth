@@ -23,6 +23,7 @@ from assistant.core.arbiter import AudioArbiter
 from assistant.core.conversation import Conversation
 from assistant.core.events import Command, Turn, WakeEvent
 from assistant.core.orchestrator import Orchestrator
+from assistant.core.revoice import Revoicer
 from assistant.core.selfupdate import restart_in_place as _default_restart_in_place
 from assistant.core.standdown import StandDown
 from assistant.core.state import NullStateEmitter
@@ -112,6 +113,7 @@ class VoicePipeline:
         barge_in_trigger_frames: int = 3,
         barge_in_announcements: bool = False,
         restart_in_place: Callable[[], None] | None = None,
+        revoicer: Revoicer | None = None,
     ) -> None:
         self._audio_in = audio_in
         self._detector = detector
@@ -215,6 +217,10 @@ class VoicePipeline:
         # Self-update: re-execs the daemon after a sign-off is spoken. Injectable
         # so tests never invoke the real os.execv; defaults to the real primitive.
         self._restart_in_place = restart_in_place or _default_restart_in_place
+        # Restyles a not-already-persona'd reply in the persona's voice at the top
+        # of _speak, before sentence splitting/TTS. None (persona off, or no LLM
+        # wired) -> passthrough, identical to today's plain speech.
+        self._revoicer = revoicer
 
     def request_listen(self) -> None:
         """Start a turn now, skipping the wake word (tap-to-listen). No-op if a
@@ -556,7 +562,7 @@ class VoicePipeline:
         log.info("Reply: %r", result.speech)
         if on_reply is not None:
             on_reply(result)  # kick off cue generation to overlap with playback
-        await self._speak(result.speech)
+        await self._speak(result.speech, voiced=result.voiced)
         if result.restart:
             self._restart_in_place()
         conv.add("user", transcript)
@@ -575,7 +581,7 @@ class VoicePipeline:
         log.info("Reply: %r", result.speech)
         if on_reply is not None:
             on_reply(result)  # kick off cue generation to overlap with playback
-        await self._speak(result.speech)
+        await self._speak(result.speech, voiced=result.voiced)
         if result.restart:
             self._restart_in_place()
         if transcript:
@@ -650,12 +656,19 @@ class VoicePipeline:
         # fire inside a longer follow-up like "no wait, one more thing".
         return self._normalize_text(transcript) in self._decline_phrases
 
-    async def _speak(self, text: str) -> bool:
+    async def _speak(self, text: str, *, voiced: bool = False) -> bool:
         """Synthesize and play sentence by sentence so the first audio starts before
         the whole reply is synthesized, cutting the "wait for the full synth" stall.
 
+        ``voiced`` marks text that is already persona-flavored (an LLM reply whose
+        system prompt carried the persona suffix); it skips the Revoicer seam.
+        Plain/deterministic text (``voiced=False``, the default) is restyled by the
+        injected Revoicer first, when one is wired in.
+
         Returns True when the user barged in (wake word over playback): the rest
         of the reply is dropped and the caller reopens the mic."""
+        if not voiced and self._revoicer is not None:
+            text = await self._revoicer.revoice(text)
         self._barged = False
         self._state_emitter.state("speaking", text=text)
         barged = self._watch_for_barge_in()

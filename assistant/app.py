@@ -25,6 +25,7 @@ from assistant.core.logging import setup_logging
 from assistant.core import persona
 from assistant.core.orchestrator import Orchestrator
 from assistant.core.pipeline import VoicePipeline
+from assistant.core.revoice import Revoicer
 from assistant.core.selfupdate import restart_in_place
 from assistant.core.speech import Speaker
 from assistant.core.standdown import StandDown
@@ -235,7 +236,8 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
 
     # LLM + routing + skills.
     llm = _build_llm(config.llm)
-    if not await llm.health():
+    llm_healthy = await llm.health()
+    if not llm_healthy:
         if config.llm.provider == "opencode-zen":
             log.warning(
                 "OpenCode Zen not ready (base_url=%s, model=%s); answers will fail "
@@ -265,6 +267,16 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     )
     persona_suffix = persona.suffix(
         enabled=config.persona.enabled, strength=config.persona.strength
+    )
+    # Restyles a not-already-persona'd skill reply live at the pipeline's speak
+    # choke point (core/revoice.py). Seeded from the boot health check above, so
+    # a down LLM never adds revoice latency to the first replies.
+    revoicer = Revoicer(
+        llm,
+        persona.persona_segment(config.persona.strength),
+        enabled=config.persona.enabled and config.persona.revoice_enabled,
+        timeout_s=config.persona.revoice_timeout_s,
+        healthy=llm_healthy,
     )
     registry = SkillRegistry()
     registry.register(ClockSkill())
@@ -456,6 +468,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
         barge_in_trigger_frames=config.barge_in.trigger_frames,
         barge_in_announcements=config.barge_in.announcements,
         restart_in_place=restart_in_place,
+        revoicer=revoicer,
     )
     scheduler = ReminderScheduler(
         store, tts, out, arbiter, poll_seconds=config.scheduling.poll_seconds,
