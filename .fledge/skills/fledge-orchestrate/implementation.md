@@ -90,7 +90,7 @@ For each feather dispatched:
 
 **Skua pool (`spawn-pool`):** size is `ceil(active brooders / 3)`, minimum 1. Spawn `fledge-skua` workers (named per the scheme below) as the active brooder count crosses each multiple of 3; skuas persist until the end of the run. A skua idle between review requests is normal — idle is not completion; it stays alive and addressable.
 
-**Naming scheme:** a worker's name is its role name plus a unique identifier drawn from the 18 extant penguin species — `<role>-<species>`, e.g. `fledge-brooder-adelie`, `fledge-skua-emperor`. The name is set at spawn and is how you and other workers address it. Species identifiers are for spawned workers only — you are always `fledge-orchestrator` and never take a species. One species per living worker, shared across roles:
+**Naming scheme:** a worker's name is its role name plus a unique identifier drawn from the 18 extant penguin species — `<role>-<species>`, e.g. `fledge-brooder-adelie`, `fledge-skua-emperor`. The name is set at spawn and is how you and other workers address it. The scheme covers every `spawn-worker` you create, including the forager spawned during planning (`fledge-forager-<species>`); scouts (spawned by the forager, never addressed by name) are exempt and take no species. Species identifiers are for spawned workers only — you are always `fledge-orchestrator` and never take a species. One species per living worker, shared across roles:
 
 `emperor`, `king`, `adelie`, `chinstrap`, `gentoo`, `little`, `yellow-eyed`, `african`, `humboldt`, `magellanic`, `galapagos`, `fiordland`, `snares`, `erect-crested`, `southern-rockhopper`, `northern-rockhopper`, `royal`, `macaroni`
 

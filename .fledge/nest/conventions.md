@@ -1,68 +1,64 @@
 ---
-generated: 2026-07-07T02:45:41Z
-commit: 8d180f04862c48fdddc61804b81dafcd0f620344
+generated: 2026-07-07T07:06:00Z
+commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Conventions
 
-Coding, architectural, and process conventions observed consistently across the codebase. Follow these when extending the daemon or adding a feature (e.g., a self-update skill); reviewers enforce them.
+Coding and design conventions observed across the repository, reconciled from every module's report. These are the rules a change should follow to match the existing codebase.
 
-## Architectural rules
+## Async everywhere pipeline-facing
+Every capability method that the pipeline or a skill calls is `async def` — STT, TTS, LLM, search, calendar, weather, skill `handle()`. CPU-bound or blocking work is wrapped in `asyncio.to_thread()` (Whisper, Piper, Ollama HTTP, the synchronous `ddgs` client) so the event loop is never blocked (`assistant/stt/faster_whisper_stt.py`, `assistant/search/ddgs_provider.py`). Tests match: `pytest` runs with `asyncio_mode = auto`, so `async def test_...` needs no marker.
 
-- **Interface-per-capability.** Every capability is a package with an ABC in `base.py` and concrete implementation(s) beside it. The pipeline depends only on the ABC, never a concrete provider (`assistant/core/pipeline.py`, `CLAUDE.md`). Adding or swapping an implementation means coding against `base.py`.
-- **`app.py` is the only wiring point.** All concrete construction, skill registration, and default-skill choice happen in `assistant/app.py:_run()`. Do not instantiate providers or hard-code choices inside components.
-- **Shared cross-stage records live in `core/events.py`.** New records that flow between pipeline stages go here so capability packages don't import each other and the dependency graph stays acyclic.
-- **`tui` → `assistant` is one-directional and narrow.** The TUI imports only `assistant.core.config.Config` and `assistant.wake.registry`. Nothing under `assistant/` imports `tui` (`CLAUDE.md`, `tui/app.py`).
-- **Stub seams are not dead code.** `sync/` and `connectivity/` base classes are deliberate future seams; don't delete them (`CLAUDE.md`).
-- **Remote is an optional accelerator.** Local implementations are the guaranteed path; cloud/remote always sits behind an interface with a local fallback and boot health-check that degrades with a logged warning, never a crash (`OllamaProvider.health()`, `assistant/app.py`).
+## Interface-per-capability, ABC in `base.py`
+Each capability package holds an ABC in `base.py` and concrete implementation(s) beside it. The pipeline and skills type against the ABC and never import a concrete provider. When adding a capability or swapping an implementation, code against `base.py`. New search backends implement `assistant/search/base.py:SearchProvider` (`async search(query, *, count)`, `async health()`, `async aclose()`) — do not let a caller reach for `DdgsSearch`/`WikipediaSearch` directly.
 
-## Config
+## `app.py` is the sole composition root
+All concrete construction and dependency injection happens in `assistant/app.py`. Components never build their collaborators; they receive them. Construction-time choices (which skills, default skill, provider fallback order, `MultiSearch` provider list) live in `app.py`, isolated in `_build_*` factories. Nothing else instantiates a provider.
 
-- **Config is the single source of truth** (`assistant/core/config.py`, pydantic-settings). Every device id, model path, and threshold is a typed field on a `*Config` model. No magic numbers or hard-coded paths in component code.
-- **New tunables must be added in three places**: a typed field on the relevant `*Config` model, plus mirrored in both `config.yaml` and `default-config.yaml` (`default-config.yaml` documents every key with defaults + comments).
-- **Env override format**: `ASSISTANT_<SECTION>__<FIELD>` with `__` for nesting (e.g. `ASSISTANT_LLM__MODEL=llama3.2:3b`). Precedence: explicit init args > env > `config.yaml` > pydantic defaults (`tests/test_config.py`).
+## Components take primitives, not the whole `Config`
+Constructors accept scalar config values (paths, thresholds, host URLs, timeouts, counts), never the global `Config` object. This keeps every component unit-testable in isolation (`assistant/core/config.py` conventions; confirmed by all provider tests instantiating with bare kwargs).
 
-## Component construction
+## Config is the single source of truth
+Every device id, model path, and threshold is a typed field on a `*Config` model in `assistant/core/config.py`, mirrored in both `config.yaml` and `default-config.yaml`. Values are overridable by `ASSISTANT_*` env vars using `__` for nesting; precedence is init args > env > `config.yaml`. Never hard-code a path/threshold/device in a component — add a tunable to the relevant `*Config` and mirror it in both YAML files.
 
-- **Components take primitives in `__init__`, never the whole `Config`** (paths, thresholds, IDs, provider instances) — keeps them unit-testable in isolation. The whole-`Config` read happens only in `app.py`.
-- **Dependency injection everywhere**, including injectable clocks (`now=` callables) and token sources for deterministic tests.
+## Shared cross-stage records live in `core/events.py`
+`WakeEvent`, `Command`, `Intent`, `SkillResult`, `Turn`, `ToolCall` live in `assistant/core/events.py` so capability packages exchange them without importing each other, keeping the dependency graph acyclic. Provider-local types (e.g. `SearchResult` in `search/base.py`, `Forecast` in `weather/base.py`) stay in their own package — they are not cross-stage pipeline records.
 
-## Async & concurrency
+## Graceful degradation over crashing
+Offline-first means never crashing the loop. Patterns seen throughout:
+- Providers expose `health() -> bool`, checked at boot in `app.py`, which logs a warning and continues rather than aborting.
+- Skills wrap provider/LLM calls in `try/except` and return `SkillResult(..., success=False)` with an apologetic spoken line instead of raising.
+- LLM/JSON/timeout failures in the orchestrator degrade to the `default=True` `GeneralSkill`.
+- `MultiSearch` logs and skips a failing provider; it only raises if all fail.
+- `verify()` fails open — a malformed verdict is treated as approve.
+- Pipeline uses intentional bare `except Exception` to survive transient device/synth/skill errors (documented in `AGENTS.md` — do not "fix" these).
 
-- **All pipeline-facing capability methods are `async`.** Blocking native work (Whisper, Piper) is wrapped in `asyncio.to_thread()` to keep the event loop free (`assistant/stt/faster_whisper_stt.py`, `assistant/tts/piper_tts.py`).
-- **No background timer tasks for timed state.** Consumers of `StandDown` and the poll loops poll `.active`/`due()` on their own tick (`assistant/core/standdown.py`, `assistant/scheduling/scheduler.py`).
-- **Audio is serialized through `AudioArbiter`.** Proactive pollers (reminders, calendar) hold the arbiter before speaking so they never collide with capture/playback (`assistant/scheduling/scheduler.py`, `assistant/core/arbiter.py`).
-- **UTC epoch seconds everywhere** in storage and poll loops (`time.time()`); only skills convert wall-clock to epoch (`assistant/storage/reminders.py`).
+## Remote behind an interface with a local fallback
+Cloud services (OpenCode Zen LLM, Google Calendar, DuckDuckGo) are optional accelerators behind an ABC with a guaranteed-local path (`OllamaProvider`, `WikipediaSearch`, no-calendar). `FallbackLLMProvider` retries on the fallback only on an exception from the primary — a valid-but-empty primary response does not fall back. Transient HTTP failures (429/5xx, truncated 200) retry with exponential backoff + jitter; auth/4xx never retry (`OpenCodeZenProvider`).
 
-## Error handling & degradation
+## Skills are plug-ins; routing never names them
+A skill is a `Skill` subclass declaring `name` + `intents` + static `tool_specs`, registered via `SkillRegistry.register(...)`. The tool name IS the intent type — the orchestrator dispatches by name with no mapping layer. Slots come from tool arguments, with `intent.slots.get("x") or cmd.text` as the fallback. Skills that should answer directly (e.g. `GeneralSkill`) override `tools()` to return `[]`.
 
-- **Graceful degradation is pervasive.** Every external call (LLM, provider, store, playback) is wrapped in try/except with a spoken apology or logged warning; failures never propagate to crash the pipeline. LLM/tool/JSON failures degrade to the `default=True` `GeneralSkill` (`assistant/core/orchestrator.py`, `assistant/skills/*`).
-- **Health checks return bool, never throw** (`OllamaProvider.health()`).
+## Prompt-injection defense for untrusted web content
+Any web content fed to the LLM is fenced and neutralized. `WebSearchSkill._neutralize()` strips internal fence markers, regex-filters injection patterns ("ignore previous instructions", role prefixes, "new instructions:", exfil URLs) to `[filtered]`, wraps each result in `<<<…>>>`, and the assess system prompt forbids following instructions inside fences. Model-emitted `new_query`/`remark` are length-capped so injected text can't ride out at scale. A new search provider's snippets flow through the same path.
 
-## Skill & routing patterns
+## Persona is scoped to spoken outputs only
+The Calcifer persona suffix (`core/persona.py:with_persona`) is appended only to terminal spoken replies (`chat`/`complete`), never to tool-decision (`chat_tools`) or verification-routing fields. In the verify loop, persona rides only `feedback`/`rewritten_speech`; `decision`/`rewritten_tool`/`rewritten_arguments` stay persona-free.
 
-- **Routing never hard-codes skill names.** Intents are exposed as tool schemas via `SkillRegistry.tool_schemas()`; the intent name *is* the tool name (`assistant/skills/base.py`).
-- **Confirm-then-act via `expects_reply`.** A destructive/confirmable action returns `SkillResult(expects_reply=True)`; the pipeline holds that skill and routes the user's next utterance to `skill.handle_reply(Command)` without re-orchestrating (one round only). See `ReminderSkill` bulk delete (`assistant/skills/reminder.py`, `pipeline.py`). **This is the seam a self-update confirmation would use.**
-- **Text-slot fallback**: intent slots commonly back off to `intent.slots.get("text") or cmd.text` so both structured tool calls and text-only fallbacks route.
-- **Persona injection is scoped.** Persona voice (`with_persona()`, `assistant/core/persona.py`) is appended only to final-reply prompts, never to tool-decision or JSON-structured prompts, so tool selection stays unaffected (`tests/test_persona.py`).
-- **LLM calls carry `label="<action>"`** for JSONL trace/eval extraction; structured extraction requests use `json=True`.
-- **Humanized speech**: durations/dates/times go through `assistant/nlu/timespec.py` helpers; no raw timestamps spoken.
+## Logging and diagnostics
+Console logs use a fixed `HH:MM:SS LEVEL logger: message` format the TUI parses. Structured diagnostics go to JSONL via `JsonlFormatter` with a reserved `extra={"data": {...}}` dict; LLM providers log full payloads + `latency_ms`. Pipeline state is emitted to stdout as `@@STATE {json}\n` markers for the TUI. Console lines are clipped (200–2000 chars); JSONL keeps full payloads.
 
-## TUI conventions
+## TUI conventions (40×30 portrait, touch-first)
+- Dependency is one-directional: `tui` imports only `assistant.core.config.Config` and `assistant.wake.registry`; nothing in `assistant/` imports `tui`.
+- Thin screens, thick app: all state lives on `AssistantTUI`; screens are views that call back via `self.app._method()`.
+- One screen per job; full-width height-3 tappable controls; steppers/pickers/switches instead of text inputs (no free-text fields); no horizontal overflow at 40 columns (enforced by `tests/test_tui_screens.py:test_no_screen_overflows_40_columns`).
+- Config editing is declarative via `config_schema.py:FIELDS`; Save writes `config.yaml`, Apply sets env overrides + restarts, Reset re-seeds from `default-config.yaml`.
 
-- **Portrait-first, touch-only.** Design for 40×30 cells: full-width height-3 buttons, steppers/pickers instead of text inputs, no horizontal overflow at 40 columns (enforced by `tests/test_tui_screens.py`). No free-text config fields — all fields are select/multiselect/number/toggle (`tui/config_schema.py`).
-- **Config edits become `ASSISTANT_*` env overrides** applied at daemon (re)start; "Save" persists to `config.yaml`, "Apply" restarts with env overrides.
-
-## Style & tooling
-
-- **Ruff, line length 100.** `ruff check assistant tests`.
-- **Python 3.12** (pinned via `.python-version`).
-- **Spec conventions** (`specs/`): a spec has a status line, author+date, context, behavior (spoken vs. typed paths), design (naming files/classes), "files to change", acceptance criteria (as numbered test cases), out-of-scope, and verification sections. `Command.spoken` distinguishes spoken (needs confirmation) vs. typed (trusted) input.
-
-## Testing conventions
-
-- **pytest with `asyncio_mode = auto`** — `async def test_...` needs no marker.
-- **Tests run without native extras**; anything touching a model/device/network is stubbed. `pip install -e ".[dev]"` is sufficient.
-- **Fakes mirror the ABC exactly** and record calls for assertion. See `testing.md`.
+## Formatting and tooling
+- Python ≥3.11 (repo pins 3.12.13); `ruff` with line-length 100 (`ruff check assistant tests`).
+- Native/heavy deps are split into per-capability optional extras; tests run on `[dev]` alone with everything native stubbed.
+- Injectable clocks: skills/schedulers take an optional `now: Callable[[], datetime]` (default `local_now()`/`datetime.now`) for deterministic tests.
+- Timestamps: UTC epoch seconds in SQLite; tz-aware `datetime` elsewhere.

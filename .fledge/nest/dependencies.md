@@ -1,69 +1,68 @@
 ---
-generated: 2026-07-07T02:45:41Z
-commit: 8d180f04862c48fdddc61804b81dafcd0f620344
+generated: 2026-07-07T07:06:00Z
+commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Dependencies
 
-External libraries, tools, and services, with where and why each is used. Heavy/native deps are split into per-capability extras in `pyproject.toml` and installed only as needed; the test suite runs on the core + `[dev]` extras alone (everything native is stubbed).
+Third-party libraries, external services, and system tools, deduplicated with usage notes. Native/heavy deps are split into per-capability optional extras in `pyproject.toml` (`tts`, `wake`, `stt`, `vad`, `llm`, `nlu`, `scheduling`, `search`, `gcal`, `aec`, `tui`, `dev`, `all`) and installed only as needed. `[all]` includes everything except `aec` and `tui`; the test suite runs on `[dev]` alone with all native deps stubbed.
 
-## Core (always installed)
+## Core runtime
+- **pydantic ≥2 / pydantic-settings ≥2** — all `*Config` models and env-var override system (`assistant/core/config.py`).
+- **pyyaml ≥6** — `config.yaml`/`default-config.yaml` load; also TUI config read/write (lossy of comments) and training config.
+- **numpy ≥1.24** — PCM/signal processing (RMS, peak, resampling, earcon synthesis) across `audio/`, `core/`, wake/STT stubs.
+- **httpx** — the shared async HTTP client. Used by: Ollama + OpenCode Zen LLM providers, `WikipediaSearch`, `OpenMeteoWeather`, `GoogleCalendar`, and the TUI's Ollama/Zen/registry/voice discovery. **Every network provider test stubs it via `httpx.MockTransport`.**
 
-- **pydantic ≥2 + pydantic-settings ≥2** — `Config` loading and validation from `config.yaml` + `ASSISTANT_*` env vars (`assistant/core/config.py`).
-- **pyyaml ≥6** — YAML config read/write (config loading; also `tui/configfile.py`).
-- **sounddevice ≥0.4** — PortAudio-backed audio I/O (`assistant/audio/sounddevice_io.py`, `devices.py`). Requires system PortAudio (`libportaudio2`).
-- **numpy ≥1.24** — PCM/audio math throughout `assistant/audio/` and `assistant/core/pipeline.py` (RMS, int16↔float32).
+## Voice I/O (per-capability extras)
+- **sounddevice** (+ system **PortAudio**) — audio device enumeration and streaming (`audio/sounddevice_io.py`). `[audio]`-ish; PortAudio is a host prerequisite even for the frozen binary.
+- **webrtcvad** — voice-activity detection for end-of-speech (`audio/recorder.py`); `[vad]`. Also needs `setuptools<81` for `pkg_resources`.
+- **speexdsp** (optional native, `[aec]`, not in `all`) — acoustic echo cancellation for barge-in (`audio/aec.py`); degrades to passthrough if absent. Needs `libspeexdsp-dev` at build.
+- **livekit-wakeword** — ONNX wake-word runtime + bundled mel/embedding models (`wake/livekit_detector.py`); `[wake]`.
+- **faster-whisper** (CTranslate2 backend) — local STT (`stt/faster_whisper_stt.py`); `[stt]`. Bundles a Silero VAD ONNX model.
+- **piper-tts** (+ system **espeak-ng**) — offline TTS synthesis (`tts/piper_tts.py`); `[tts]`.
 
-## Per-capability extras (`pyproject.toml`)
+## Reasoning / LLM
+- **Ollama** (external binary daemon, HTTP at `http://localhost:11434`) — local LLM, the default and guaranteed path; `OllamaProvider` calls `/api/generate`, `/api/chat`, `/api/tags`. Managed/started by `install.sh`, `bootstrap.py`, and the TUI.
+- **OpenCode Zen** (external cloud API, OpenAI-compatible, `/zen/v1/...`, Bearer auth) — optional remote LLM accelerator; `OpenCodeZenProvider`. Metadata in `opencode.json`; key kept in `.env`.
+- **dateparser** — spoken/absolute date parsing fallback in `nlu/timespec.py`; `[nlu]`.
 
-| Extra | Package(s) | Used by / for |
-|---|---|---|
-| `[tts]` | piper-tts | `assistant/tts/piper_tts.py` — ONNX voice synthesis (needs espeak-ng) |
-| `[wake]` | livekit-wakeword | `assistant/wake/livekit_detector.py` — wake detection (bundles onnxruntime + mel/embedding models) |
-| `[stt]` | faster-whisper | `assistant/stt/faster_whisper_stt.py` — CTranslate2 Whisper |
-| `[vad]` | webrtcvad, setuptools<81 | `assistant/audio/recorder.py` — per-frame VAD (webrtcvad needs pkg_resources) |
-| `[llm]` | httpx | `assistant/llm/ollama_provider.py` — async calls to Ollama |
-| `[nlu]` | dateparser | `assistant/nlu/timespec.py` — natural-language time parsing |
-| `[scheduling]` | apscheduler | reminder/timer scheduling support |
-| `[search]` | httpx, ddgs | `assistant/search/ddgs_provider.py` (DuckDuckGo) + `wikipedia.py` |
-| `[gcal]` | httpx, google-auth, requests | `assistant/calendar/google_calendar.py` — Google Calendar REST v3 + token refresh |
-| `[aec]` | speexdsp | `assistant/audio/aec.py` — echo cancellation (C build; degrades to `None`; excluded from `all` pending Pi 5 validation) |
-| `[tui]` | textual~=8.2, httpx | `tui/` (textual pinned to 8.2.x for RichLog internals) |
-| `[dev]` | pytest, pytest-asyncio, ruff | test + lint |
-| `[all]` | tts, wake, stt, vad, llm, nlu, scheduling, search, gcal | full runtime (aec and tui deliberately excluded) |
+## Services
+- **ddgs** — DuckDuckGo keyless web-search scraper; synchronous, wrapped in `asyncio.to_thread` (`search/ddgs_provider.py`); `[search]`. (Wikipedia search needs only httpx — no extra package.)
+- **google-auth** (+ **requests** for its sync transport) — service-account token minting/refresh for Google Calendar; lazy-imported, refreshed off-thread (`calendar/google_calendar.py`); `[gcal]`.
+- **apscheduler** — referenced for reminder scheduling background polling (`[scheduling]`); note the runtime `ReminderScheduler` is itself a hand-rolled async poll loop.
+- **sqlite3** (stdlib) — reminder and calendar-state stores; WAL + `synchronous=NORMAL`.
+- **Open-Meteo** (external free API, no key) — weather forecast + geocoding (`weather/open_meteo.py`).
 
-## External services / processes
+## Web-search dependency picture (focus area)
+Today the search capability depends only on **ddgs** (keyless DuckDuckGo) and **httpx** (Wikipedia). Both are keyless. Introducing AI-first providers (Tavily/Exa/Brave) will add:
+- new HTTP calls (reuse **httpx** — the established async client; no new HTTP library needed);
+- an **API key** per provider (precedent from `LlmConfig.api_key`/OpenCode Zen: secret lives in `.env`, surfaced via `ASSISTANT_*`, not the touch UI);
+- a new optional extra if a provider ships its own SDK (prefer raw httpx to stay consistent and keyless-friendly).
+Note: a user memory records interest in a self-hosted **SearXNG** provider (JSON API via `format=json`, needs Redis) as a possible future keyless backend.
 
-- **Ollama** — local LLM server (`ollama serve`), reached over HTTP by `OllamaProvider` (`/api/generate`, `/api/chat`, `/api/tags`). The default model is `qwen2.5:3b-instruct` (`config.yaml`). The TUI can start/restart/monitor it as a second supervised process and browse the ollama.com registry (`tui/discovery.py`, `tui/supervisor.py`).
-- **Google Calendar API v3** — optional; service-account auth via google-auth (sync refresh off-thread), read personal calendar + read/write the dedicated "Calcifer" calendar (`assistant/calendar/google_calendar.py`).
-- **DuckDuckGo (via `ddgs`)** — keyless web search; sync client run in `asyncio.to_thread`, fresh client per call; rate-limits, so occasional failures expected (`assistant/search/ddgs_provider.py`).
-- **Wikipedia Action API** — keyless; httpx async; lead-paragraph extraction (`assistant/search/wikipedia.py`).
-- **Open-Meteo** — keyless forecast + geocoding APIs; WMO code → phrase (`assistant/weather/open_meteo.py`).
+## TUI (`[tui]` extra, not in `all`)
+- **textual** (~=8.2, pinned for RichLog internals) — the TUI framework (`tui/`).
+- **rich** — text styling / RichLog rendering / selection.
+- **httpx** — Ollama/Zen/registry/HuggingFace discovery.
 
-## System packages (provisioned by `install.sh`)
+## Training (isolated `.venv-train`, never installed into runtime)
+- **livekit-wakeword[train,eval,export]** — the training orchestrator.
+- **torch + torchaudio** from the **ROCm** index (RX 9070 XT / RDNA4 / gfx1201; ROCm ≥6.4) — GPU compute for VITS synthesis + training. Runtime consumes only the exported `.onnx`; no GPU needed at inference.
+- System tools: **espeak-ng, libsndfile, ffmpeg, sox**. Auto-downloaded corpora: ACAV100M, MUSAN, MIT RIRs, Piper voices.
 
-PortAudio (`libportaudio2`, `portaudio19-dev`), Ollama binary, espeak-ng (Piper voices), optional `libspeexdsp-dev` (AEC). Pipeline detects pacman vs. apt.
+## Packaging (`packaging/`)
+- **PyInstaller 6.x** + **pyinstaller-hooks-contrib** — single-file binary build.
+- Bundled at build time: **openwakeword 0.6.0** feature models, **piper** assets, **faster_whisper** Silero VAD, **ctranslate2/onnxruntime** binaries, **dateparser** data, **textual** styles; hidden imports include webrtcvad, yaml, sklearn, scipy, apscheduler, tzlocal, tzdata, **ddgs**, huggingface_hub, tokenizers.
 
-## Models (downloaded at install, not in repo)
+## Tooling
+- **pytest + pytest-asyncio** (`asyncio_mode = auto`) — test runner; `[dev]`.
+- **ruff** (line-length 100) — linter; `[dev]`.
+- **pyenv** — pins Python 3.12.13 (`.python-version`); repo requires ≥3.11.
 
-- Wake: Calcifer ONNX (~940 KB, `models/wake/calcifer.onnx`) + livekit mel/embedding feature models (in the wheel).
-- TTS: Piper ONNX voice from HuggingFace `rhasspy/piper-voices`.
-- LLM: pulled by Ollama from ollama.com.
-- STT: faster-whisper model cached on first use (distil-small.en recommended for Pi 5).
+## System prerequisites (host)
+PortAudio, Ollama, espeak-ng (per README/`AGENTS.md`); libspeexdsp-dev only if building AEC.
 
-## Packaging / build & re-exec target
-
-- **PyInstaller 6.\*** + `pyinstaller-hooks-contrib` freezes the app to a single-file binary `dist/assistant-$(uname -m)` (`packaging/assistant.spec`, `build.sh`). No cross-compile: CI builds natively on x86_64 and aarch64 (`.github/workflows/release.yml`), attaching binaries to the GitHub Release via `softprops/action-gh-release@v2`.
-- The frozen bundle collects openwakeword, piper, faster_whisper, ctranslate2, onnxruntime, dateparser, textual, apscheduler, huggingface_hub, scikit-learn, scipy.
-- **Self-update relevance**: `packaging/entrypoint.py` is the frozen entry point. It detects frozen vs. source (`sys._MEIPASS`), `chdir`s to the bundle root, redirects writable paths via env (`ASSISTANT_STORAGE__DB_PATH`, `HF_HOME`) into an XDG data dir, and routes CLI subcommands (`--version`, `doctor`, `bootstrap`, `tui`, daemon). An `os.execv` re-exec must therefore target **the frozen binary path** when frozen (argv parsed by `entrypoint.py`) or **`sys.executable -m assistant.app`** from source; env vars survive `execv`, but the caller must preserve the chdir/env invariants. Host libs (`libportaudio.so*`, espeak-ng) are resolved from the system, not the bundle.
-
-## Standard library leaned on heavily
-
-`asyncio` (loops, locks, timeouts, subprocess, to_thread), `sqlite3`, `httpx` (async HTTP across LLM/calendar/search/weather/TUI), `threading.Lock` (AEC far-end queue), `hashlib`/`difflib` (eval replay), `logging` (JSONL trace).
-
-## Open Questions
-
-- `[aec]`/speexdsp is excluded from `[all]` pending Pi 5 validation; the validation gate is unspecified (`root` scout).
-- google-auth is lazily imported inside async methods; import correctness across all deploy targets (Pi 5, frozen binary) is untested (`assistant-data` scout).
+## Licensing
+Project is **AGPL-3.0** (`LICENSE`).

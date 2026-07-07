@@ -1,90 +1,110 @@
 ---
-generated: 2026-07-07T02:45:41Z
-commit: 8d180f04862c48fdddc61804b81dafcd0f620344
+generated: 2026-07-07T07:06:00Z
+commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Data Model
 
-Core types, dataclasses, and persistent schemas. The pipeline's shared records live in `assistant/core/events.py`; capabilities define their own dataclasses; two SQLite stores persist reminders and calendar state.
+Core types, dataclasses, config models, and persistent schemas, organized by concern. File references point at the definition site.
 
-## Pipeline records — `assistant/core/events.py`
+## Cross-stage pipeline records (`assistant/core/events.py`)
+These flow down the pipeline; kept in `core/` to keep the dependency graph acyclic.
 
-These flow down the pipeline and are the vocabulary skills and the orchestrator speak.
+- `WakeEvent(name: str, score: float)` — a wake-word activation.
+- `Turn(role: str, content: str)` — one message in conversation history (`"user"`/`"assistant"`).
+- `Command(text: str, spoken: bool = True, history: list[Turn] = [])` — a transcribed utterance to route.
+- `ToolCall(name: str, arguments: dict = {})` — a tool the model asked to run.
+- `Intent(type: str, slots: dict = {}, raw_text: str = "")` — a routed intent; `slots` populated from tool arguments.
+- `SkillResult(speech: str, data: dict | None = None, success: bool = True, expects_reply: bool = False)` — outcome of a skill handling a command.
 
-- **`WakeEvent`** — `name: str`, `score: float`. Wake-word detection with confidence; the score gates which ack-earcon pool is used.
-- **`Turn`** — `role: "user"|"assistant"`, `content: str`. One message in conversation history.
-- **`Command`** — `text: str`, `spoken: bool = True`, `history: list[Turn]`. A transcribed (or typed) utterance with conversation context. `spoken` distinguishes voice input (needs confirmation) from typed TUI input (trusted).
-- **`ToolCall`** — `name: str`, `arguments: dict`. The LLM's tool selection, parsed from native or JSON response.
-- **`Intent`** — `type: str`, `slots: dict = {}`, `raw_text: str = ""`. Routed intent; `slots` is populated from `ToolCall.arguments`.
-- **`SkillResult`** — `speech: str`, `data: dict | None = None`, `success: bool = True`, `expects_reply: bool = False`. A skill's outcome. **`expects_reply=True` is the confirm-then-act seam**: it tells the pipeline to hold the skill and route the next utterance to `skill.handle_reply(cmd)` without re-orchestrating.
+## Verification (`assistant/core/verify.py`)
+- `Verdict(decision: str, feedback: str = "", rewritten_tool: str = "", rewritten_arguments: dict = {}, rewritten_speech: str = "")` — `decision ∈ {approve, rewrite, reject}`. `feedback`/`rewritten_speech` are persona-flavored (spoken); `rewritten_tool`/`rewritten_arguments` are neutral (routing).
 
-Related: **`ChatResponse`** (`assistant/llm/base.py`) — `content: str`, `tool_calls: list[ToolCall]`. **`Conversation`** (`assistant/core/conversation.py`) — a rolling deque of `Turn`, capped at `max_turns`; `history()` returns a copy.
+## LLM (`assistant/llm/base.py`)
+- `ChatResponse(content: str = "", tool_calls: list[ToolCall] = [])` — union response: spoken content, tool calls, or both.
+- `LLMResponseError(message, *, retryable: bool)` — distinguishes transient (429/5xx, truncated 200) from permanent (4xx auth) failures; drives retry-vs-give-up.
 
-## Tool schema shape — `assistant/skills/base.py`
+## Search — the focus area (`assistant/search/base.py`)
+- `SearchResult` (`@dataclass`):
+  - `title: str` — result heading.
+  - `snippet: str` — brief excerpt (truncated to `max_snippet_chars`).
+  - `source: str` — bare domain for spoken attribution (e.g. `"bbc.com"`) or a hardcoded label (`"wikipedia"`); derived via `domain(url)`.
+  - `url: str = ""` — full URL; empty for backends that don't supply one.
+- `SearchProvider` (ABC) — the seam every backend implements: `async search(query: str, *, count: int) -> list[SearchResult]`, `async health() -> bool`, `async aclose() -> None`.
+- `domain(url) -> str` — `urlparse(url).netloc` minus a leading `www.`; `""` on invalid input.
+- Provider-internal request/response shapes (not persisted):
+  - `DdgsSearch`: `ddgs.DDGS.text()` rows `{href, title, body}` → `SearchResult{url, title, snippet}`.
+  - `WikipediaSearch`: Action API `action=query&generator=search&gsrsearch=…&prop=extracts&exintro=1&explaintext=1` → `{"query":{"pages":{pageid:{title, extract, index}}}}`, sorted by `index`.
+  - `MultiSearch` merge: round-robin by rank across provider lists; dedup key `url.rstrip("/").lower() or f"{source}:{title}"`; capped at `max_results`.
+- `WebSearchSkill._Verdict` (internal, `assistant/skills/web_search.py`) — parsed assess response: `sufficient` + either `answer` (+ source urls) or `new_query` + spoken `remark`.
 
-Skills expose OpenAI function-calling schemas; the intent name *is* the tool name:
+**Adding an AI-first provider (Tavily/Exa/Brave):** map the API's title/snippet/source/url onto `SearchResult`, implement `search`/`health`/`aclose`, and take API key + tuning as `__init__` primitives (no new cross-stage type is needed).
 
-```json
-{"type": "function",
- "function": {"name": "<intent>", "description": "...",
-              "parameters": {"type": "object", "properties": {...}, "required": [...]}}}
+## NLU time specs (`assistant/nlu/timespec.py`)
+- `ReminderSpec(due_at: float, message: str, interval: float | None = None)` — epoch due time, text, optional repeat cadence (seconds).
+- `ManagementAction(action, target_index, new_at_time, new_delay_seconds, new_message)` — `action ∈ {cancel, reschedule, rename, none}`.
+
+## Calendar (`assistant/calendar/`)
+- `CalendarEvent(id, calendar_id, title, start, end, all_day, description)` — `start` tz-aware; `end: datetime | None` (`base.py`).
+- `ExtractedEvent(title, start, end)`, `EventManagementAction(action, target_index, new_date, new_start_time, new_title)`, `EventReminderRequest(target_index, lead_minutes)`, `BlockRequest(action, pattern)` — LLM-extraction results (`extraction.py`).
+
+## Weather (`assistant/weather/base.py`)
+- `Place(name, latitude, longitude)` — geocode result.
+- `Forecast(location, current: dict, daily: list[dict], units: dict)` — `current` keys: temp/apparent/description/wind/humidity; `units`: temp/wind/precip.
+
+## Persistent storage (SQLite)
+
+### `reminders` table (`assistant/storage/reminders.py`)
+Backs both reminders and timers (discriminated by `kind`).
+```sql
+CREATE TABLE IF NOT EXISTS reminders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    due_at     REAL    NOT NULL,
+    speech     TEXT    NOT NULL,
+    created_at REAL    NOT NULL,
+    kind       TEXT    NOT NULL DEFAULT 'reminder',   -- 'reminder' | 'timer'
+    label      TEXT,                                   -- optional timer name
+    interval   REAL                                    -- recurring period (s); NULL = one-shot
+);
+CREATE INDEX IF NOT EXISTS ix_reminders_due ON reminders (due_at);
 ```
+- `Reminder(id, due_at, speech, kind, label, interval)` dataclass. Migration adds `kind`/`label`/`interval` to legacy DBs; a one-time backfill retags old `'Your timer is done.'` rows as timers.
+- WAL mode + `PRAGMA synchronous=NORMAL` so scheduler reads overlap writes.
 
-Intents with no explicit `tool_specs` entry get a default single-parameter schema: `{"text": {"type": "string", "description": "the user's full request, verbatim"}}` (required). The `default=True` skill (`GeneralSkill`) contributes **no** tools — its reach is the model's direct answer.
+### `announced_events` + `blocked_titles` tables (`assistant/storage/calendar_state.py`)
+```sql
+CREATE TABLE IF NOT EXISTS announced_events (
+    event_id     TEXT NOT NULL,
+    start_at     REAL NOT NULL,
+    announced_at REAL NOT NULL,
+    PRIMARY KEY (event_id, start_at)
+);
+CREATE TABLE IF NOT EXISTS blocked_titles (
+    pattern    TEXT PRIMARY KEY,
+    created_at REAL NOT NULL
+);
+```
+Dedup key `(event_id, start_at)` — a rescheduled event gets a new `start_at` and re-announces.
 
-## NLU / time types — `assistant/nlu/timespec.py`
+## Configuration models (`assistant/core/config.py`)
+Top-level `Config(BaseSettings)` with `model_config`: `yaml_file="config.yaml"`, `env_prefix="ASSISTANT_"`, `env_nested_delimiter="__"`; precedence init > env > yaml. Nested fields: `audio`, `recorder`, `wake`, `stt`, `llm`, `persona`, `agent`, `verify`, `tts`, `storage`, `scheduling`, `web_search`, `weather`, `calendar`, `conversation`, `aec`, `barge_in`, `logging`. Notable models:
 
-- **`ReminderSpec`** — `due_at: float` (epoch), `message: str`, `interval: float | None` (repeat seconds; `None` = one-shot).
-- **`ManagementAction`** — `action: "cancel"|"reschedule"|"rename"|"none"`, `target_index: int | None`, `new_at_time: str | None` (HH:MM 24h), `new_delay_seconds: float | None`, `new_message: str | None`.
+- **`WebSearchConfig`** (focus area) — `providers: list[str] = ["ddgs", "wikipedia"]` (fan-out set; order = merge priority), `language: str = "en"`, `region: str = "us-en"`, `result_count: int = 3` (per provider), `max_results: int = 5` (merged cap fed to LLM), `timeout: float = 10.0`, `max_snippet_chars: int = 500`, `max_rounds: int = 2` (agentic rounds), `progress_updates: bool = True`. A new provider is opted in by adding its key to `providers`; any provider-specific setting (API key, endpoint) should be added here as a typed field and mirrored in both YAML files.
+- **`LlmConfig`** — `provider`, `model`, `host`, `timeout`, `health_timeout`, `num_ctx`, `think`, `serve_cmd`, `api_key`, `base_url`, `fallback`, `fallback_model`, `max_retries`, `system_prompt`.
+- **`AgentConfig`** — `tool_mode` (native|json|auto), `max_tool_rounds`, `turn_timeout_s`.
+- **`VerifyConfig`** — `enabled`, `pre`, `post`, `max_verify_rounds`, `spoken_feedback`.
+- **`WakeConfig`** — `model_path`, `model_paths`, `model_name`, `threshold`, `score_interval`, `trigger_frames`, `confident_threshold`; methods `model_refs()`, `phrases()`.
+- **`SttConfig`** — model/device/compute_type/language/beam_size/vad_filter/thresholds/`hallucination_phrases`/`hallucination_max_rms`.
+- **`AudioConfig`**, **`RecorderConfig`**, **`TtsConfig`**, **`PersonaConfig`**, **`StorageConfig`**, **`SchedulingConfig`**, **`WeatherConfig`**, **`CalendarConfig`**, **`ConversationConfig`**, **`AecConfig`**, **`BargeInConfig`**, **`LoggingConfig`** — see `assistant/core/config.py` for full field lists.
 
-## Calendar types — `assistant/calendar/`
+## Pipeline state values (`assistant/core/state.py`)
+`"idle"`, `"paused"`, `"listening"`, `"thinking"`, `"speaking"`, `"no_speech"`, `"error"` — emitted as `@@STATE {json}` for the TUI.
 
-- **`CalendarEvent`** (`base.py`) — `id`, `calendar_id`, `title`, `start` (tz-aware), `end` (optional), `all_day: bool`, `description`.
-- **`ExtractedEvent`** (`extraction.py`) — `title`, `start`, `end` (tz-aware datetimes).
-- **`EventManagementAction`** (`extraction.py`) — `action` (cancel/reschedule/rename/none), `target_index` (1-based | None), `new_date` (YYYY-MM-DD | None), `new_start_time` (HH:MM | None), `new_title`.
-- **`EventReminderRequest`** (`extraction.py`) — `target_index` (1-based | None), `lead_minutes`.
-- **`BlockRequest`** (`extraction.py`) — `action` (block/unblock/list/none), `pattern` (str | None).
-
-## Search & weather types
-
-- **`SearchResult`** (`assistant/search/base.py`) — `title`, `snippet`, `source` (domain for spoken attribution), `url`. `domain()` helper derives spoken attribution.
-- **`Place`** (`assistant/weather/base.py`) — `name`, `latitude`, `longitude`.
-- **`Forecast`** (`assistant/weather/base.py`) — `location`, `current` (dict: temp, apparent, description, wind, humidity), `daily` (list of dicts: date, weekday, description, high, low, precip_prob, precip, wind_max), `units` (dict).
-
-## Persistent schemas (SQLite)
-
-Both stores use WAL journal mode + `synchronous=NORMAL`, UTC epoch seconds for all timestamps, and synchronous methods (sub-millisecond statements on the event-loop thread).
-
-### `ReminderStore` — `assistant/storage/reminders.py`
-
-One table for reminders **and** timers (distinguished by `kind`). **`Reminder`** row: `id`, `due_at` (UTC epoch float, indexed), `speech`, `created_at`, `kind` (`"reminder"` | `"timer"`), `label` (optional, for named timers), `interval` (optional recurring seconds). Recurring reminders (non-null `interval`) re-arm to `now + interval` on fire instead of being deleted. Schema migration backfills `kind`/`label`/`interval` on legacy tables and reclassifies timer rows (`tests/test_reminder_store.py`).
-Methods: `add`, `due(now)`, `pending(now, kind=None)`, `delete(id)`, `delete_pending(now, kind=None)`, `update_due(id, due_at)`, `update_speech(id, speech)`, `close()`.
-
-### `CalendarStateStore` — `assistant/storage/calendar_state.py`
-
-Two tables:
-- **`announced`** — `(event_id, start_at)` primary key → `announced_at`. Dedupes announcements per event per start time; a rescheduled event gets a new key and is re-announced. Rows purged ~1 day (86400s) after start.
-- **`blocked_titles`** — `pattern` primary key → `created_at`. Voice-added blocklist patterns, ordered by `created_at`.
-
-Methods: `was_announced`, `mark`, `purge_before`, `add_blocked`, `remove_blocked`, `blocked_patterns`, `close()`.
-
-## Config models — `assistant/core/config.py`
-
-`Config` is the pydantic-settings root composed of ~20 nested `*Config` models. Full enumeration is in `entry-points.md`; notable sections: `AudioConfig`, `RecorderConfig`, `WakeConfig`, `SttConfig`, `LlmConfig`, `AgentConfig` (`tool_mode`, `max_tool_rounds`, `turn_timeout_s`), `PersonaConfig` (`enabled`, `strength`), `TtsConfig`, `ConversationConfig` (`followup_window_ms`, `max_history_turns`, `decision_*`, `end_phrases`), `CalendarConfig`, `WebSearchConfig`, `WeatherConfig`, `StorageConfig`, `SchedulingConfig`, `BargeinConfig`, `AecConfig`, `LoggingConfig`.
-
-## Wake manifest — `models/wake/models.json`
-
-Per-model entries (managed by `training/manifest.py`): `slug`, `phrase`, `model_path`, `fpph`, `recall`, `threshold`, `gate_passed`, `trained_at`. The runtime derives wake phrases from this manifest (or filename stems) via `assistant/wake/registry.py`.
-
-## Eval/replay records — `tests/eval/`
-
-- **`Case`** (`dataset.py`, frozen) — `utterance`, `tool: str|None`, `required_args: tuple`, `arg_contains: dict`, `note`.
-- **Turn record** (captured JSONL) — `kind="turn"`, `text`, `history`, `route` (`"tool"|"direct"`), `tool`, `slots`, `speech`.
-- **LLM records** — `kind ∈ {llm.complete, llm.chat, llm.chat_tools}`, `label`, `messages`, `system`, `tools`, `response`/`tool_calls`/`content`. Keyed for replay by SHA256 of canonical JSON.
+## Training manifest (`models/wake/models.json`, `training/manifest.py`)
+`{ slug: { phrase, model_path, fpph, recall, threshold, gate_passed, trained_at } }`. `gate_passed = optimal_fpph <= target_fp_per_hour`. Consumed by `assistant/wake/registry.py` for phrase derivation and by the TUI/`select` for model choice.
 
 ## Open Questions
-
-- No retention/archive policy is visible for `ReminderStore` beyond `CalendarStateStore.purge_before`; old reminders are removed only by explicit callers (`assistant-data` scout).
-- Exact serialized shape of the `history` field in captured turn records (list of `Turn` as role/content dicts) is inferred, not confirmed (`tests-eval` scout).
+- `Skill.tool_specs` is a class-level mutable `{}` (`skills/base.py:35`); whether a subclass could mutate the shared default is unverified.
+- `WebSearchConfig` has no field for a keyed provider's API key yet — the AI-first work will need to add one (and decide whether it lives in config or `.env` only, per the verify-loop spec's precedent of keeping secrets in `.env`).

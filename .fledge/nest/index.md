@@ -1,42 +1,42 @@
 ---
-generated: 2026-07-07T02:45:41Z
-commit: 8d180f04862c48fdddc61804b81dafcd0f620344
+generated: 2026-07-07T07:06:00Z
+commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Context Index
 
-Context for Calcifer, an offline-first voice assistant daemon (`assistant/`) plus a separate Textual monitor TUI (`tui/`). Generated for planning a "self-update" capability (spoken confirmation → quirky sign-off → `os.execv` restart-in-place, no network fetch). Load docs per the `Read this when:` routing lines below.
+Regenerated context for `personal-assistant` — an offline-first voice assistant (daemon `assistant/` + monitor TUI `tui/`). This regeneration gives the **web-search capability** special attention (providers in `assistant/search/`, the agentic `WebSearchSkill`, `WebSearchConfig`, `_build_search` wiring, and the search test seams) because upcoming work adds AI-first search adapters. Load docs by the `Read this when:` lines below.
 
 ## architecture.md
-How the daemon is wired end to end: the async pipeline loop, interface-per-capability, the `app.py` composition root, shared `StandDown`/`AudioArbiter` state, orchestration, and the TUI daemon-supervision lifecycle. Includes a dedicated analysis of the self-update seams (confirm-then-act reply, persona sign-off, re-exec target, and how `os.execv`'s same-PID/preserved-fd behavior interacts with the supervisor).
-Read this when: you need the big picture of how components relate, or you are placing a new cross-cutting seam like a restart hook.
+Explains the single async pipeline loop, interface-per-capability, `app.py` as sole composition root, the LLM tool-calling router + verification loop, remote-as-accelerator fallback chains, shared `StandDown`/`AudioArbiter` state, and the one-directional TUI supervisor. Includes a dedicated section on the web-search capability's architecture and how a new provider slots in.
+Read this when: you need the mental model of how components fit, why the graph stays acyclic, or where the search path sits in the whole system before changing it.
 
 ## modules.md
-Directory-by-directory map (assistant/core, skills, capability packages, tui, tests, training, packaging, specs, root) with each module's purpose, key files, and a "Look here for" pointer.
-Read this when: you need to find which files own a concern before diving in.
+Directory-by-directory map (root, `assistant/` broken into app/core/audio/io/search/skills/services/stubs, `tui/`, `training/`+`models/`, `packaging/`, `pluma/`+`docs/`, `tests/`, `.github/`) with key files and a "Look here for:" pointer each. Calls out `assistant/search/` and `assistant/skills/web_search.py` as the search focus.
+Read this when: you know what you need to change but not which files/directory hold it.
 
 ## conventions.md
-The enforced rules: interface-per-capability, `app.py`-only wiring, config-as-single-source-of-truth (three-place rule + `ASSISTANT_*` overrides), async/arbiter/standdown patterns, graceful degradation, the `expects_reply` confirm-then-act pattern, scoped persona injection, TUI portrait/touch rules, and testing/spec conventions.
-Read this when: you are writing code or a spec and need to match house style, especially the confirm-then-act and config-field conventions a self-update touches.
+The rules a change must follow: async-everywhere, ABC-in-`base.py`, `app.py`-only wiring, primitives-not-`Config`, config-as-single-source-of-truth, graceful degradation, remote-behind-interface, skill plug-in routing, prompt-injection defense for web content, persona-scoped-to-speech, logging/`@@STATE`, and the 40×30 touch-first TUI rules.
+Read this when: you are writing code and want it to match existing style/patterns — especially the injection-defense and provider conventions a new search backend must honor.
 
 ## data-model.md
-The shared pipeline dataclasses in `core/events.py` (`Command`, `Intent`, `SkillResult` incl. `expects_reply`, `ToolCall`, etc.), the tool-schema shape, capability types (calendar/search/weather/timespec), and the two SQLite schemas (`ReminderStore`, `CalendarStateStore`).
-Read this when: you need exact field names/types for a record, tool schema, or DB table.
+Every core type and schema: `core/events.py` records, `Verdict`, `ChatResponse`, the **`SearchResult`/`SearchProvider` seam**, NLU/calendar/weather dataclasses, the SQLite `reminders`/`announced_events`/`blocked_titles` schemas, and all `*Config` models — with `WebSearchConfig` fields fully enumerated.
+Read this when: you need exact field names/types/defaults — particularly to shape a new `SearchResult` mapping or add a keyed-provider config field.
 
 ## dependencies.md
-External libs and services mapped to where they're used, the per-capability extras layout, models downloaded at install, and the PyInstaller freeze/release flow — including the `os.execv` re-exec target difference between source (`python -m assistant.app`) and frozen binary (`entrypoint.py` + `sys._MEIPASS` chdir).
-Read this when: you need to know what a component depends on, or what a self-update re-exec must target under freeze vs. source.
+Third-party libs, external services, and system tools with usage notes, organized by concern and mapped to the per-capability optional extras. Includes a "web-search dependency picture" (today ddgs+httpx, keyless; AI-first adds httpx calls + an API key per provider, SearXNG noted as a roadmap keyless option).
+Read this when: you are adding/removing a dependency, choosing how a new provider makes HTTP calls, or reasoning about extras/packaging impact.
 
 ## entry-points.md
-Every public interface and how to run/build: daemon and TUI entry, pipeline/orchestrator/skill APIs, the control-channel verbs, the `@@STATE` feed, provider ABCs, `DaemonSupervisor`, and the full config surface. Details the confirm-then-act reply seam, the sign-off/persona layer, and how to add a skill.
-Read this when: you are wiring the self-update trigger (spoken intent or control verb), adding a skill, or need the exact confirmation/sign-off/restart entry points and run commands.
+How to run/build/test the project (daemon, TUI, install, PyInstaller release, CI) and the public interfaces execution flows through: `VoicePipeline`, `Orchestrator`, `SkillRegistry`/`Skill`, `LLMProvider`, control channel, and the **web-search interfaces (`SearchProvider` ABC, `WebSearchSkill`, and `_build_search` — the function a new provider must be added to)**.
+Read this when: you need to run something, or you need the signature/entry seam for the pipeline, a skill, or the search capability.
 
 ## testing.md
-How the suite runs (pytest `asyncio_mode=auto`, all-native-stubbed), the fake/mock patterns, a coverage map (notably the `expects_reply` and supervisor-lifecycle tests), the live+replay eval harness, and test-first guidance for a self-update feature.
-Read this when: you are writing tests for a new seam or need an existing fake/fixture to copy.
+Suite structure, `asyncio_mode=auto`, and the `httpx.MockTransport`/`FakeX` stubbing patterns; the core/capabilities/TUI/eval groupings; the 40-column overflow gate; and the offline eval harness. Devotes a section to the **four search test files and the exact seam-contract a new provider's tests must satisfy**.
+Read this when: you are writing or running tests — above all when adding a search provider and need to mirror `test_wikipedia_provider.py`/`test_multi_search.py`/`test_web_search_skill.py`.
 
 ## domain.md
-Glossary of the vocabulary — Calcifer/persona, wake/VAD/STT/TTS/barge-in/earcon, skills/intents/tools/confirm-then-act/sign-off, stand-down/arbiter/reminders, search, TUI supervision, and wake-training terms.
-Read this when: you hit an unfamiliar term in code or a spec and want its precise meaning.
+Glossary of the project's vocabulary — voice pipeline, routing/reasoning, calendar/scheduling, wake-word training, deployment/specs — with a dedicated **web-search cluster** (AI-first search, fan-out, round-robin merge, assess loop, injection neutralization, SearXNG).
+Read this when: a term in the code or a spec is unfamiliar, or you want precise language for a plan.

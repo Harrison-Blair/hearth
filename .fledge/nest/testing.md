@@ -1,69 +1,59 @@
 ---
-generated: 2026-07-07T02:45:41Z
-commit: 8d180f04862c48fdddc61804b81dafcd0f620344
+generated: 2026-07-07T07:06:00Z
+commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Testing
 
-How the suite is structured, run, and stubbed, and what it covers. 74 test files under `tests/`. Framework is pytest with `asyncio_mode = auto`, so `async def test_...` needs no marker. Everything native (models, devices, network) is stubbed — `pip install -e ".[dev]"` alone runs the whole suite.
+How the suite is structured, run, and stubbed, with special attention to the seams a new web-search provider must satisfy. Tests live under `tests/` (plus `tests/eval/`).
 
-## Running
+## Framework and running
+- **pytest + pytest-asyncio** with `asyncio_mode = auto` (`pyproject.toml`): `async def test_...` needs no marker.
+- Install with `pip install -e ".[dev]"` — **no native extras needed**; anything touching a model, device, or network is stubbed.
+- Run: `pytest` (all), `pytest tests/test_pipeline.py` (one file), `pytest tests/test_web_search_skill.py -k happy_path` (one test). Lint: `ruff check assistant tests`.
 
-```bash
-pytest                                            # all
-pytest tests/test_pipeline.py                     # one file
-pytest tests/test_pipeline.py -k followup         # filter
-ruff check assistant tests                        # lint (line length 100)
-```
+## Stubbing patterns (used everywhere)
+- **`httpx.MockTransport`** — every network provider test routes `httpx.AsyncClient` to a handler `fn(request) -> httpx.Response`. Shared `_patch_transport(monkeypatch, handler)` closure reused across Wikipedia, Open-Meteo, Google Calendar, Ollama, Zen, and voice-download tests.
+- **In-line `FakeX` classes** — `FakeLLM` (scripted JSON responses consumed in order, tracks prompts), `FakeProvider`/`FakeSearch` (search stubs), `FakeVoice`/`FakeWakeWordModel`/`FakeVad`/`FakeSd` (native-dep stubs), `FakeTTS`/`FakeOut`, `ScriptedLLM`/`DirectOrchestrator` (core), `FakeSupervisor` (TUI).
+- **SQLite** — `:memory:` for isolated tests; `tmp_path/"x.db"` + reopen to simulate a daemon restart / migration.
+- **Injection** — `monkeypatch.setattr(module, "Class", FakeClass)`; `monkeypatch.setenv("ASSISTANT_…", …)` for config precedence; injectable `now=lambda: …` clocks.
+- **Assertions on side effects** — fakes expose `.calls`/`.spoken`/`.plays`/`.queries`/`.received`; tests assert routing, speech, and persistence rather than internals.
 
-## Stubbing philosophy
+## Test groups
 
-Tests never touch a model, device, or network. Every capability has a fake that mirrors its ABC and records calls for assertion. Common patterns (`tests-core`, `tests-capabilities` scouts):
+### Core (`tests/test_*` — pipeline/orchestrator/config/verify/infra)
+- `test_pipeline.py` (~1466 lines, 50+ tests): full wake→speak flow, earcons, silence/no-speech retry, hallucination gating, conversation follow-ups, decision loop (confirm/listen/end), barge-in, stand-down, `@@STATE` emission. Uses `_pipeline()` factory + `FakeAudioIn`/`ScriptedDetector`/`RecordingEmitter`.
+- `test_orchestrator.py` (16) + `test_orchestrator_verify.py` (22): tool dispatch, direct answers, native→JSON fallback, `max_tool_rounds`, timeouts, `_TOOL_REPEAT_CAP`, turn records; verify verdicts (approve/reject/rewrite), filler-only-on-reject, barge abort, best-draft-on-timeout, `max_verify_rounds` sub-cap, fail-open.
+- `test_verify.py` (20), `test_persona.py` (11), `test_config.py` (19, incl. `web_search` defaults), `test_control.py` (13), `test_conversation.py`, `test_standdown.py`, `test_state.py`, `test_logging.py`, plus training-adjacent `test_manifest.py`/`test_train_batch.py`.
 
-- **Interface-matching fakes**: `ScriptedLLM` (queued tool/complete responses, for orchestrator), `FakeLLM` (fixed text, for pipeline/skills), `FakeDetector` (fires after N frames), `FakeRecorder`/`FakeSTT`/`FakeTTS`/`FakeOut`, `FakeVad`, `FakeWakeWordModel`, `FakeSupervisor` (TUI, avoids spawning a real daemon).
-- **Injected clocks**: `StandDown(clock=FakeClock())`, `scheduler(now=lambda: 100.0)` — deterministic time.
-- **HTTP mocking**: `httpx.MockTransport` handlers for Ollama/Wikipedia/Open-Meteo; `monkeypatch.setattr` to substitute `DDGS`, `sounddevice`, `PiperVoice.load`, `sys.modules["speexdsp"]`.
-- **In-memory / tmp storage**: `ReminderStore(":memory:")` for logic, `tmp_path` for persistence/reopen tests.
-- **Recording doubles**: `RecordingEmitter.states`, `FakeSpeaker.spoken`, `LLM.calls` — assert on captured state.
-- **Error injectors**: `RaisingSkill`, `BoomOut`, `SlowLLM`, `FlakyTTS` exercise degradation paths.
+### Capabilities (`tests/test_*` — providers & skills)
+Audio (`test_aec`, `test_audio_processing`, `test_devices`, `test_earcon`, `test_mic_hub`, `test_recorder`), calendar (6 files incl. `test_calendar_skill.py` ~45 tests, `test_calendar_watcher.py` ~15), weather (`test_open_meteo`, `test_weather_skill`), LLM (`test_ollama_provider`, `test_fallback_provider`, `test_zen_provider`, `test_zen_provider_guards` ~17 retry/guard tests, `test_replay_provider`), TTS/wake (`test_piper_tts`, `test_livekit_detector`, `test_wake_registry`, `test_voice_download`), skills (`test_clock`, `test_reminder`, `test_timer`, `test_stand_down`, `test_general`), storage/scheduling (`test_reminder_store`, `test_calendar_state_store`, `test_scheduler`, `test_timespec`).
 
-## Coverage map
+### Search tests — the seam for a new AI-first provider (focus area)
+Four files define what any new backend must satisfy:
 
-### Core (feature-relevant)
+- **`test_ddgs_provider.py`** (6): `FakeDDGS` intercepts the `DDGS` constructor + context manager + `.text()`, records init/query kwargs. Asserts row→`SearchResult` mapping (title/body/href → title/snippet/url, `domain()` source), snippet truncation to `max_snippet_chars`, region/timeout/count pass-through, backend error propagation, and `health()` both paths. Fixture is `autouse` monkeypatching `ddgs_provider.DDGS`.
+- **`test_multi_search.py`** (8): `FakeProvider(results, exc, healthy)` with async `search`/`health`/`aclose`. Asserts round-robin interleave, URL dedup (trailing-slash normalized), `max_results` cap, a failing provider skipped, all-fail re-raises the first, all-empty → `[]`, `health()` true if any child healthy, `aclose()` fans out. Helper `_r(url, source)` builds `SearchResult`.
+- **`test_wikipedia_provider.py`** (8): `httpx.MockTransport` handler returns the Action-API JSON. Asserts extract→snippet mapping + `"wikipedia"` source + URL from title, ordering by `index`, snippet truncation, empty/malformed → `[]`, `health()` true/false, custom `language` (de.wikipedia.org), `gsrlimit == count`.
+- **`test_web_search_skill.py`** (14): `FakeSearch` + `FakeLLM` + `FakeSpeaker`. Asserts the full agentic loop — happy path (refine JSON → assess `sufficient:true` → answer, one search, spoken "Searching for…"), insufficient→retry with `new_query`+`remark`, rounds-exhausted unsuccessful, assess-bad-JSON → plain-summary fallback, empty results / search error degrade gracefully, refine-parse-failure → stripped-transcript query, and the **prompt-injection defenses**: untrusted snippets fenced in `<<<…>>>`, imperative injection neutralized to `[filtered]` before fencing, stray fence markers can't break the boundary, benign text passes through, overlong `new_query`/`remark` rejected, `speaker=None` silent-and-works, pending progress speech awaited before return, refine call is JSON-only (no system prompt).
 
-- **`tests/test_pipeline.py`** (1466 lines) — the deepest file. Covers the wake loop, VAD-skip on low RMS, empty-capture retry, conversation/follow-up, `max_history_turns` cap, stand-down suppression, barge-in gating, the continuation decision (`listen`/`confirm`/`end` with JSON-parse fallback to listen), confirm/decline/end phrases, hallucination filtering, earcon bracketing, arbiter-busy wake suppression, and — key for self-update — **`test_expects_reply_routes_followup_to_handle_reply`, `test_reply_is_one_round_only`, `test_expects_reply_skips_decision`, `test_silence_during_pending_reply_cancels`** (the confirm-then-act seam).
-- **`tests/test_orchestrator.py`** (327 lines) — tool-call dispatch (args → slots), direct-answer path, delegation to general skill, native→JSON fallback, `max_tool_rounds` cap, repeat-tool cap, turn-timeout degradation, and route-trace logging.
-- **`tests/test_control.py`** — every control verb (`TEXT`/`LISTEN`/`CANCEL`/`STOP`/`SAY`/`SET`/`RESUME`), including SAY waiting on the `AudioArbiter` and rate-prefix parsing.
-- **`tests/test_persona.py`** — persona suffix scoping (reply prompts yes; tool-decision/JSON no), delegation re-voicing drafts, disabled = byte-identical.
-- **`tests/test_standdown.py`** — timed expiry, indefinite, resume, re-engage, clock injection.
-- **`tests/test_conversation.py`**, **`tests/test_state.py`**, **`tests/test_config.py`** (env override precedence, defaults), **`tests/test_logging.py`** (JSONL formatter, per-run dirs, prune), **`tests/test_scheduler.py`** (due firing, boot catch-up coalescing, arbiter hold, standdown skip, transient-retry/permanent-drop, recurring re-arm), **`tests/test_reminder_store.py`** (queries, migration, kind filtering).
-- **Skill tests**: `test_general_skill`, `test_reminder_skill` (incl. bulk-cancel confirm via `expects_reply`), `test_clock_skill`, `test_timer_skill`, `test_stand_down_skill` (sign-off wording, indefinite fallback), `test_calendar_skill` (535 lines), `test_weather_skill`, `test_web_search_skill`.
+**Net seam contract for a new provider:** implement `async search(query, *, count) -> list[SearchResult]` and `async health() -> bool` (+ `aclose()`); return `SearchResult` with a domain-ish `source` and dedup-able `url`; honor `count`, `timeout`, and `max_snippet_chars`; raise on backend error (let `MultiSearch` skip it). A test should mock the provider's HTTP via `httpx.MockTransport` in the same style, and — if wired into `WebSearchSkill` — nothing in the skill changes (it depends only on the ABC). Add a `test_<provider>_provider.py` mirroring `test_wikipedia_provider.py` and extend `test_multi_search.py` only if merge behavior changes.
 
-### Capabilities
+### TUI (`tests/test_tui_*`)
+16 files driven by Textual's pilot at fixed `SIZE=(40,30)`. **The gate:** `test_tui_screens.py:test_no_screen_overflows_40_columns` asserts `widget.region.right <= 40` and `max_scroll_x == 0` for every non-hidden widget on every screen — this is the hard constraint for the Pi 5 portrait display. Other files cover `AssistantTUI` health tiering, `DaemonSupervisor` start/stop/restart + env-override precedence, control channel (TEXT/SET), discovery (Ollama/Zen/registry/pull/cache-TTL, `test_tui_discovery.py` ~483 lines), config schema/file/env, log parse/color/collapse/reflow/runlog, widgets (Stepper/NavBar), and mouse selection.
 
-Audio (AEC, recorder VAD, earcons, devices, mic hub, processing), search (ddgs/wikipedia/multi with dedup + fallback), weather (Open-Meteo), LLM (`test_ollama_provider.py` — complete/chat/chat_tools/health/num_ctx/tracing), TTS (Piper length_scale), wake (`test_livekit_detector.py` windowing/threshold/streak; `test_wake_registry.py` phrase derivation), voice download, calendar (blocklist/extraction/state store/watcher), timespec, and training helpers (`test_train_batch.py`, `test_manifest.py`).
+### Eval harness (`tests/eval/`)
+Two offline gates that keep a fresh checkout green:
+- `test_tool_eval.py:test_tool_call_formatting` — **live** eval; skips unless `ASSISTANT_EVAL=1` and Ollama reachable. Runs ~20 `CASES` through the real orchestrator, asserts tool-name + required-arg score ≥ `PASS_THRESHOLD = 0.90`.
+- `test_replay_eval.py:test_replay_matches_baseline` — **replay** eval; skips when `tests/eval/captures/` has no scoreable turns (only `.gitkeep` on a fresh checkout). Replays captured turns through the orchestrator with `ReplayProvider` (content-hash keyed), asserts exact-match score == 1.0.
+- `build_orchestrator()` wires the real skill registry (Clock/Reminder/Timer/WebSearch/Weather/General) minus audio/TTS, using `:memory:` `ReminderStore`. Supporting unit tests: `test_eval_extract.py`, `test_replay_provider.py`.
 
-### TUI
-
-- **`tests/test_tui_supervisor.py`** — `DaemonSupervisor` lifecycle: start streams lines + merges env, stop terminates, **restart changes PID**, send is a no-op when not running, `.env` merge, session-override precedence.
-- **`tests/test_tui_screens.py`** (609 lines) — **`test_no_screen_overflows_40_columns`** enforces the 40-col portrait constraint for every screen (`_assert_fits_40_cols` at `size=(40,30)`); plus volume/mute, chat modal → TEXT, config steppers → env overrides → restart, model/voice pickers, `@@STATE` → Now screen, context-button verb-per-state.
-- **`tests/test_tui_control.py`**, `test_tui_ollama.py` (server autostart/restart/adopt-external), `test_tui_discovery.py`, `test_tui_config_schema.py` (no free-text fields; stepper bounds), plus log parse/color/collapse/reflow/runlog/selection/widgets.
-- Uses Textual's `app.run_test(size=...)` pilot harness with `FakeSupervisor` (no real daemon spawn).
-
-### Eval / replay harness — `tests/eval/`
-
-Two tracks (`tests-eval` scout):
-- **Live eval** (`run_eval.py`, `test_tool_eval.py`) — runs 23 dataset cases (`dataset.py`) through a real orchestrator + Ollama, scoring tool-name + required-arg correctness; gate ≥ 90%. Opt-in via `ASSISTANT_EVAL=1`; **skips if Ollama unreachable** so offline CI stays green.
-- **Replay eval** (`replay.py`, `run_replay.py`, `test_replay_eval.py`) — a regression gate that re-runs captured real sessions through the orchestrator with a `ReplayProvider` serving LLM responses keyed by SHA256 of canonical JSON; gate = 100% exact tool/arg match. **Skips if `tests/eval/captures/` is empty** (empty at checkout). `extract.py` builds captures from daemon JSONL logs.
-- Unit tests: `test_eval_extract.py`, `test_replay_provider.py` (key stability, FIFO replay, strict/empty miss modes).
-
-## Test-first guidance for a self-update feature
-
-A new self-update skill/verb should be tested by: (1) a skill unit test asserting the confirmation prompt carries `expects_reply=True` and that `handle_reply` acts only on an affirmative (mirror `test_reminder_skill` bulk-cancel); (2) a pipeline integration test that the sign-off is spoken before the restart callback fires (extend `test_pipeline.py`); (3) if a control verb is added, a `test_control.py` case; (4) if the TUI observes the restart, a `test_tui_supervisor.py` case for how the supervisor handles a same-PID re-exec vs. a normal exit. Per repo convention (`CLAUDE.md`), verify each new test fails against the unfixed code before it passes.
+## Test-verification discipline
+Per repo/user convention: a new test must be shown to fail against the unfixed/stubbed behavior before it counts. The eval replay gate exists precisely as a regression gate — refactors to routing must reproduce identical decisions from identical model output.
 
 ## Open Questions
-
-- The self-update / re-exec feature is untested; whether the supervisor distinguishes an `os.execv` re-exec (same PID, preserved pipes) from a normal exit is unverified (`tests-tui`, `tui` scouts).
-- No conditional-skip on missing native deps was observed beyond the eval opt-ins; whether any capability tests are gated in CI is unconfirmed (`tests-capabilities` scout).
+- `tests/eval/captures/` ships empty (`.gitkeep`), so the replay gate is inert on a fresh checkout by design; a real baseline must be captured+curated to activate it.
+- `test_web_search_skill.py` checks a remark length ≤150 while the skill's `_MAX_REMARK_CHARS` is 140 — the exact cap/where it's enforced is worth confirming before relying on it in new provider tests.
+- No end-to-end test exercises real Ollama/Piper/Whisper models; native extras are integration-only.

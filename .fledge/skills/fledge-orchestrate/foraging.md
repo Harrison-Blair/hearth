@@ -49,6 +49,10 @@ fledge_version: <contents of VERSION file, or "unknown">
 
 Report: modules scanned, scouts spawned (and any re-spawns), documents written, and anything that materially limited coverage (unreadable files, empty modules, scan failures). Keep it under ten lines.
 
+### Lifecycle
+
+A forager is one-shot: after sending its final message it has no further work. In harnesses where workers persist after their final message, the orchestrator will request its shutdown by name once the nest output is verified — comply promptly. Scouts are unnamed (no species): they self-terminate on their one-line final message and are never addressed by name.
+
 ## Scout
 
 A scout's prompt assigns a module name and an explicit list of files. Its entire job is to examine those files and write exactly one report file. It never modifies source code, and never writes any file other than its assigned report.

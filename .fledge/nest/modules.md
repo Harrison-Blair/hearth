@@ -1,77 +1,82 @@
 ---
-generated: 2026-07-07T02:45:41Z
-commit: 8d180f04862c48fdddc61804b81dafcd0f620344
+generated: 2026-07-07T07:06:00Z
+commit: 02f839d7a116780b02510c2d5b339c23c64a51f5
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Modules
 
-A map of the repository by directory. Each entry gives the module's purpose, its key files, and where to look for specific concerns. Two top-level Python packages (`assistant/`, `tui/`) plus supporting directories.
+Repository map, organized by directory. Each entry gives purpose, key files, and where to look for a given concern. `fledge scan` reports nine top-level modules (`assistant/`, `tui/`, `tests/`, `training/`, `models/`, `packaging/`, `docs/`, `pluma/`, `.github/`, plus `root`); `assistant/` and `tests/` are large enough that this map breaks them down by subpackage.
 
-## assistant/core — pipeline, orchestration, shared state
+## root (repo top level)
 
-The heart of the daemon: the async pipeline loop and everything cross-cutting.
-Key files: `pipeline.py` (`VoicePipeline` — the wake→record→transcribe→route→speak loop, conversation/follow-up, barge-in, continuation decision), `orchestrator.py` (`Orchestrator` — LLM tool-calling loop with JSON + general-skill fallback), `events.py` (shared dataclasses `WakeEvent`, `Turn`, `Command`, `ToolCall`, `Intent`, `SkillResult`), `standdown.py` (`StandDown` polled shared pause state), `control.py` (`ControlChannel` — stdin verbs from TUI), `config.py` (`Config` + ~20 nested pydantic models), `persona.py` (Calcifer voice suffix), `arbiter.py` (`AudioArbiter` audio lock), `state.py` (`StateEmitter` `@@STATE` feed), `conversation.py`, `speech.py`, `logging.py`.
-Look here for: the confirm/reply seam (`SkillResult.expects_reply`, `pipeline._handle_reply`), the tool-calling loop, control-verb dispatch, persona/sign-off wording, and where a self-update restart hook would live.
+Project configuration, install/start scripts, release pipeline, and smoke-test utilities.
 
-## assistant/skills — the skill plug-in system
+- Key files: `config.yaml` + `default-config.yaml` (live config + documented template), `pyproject.toml` (metadata, per-capability optional extras, ruff line-length 100, `asyncio_mode = auto`), `install.sh` (venv + extras + models + Ollama + optional systemd), `start.sh` (activate venv, reap orphan daemon, launch TUI), `Makefile` (`release`, `clean`), `env.example`, `opencode.json` (OpenCode Zen metadata), `.python-version` (3.12.13), `verify_calendar.py` + `verify_wikipedia.py` (end-to-end smoke checks), `.github/workflows/release.yml` (x86_64 + aarch64 binaries on `v*` tags).
+- Look here for: how to install/run/build, config precedence, optional extras, licensing (AGPL-3.0), CI/release.
 
-One `Skill` subclass per capability; the plug-in contract.
-Key files: `base.py` (`Skill` ABC + `SkillRegistry` — register/get/tool_schemas), `general.py` (`GeneralSkill`, the `default=True` fallback), `stand_down.py` (`StandDownSkill` — quirky sign-off lines), `reminder.py` (`ReminderSkill` — confirm-then-act bulk delete via `expects_reply`), `timer.py`, `clock.py`, `weather.py`, `web_search.py` (agentic multi-round search with injection defense), `calendar.py`.
-Look here for: how to add a new skill/intent, the tool-schema shape, the confirm-then-act pattern, and the sign-off/persona wording a self-update skill would emulate.
+## assistant/ — daemon package
 
-## assistant/llm, stt, tts, wake, nlu — capability providers
+### assistant (app root)
+Composition root and first-run provisioning.
+- Key files: `app.py` (`main()`, async `_run()`, factories `_build_llm`/`_build_one_llm`/`_build_search`, `_config_dump` secret masking), `bootstrap.py` (`doctor`/`bootstrap` subcommand: ensure Ollama + STT models), `__init__.py` (`__version__ = "0.1.0"`).
+- Look here for: how every capability is constructed and injected; skill registration order; the default skill; **how search providers are assembled (`_build_search`)**.
 
-ABC + concrete implementation per capability.
-Key files: `llm/base.py` + `llm/ollama_provider.py` (`OllamaProvider` — chat/complete/chat_tools/health over httpx), `stt/faster_whisper_stt.py`, `tts/piper_tts.py`, `wake/livekit_detector.py` + `wake/registry.py` (phrase-from-filename derivation, `models/wake/models.json` manifest), `nlu/timespec.py` (regex+LLM time extraction; `router.py`/`command_router.py`/`keyphrase_router.py` were deleted — routing now flows through the orchestrator).
-Look here for: provider interfaces, boot health-check patterns, wake phrase resolution.
+### assistant/core
+Orchestration heart: the pipeline, routing, config, events, shared state.
+- Key files: `pipeline.py:VoicePipeline` (the async loop), `orchestrator.py:Orchestrator` (tool-calling routing), `config.py` (all `*Config` pydantic models incl. `WebSearchConfig`), `events.py` (shared dataclasses), `verify.py` (`Verdict`, `verify()`), `standdown.py:StandDown`, `arbiter.py:AudioArbiter`, `conversation.py`, `control.py:ControlChannel`, `speech.py:Speaker`, `persona.py`, `state.py:StateEmitter`, `logging.py:JsonlFormatter`.
+- Look here for: routing logic, verification loop, config schema, the `@@STATE` feed, stand-down/arbiter semantics.
 
-## assistant/audio — audio I/O
+### assistant/audio
+Audio I/O abstraction, VAD recording, AEC, earcons, mic fan-out.
+- Key files: `base.py` (`AudioIn`/`AudioOut`), `sounddevice_io.py` (PortAudio), `devices.py` (`select_devices`), `aec.py` (`SpeexEchoCanceller`, `build_aec`), `mic_hub.py:MicHub` (tap for barge-in), `recorder.py:VadRecorder`, `processing.py:normalize_peak`, `earcon.py` (synthesized tones).
+- Look here for: device selection, echo cancellation, VAD end-of-speech, barge-in tap.
 
-Mic capture, VAD, playback, echo cancellation, earcons.
-Key files: `base.py` (`AudioIn`/`AudioOut` ABCs), `sounddevice_io.py`, `recorder.py` (`VadRecorder`), `mic_hub.py` (`MicHub` fan-out + barge-in tap), `aec.py` (`SpeexEchoCanceller`, degrades to `None`), `earcon.py` (synthesized tones/chimes), `devices.py`, `processing.py`.
-Look here for: barge-in tap wiring, earcon cues, device selection, preroll.
+### assistant/wake, stt, tts, llm, nlu (voice I/O + reasoning)
+Each an ABC + concrete impl.
+- Key files: `wake/{base,livekit_detector,registry}.py`, `stt/faster_whisper_stt.py`, `tts/piper_tts.py`, `llm/{base,ollama_provider,opencode_zen_provider,fallback_provider}.py`, `nlu/timespec.py` (hybrid regex+LLM reminder/timer parser).
+- Look here for: wake phrase derivation, Whisper transcription, Piper synthesis, LLM `complete`/`chat`/`chat_tools`/`health`, provider fallback + retry, spoken-time parsing.
 
-## assistant/calendar, scheduling, search, weather, storage, connectivity, sync — data/capabilities
+### assistant/search — web-search capability (focus area)
+Pluggable web search behind `SearchProvider`.
+- Key files: `base.py` (`SearchProvider` ABC, `SearchResult` dataclass, `domain()` util), `ddgs_provider.py:DdgsSearch` (DuckDuckGo via `ddgs`), `wikipedia.py:WikipediaSearch` (Wikipedia Action API via httpx), `multi.py:MultiSearch` (concurrent fan-out, round-robin merge, URL dedup), `__init__.py` (exports `WikipediaSearch`).
+- Look here for: **the exact seam a new AI-first provider (Tavily/Exa/Brave) must implement**, provider composition/merge semantics, and result shape. Paired with `assistant/skills/web_search.py` (the agentic skill) and `WebSearchConfig` in `core/config.py`.
 
-Key files: `calendar/google_calendar.py` + `calendar/blocklist.py` + `calendar/extraction.py`, `scheduling/scheduler.py` (`ReminderScheduler` poll loop) + `scheduling/calendar_watcher.py` (`CalendarWatcher`), `search/multi.py` + `ddgs_provider.py` + `wikipedia.py`, `weather/open_meteo.py`, `storage/reminders.py` (`ReminderStore` SQLite) + `storage/calendar_state.py` (`CalendarStateStore`), `connectivity/base.py` + `sync/base.py` (stubs).
-Look here for: SQLite schemas, poll-loop + standdown/arbiter integration, Google Calendar auth, multi-provider search.
+### assistant/skills
+Plug-in intent handlers exposed to the orchestrator as tools.
+- Key files: `base.py` (`Skill` ABC, `SkillRegistry`, `tools()`/`tool_schemas()`), `web_search.py:WebSearchSkill` (**agentic search loop**), `calendar.py`, `reminder.py`, `timer.py`, `weather.py`, `clock.py`, `stand_down.py`, `general.py` (default fallback, exports no tool).
+- Look here for: how intents become tools, per-skill slots/handlers, and the web-search refine→search→assess→answer loop with prompt-injection defenses.
 
-## assistant/app.py, bootstrap.py — composition root & provisioning
+### assistant/calendar, weather, scheduling, storage (services)
+- Key files: `calendar/{base,google_calendar,extraction,blocklist}.py`, `weather/{base,open_meteo}.py`, `scheduling/{scheduler,calendar_watcher}.py`, `storage/{reminders,calendar_state}.py` (SQLite).
+- Look here for: Google Calendar REST, Open-Meteo forecast/geocode, reminder/timer persistence + schema migrations, proactive announce loops, calendar dedup + blocklist.
 
-Key files: `app.py` (`main()`/`_run()` — the only wiring point), `bootstrap.py` (`doctor` subcommand — ensures Ollama/STT models ready).
-Look here for: how everything is constructed and injected, boot health checks, graceful-degrade wiring, and the shutdown path (currently just KeyboardInterrupt).
+### assistant/connectivity, sync (stubs)
+Deliberate seams for future remote acceleration — `ConnectivityService`, `ProviderRouter`, `SyncAdapter`/`NoopSyncAdapter`. Not dead code; do not delete.
 
-## tui — the monitor UI
+## tui/ — monitor TUI
+Textual app supervising the daemon; touch-first, 40×30 portrait.
+- Key files: `app.py:AssistantTUI` (thick app: supervisor, health, logs, pulls, config), `supervisor.py:DaemonSupervisor`, `config_schema.py` (declarative `FIELDS`), `configfile.py`/`envfile.py`, `discovery.py` (Ollama/Zen/registry/voice providers), `logparse.py`/`logcolor.py`/`collapse.py`/`runlog.py`, `widgets.py` (`Stepper`, `NavBar`, `ScreenWidthRichLog`), `screens/{home,now,logs,config,models,voices,picker}.py`.
+- Look here for: daemon supervision, live config editing (Save/Apply/Reset), model browsing/pulling from ollama.com, Piper voice downloads, the `@@STATE` UI, the 40-column overflow constraint.
 
-Textual app supervising the daemon on a 320×480 portrait touch display (~40×30 cells).
-Key files: `supervisor.py` (`DaemonSupervisor` — spawn/restart/stop the daemon child, stdin/stdout channel, `prctl(PR_SET_PDEATHSIG)`, `free_ollama_port()`), `app.py` (`AssistantTUI` controller), `screens/` (home, now, logs, config, models, voices, picker), `config_schema.py` (declarative `FIELDS` → `ASSISTANT_*` env vars), `discovery.py` (Ollama/registry/voice discovery), `logparse.py`/`logcolor.py`/`collapse.py`, `widgets.py` (`Stepper`, `NavBar`, `ScreenWidthRichLog`).
-Look here for: daemon supervision/restart lifecycle, the control-channel wire format, how config edits become env overrides, and how the daemon would appear to the supervisor during a re-exec.
+## training/ (+ models/)
+Wake-word model training in an isolated ROCm venv.
+- Key files: `train.py` (single-model), `train_batch.py` (multi-phrase from `phrases.txt`), `manifest.py` (`models/wake/models.json` registry: upsert/list/regen/select), `calcifer.yaml` (production config), `bootstrap.sh` (ROCm PyTorch + livekit-wakeword), `README.md`. `models/wake/calcifer.onnx` (~963 KB) is the produced artifact consumed by `assistant/wake/livekit_detector.py`.
+- Look here for: how the wake model is produced, FPPH gating, smoke runs, GPU/ROCm setup.
 
-## tests — unit + integration suite
+## packaging/
+PyInstaller single-file build.
+- Key files: `assistant.spec` (collects ONNX models + native libs), `build.sh` (fresh venv, `[all,tui]`, native-arch), `entrypoint.py` (frozen entry: `sys._MEIPASS`, XDG redirection, subcommand routing).
+- Look here for: how the binary is bundled, what gets included, frozen-app path handling.
 
-74 files, pytest with `asyncio_mode = auto`.
-Key files: `test_pipeline.py` (1466 lines — pipeline state machine, conversation, barge-in, standdown), `test_orchestrator.py` (tool-calling/fallback), `test_control.py`, `test_persona.py`, `test_standdown.py`, skill tests (`test_*_skill.py`), `test_tui_supervisor.py`, `test_tui_screens.py` (enforces 40-col fit), `tests/eval/` (tool-calling + replay harness).
-Look here for: how to test a new pipeline seam or skill; existing fakes (`ScriptedLLM`, `FakeDetector`, `FakeSupervisor`, `ReplayProvider`). See `testing.md`.
+## pluma/ + docs/ (specs)
+Fledge spec store and design docs.
+- Key files: `pluma/plumage/PLM-001-…` (self-update/restart-in-place plumage), `pluma/feathers/FTHR-001-…` + `FTHR-002-…` (implementation slices), `docs/compass_artifact_…md` (reference architecture for a privacy-preserving local assistant), `docs/verification-loop-and-llm-tui-plan.md` (the verify-loop + provider-aware-TUI spec that shipped).
+- Look here for: intended/authored capabilities, acceptance criteria, design rationale.
 
-## training — wake-word training pipeline
+## tests/
+Full suite; native deps stubbed. Broken down in `testing.md`. Groups: core (`test_pipeline`, `test_orchestrator*`, `test_config`, `test_verify`, …), capabilities (providers/skills incl. **search: `test_ddgs_provider`, `test_multi_search`, `test_wikipedia_provider`, `test_web_search_skill`**), TUI (`test_tui_*`, incl. the 40-col overflow gate), and eval (`tests/eval/` replay + live tool-call harness).
 
-Peripheral to the runtime; trains the Calcifer ONNX wake model via `livekit-wakeword` on ROCm.
-Key files: `train.py`, `train_batch.py`, `manifest.py` (`models/wake/models.json` registry), `calcifer.yaml`, `bootstrap.sh`, `phrases.txt`.
-Look here for: how the wake model is produced and registered; not touched by app runtime changes.
-
-## packaging, .github — freeze & release
-
-Key files: `packaging/entrypoint.py` (frozen entry: env/chdir setup, CLI subcommand routing — **critical for re-exec target**), `packaging/assistant.spec` (PyInstaller), `packaging/build.sh`, `.github/workflows/release.yml` (native x86_64 + aarch64 builds).
-Look here for: whether the app runs frozen vs. `python -m`, and what `os.execv` must target after a self-update.
-
-## specs, docs — design specs & research
-
-Key files: `specs/mute-for-duration.md` (the StandDown spec — the house style a self-update spec should follow), `specs/speaker-gate.md`, `specs/web-search-answers.md`, `docs/compass_artifact_*.md` (research artifact on self-hosted assistant architecture).
-Look here for: the spec template/conventions and the StandDown design that self-update most resembles.
-
-## root — project files
-
-`pyproject.toml` (extras per capability), `config.yaml` + `default-config.yaml` (config surface), `install.sh`, `start.sh` (venv + daemon reap + launch TUI), `Makefile`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `models/wake/calcifer.onnx` (binary), `verify_calendar.py`/`verify_wikipedia.py` (smoke scripts).
-Look here for: how to build/install/run, the full config surface, and env-override precedence.
+## .github/
+`workflows/release.yml` — tag-triggered dual-arch binary build/release.
