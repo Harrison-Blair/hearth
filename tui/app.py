@@ -381,7 +381,7 @@ class AssistantTUI(App):
                 host=llm.host,
                 provider=llm.provider,
                 base_url=llm.base_url,
-                api_key=llm.api_key,
+                api_key=getattr(llm, f"{llm.provider}_api_key", ""),
                 fallback=llm.fallback,
             ) if field.options else []
             if inspect.isawaitable(result):
