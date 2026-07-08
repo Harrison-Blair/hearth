@@ -58,10 +58,10 @@ Fixed order: (1) write the tests; (2) confirm they FAIL against the current file
 (3) edit the files until they pass.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and
+- [x] AC-1: The tests listed above were observed failing before implementation and
       pass after.
-- [ ] AC-2: `config.yaml` and `default-config.yaml` contain no secret-bearing fields;
+- [x] AC-2: `config.yaml` and `default-config.yaml` contain no secret-bearing fields;
       secrets come only from `.env`/env (PLM-005 FC-6, AC-5).
-- [ ] AC-3: `.env.example` documents only the credential vars and no non-secret
+- [x] AC-3: `.env.example` documents only the credential vars and no non-secret
       overrides (PLM-005 FC-7, AC-6).
-- [ ] AC-4: `ruff check assistant tests` and the full suite pass offline.
+- [x] AC-4: `ruff check assistant tests` and the full suite pass offline.
