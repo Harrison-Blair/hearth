@@ -170,12 +170,12 @@ async def ollama_model_options(host: str = DEFAULT_HOST, **_: object) -> list[tu
 
 def llm_provider_options(**_: object) -> list[str]:
     """Selectable primary LLM providers."""
-    return ["ollama", "opencode-zen"]
+    return ["ollama", "opencode_zen"]
 
 
 def llm_fallback_options(**_: object) -> list[str]:
     """Selectable fallback providers; the empty string means no fallback."""
-    return ["", "ollama", "opencode-zen"]
+    return ["", "ollama", "opencode_zen"]
 
 
 async def _zen_models(base_url: str, api_key: str) -> list[dict]:
@@ -232,7 +232,7 @@ async def llm_model_options(
     """Model picker options for the PRIMARY provider: route by ``provider``.
 
     Ollama lists pulled models with size/params; Zen lists server-side ids."""
-    if provider == "opencode-zen":
+    if provider == "opencode_zen":
         return await zen_model_options(base_url=base_url, api_key=api_key)
     return await ollama_model_options(host=host)
 
@@ -244,7 +244,7 @@ async def llm_fallback_model_options(
     """Model picker options for the FALLBACK provider: route by ``fallback``
     (the fallback's identity, not the primary's). Shares the one configured
     host/base_url/api_key — there are no separate fallback connection params."""
-    if fallback == "opencode-zen":
+    if fallback == "opencode_zen":
         return await zen_model_options(base_url=base_url, api_key=api_key)
     # "" (no fallback) or "ollama": list local models so a fallback can be chosen.
     return await ollama_model_options(host=host)
