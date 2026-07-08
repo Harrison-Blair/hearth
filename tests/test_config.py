@@ -264,3 +264,42 @@ def test_revoice_env_override(monkeypatch):
     cfg = Config()
     assert cfg.persona.revoice_enabled is False
     assert cfg.persona.revoice_timeout_s == 2.5
+
+
+# --- FTHR-013: per-provider LLM keys + .env loading ---
+
+
+def test_llm_config_has_no_api_key():
+    # The shared api_key is replaced by per-provider keys (FTHR-013 AC-3).
+    assert not hasattr(LlmConfig(), "api_key")
+
+
+def test_llm_per_provider_key_defaults():
+    cfg = LlmConfig()
+    assert cfg.openrouter_api_key == ""
+    assert cfg.opencode_zen_api_key == ""
+
+
+def test_env_file_loads_openrouter_api_key(tmp_path):
+    # .env is wired into the settings sources; a key in .env is surfaced (AC-2).
+    env_file = tmp_path / ".env"
+    env_file.write_text("ASSISTANT_LLM__OPENROUTER_API_KEY=k1\n")
+    cfg = Config(_env_file=str(env_file))
+    assert cfg.llm.openrouter_api_key == "k1"
+
+
+def test_env_var_beats_env_file(tmp_path, monkeypatch):
+    # Precedence: env var > .env (AC-2).
+    env_file = tmp_path / ".env"
+    env_file.write_text("ASSISTANT_LLM__OPENROUTER_API_KEY=dot-env-val\n")
+    monkeypatch.setenv("ASSISTANT_LLM__OPENROUTER_API_KEY", "env-wins")
+    cfg = Config(_env_file=str(env_file))
+    assert cfg.llm.openrouter_api_key == "env-wins"
+
+
+def test_env_file_beats_yaml(tmp_path):
+    # Precedence: .env > config.yaml; yaml default is "" (AC-2).
+    env_file = tmp_path / ".env"
+    env_file.write_text("ASSISTANT_LLM__OPENROUTER_API_KEY=fromfile\n")
+    cfg = Config(_env_file=str(env_file))
+    assert cfg.llm.openrouter_api_key == "fromfile"

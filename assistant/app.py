@@ -147,10 +147,11 @@ def _gateway_base_url(cfg: LlmConfig, provider: str | None = None) -> str | None
 def _llm_unhealthy_warning(cfg: LlmConfig) -> str:
     """Message logged when the boot-time LLM health check fails."""
     if cfg.provider in GATEWAYS:
+        env_var = f"ASSISTANT_LLM__{cfg.provider.upper()}_API_KEY"
         return (
             f"Remote LLM gateway {cfg.provider} not ready "
             f"(base_url={_gateway_base_url(cfg)}, model={cfg.model}); answers will "
-            "fail until it's reachable. Verify ASSISTANT_LLM__API_KEY and network."
+            f"fail until it's reachable. Verify {env_var} and network."
         )
     return (
         f"Ollama not ready (host={cfg.host}, model={cfg.model}); answers will fail "
@@ -160,16 +161,17 @@ def _llm_unhealthy_warning(cfg: LlmConfig) -> str:
 
 def _build_one_llm(cfg: LlmConfig, provider: str, model: str) -> LLMProvider:
     if provider in GATEWAYS:
-        if not cfg.api_key:
+        key = getattr(cfg, f"{provider}_api_key", "")
+        if not key:
             log.warning(
-                "%s provider selected but llm.api_key is empty; set "
-                "ASSISTANT_LLM__API_KEY. Requests will fail with 401.",
-                provider,
+                "%s provider selected but llm.%s_api_key is empty; set "
+                "ASSISTANT_LLM__%s_API_KEY. Requests will fail with 401.",
+                provider, provider, provider.upper(),
             )
         gateway = GATEWAYS[provider]
         return OpenAICompatibleProvider(
             model=model,
-            api_key=cfg.api_key,
+            api_key=key,
             base_url=_gateway_base_url(cfg, provider),
             timeout=cfg.timeout,
             health_timeout=cfg.health_timeout,
@@ -194,8 +196,9 @@ def _config_dump(config: Config) -> dict:
     for key in ("personal_calendar_id", "calcifer_calendar_id"):
         if dump["calendar"].get(key):
             dump["calendar"][key] = "***"
-    if dump["llm"].get("api_key"):
-        dump["llm"]["api_key"] = "***"
+    for key in ("openrouter_api_key", "opencode_zen_api_key"):
+        if dump["llm"].get(key):
+            dump["llm"][key] = "***"
     return dump
 
 

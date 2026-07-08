@@ -11,8 +11,9 @@ def test_gateway_base_url_openrouter():
 
 
 def test_gateway_base_url_opencode_zen():
-    cfg = LlmConfig(provider="opencode-zen", base_url="")
-    assert _gateway_base_url(cfg) == GATEWAYS["opencode-zen"]["base_url"]
+    # "opencode_zen" (underscore) resolves post-FTHR-013 (AC-4).
+    cfg = LlmConfig(provider="opencode_zen", base_url="")
+    assert _gateway_base_url(cfg) == GATEWAYS["opencode_zen"]["base_url"]
 
 
 def test_gateway_base_url_explicit_override():
@@ -30,15 +31,16 @@ def test_unhealthy_warning_openrouter_names_gateway():
     msg = _llm_unhealthy_warning(cfg)
     assert "openrouter" in msg
     assert GATEWAYS["openrouter"]["base_url"] in msg
-    assert "ASSISTANT_LLM__API_KEY" in msg
+    assert "ASSISTANT_LLM__OPENROUTER_API_KEY" in msg
 
 
 def test_unhealthy_warning_opencode_zen_names_gateway():
-    cfg = LlmConfig(provider="opencode-zen", base_url="", model="gpt-oss")
+    # "opencode_zen" (underscore) in both message and gateway table (AC-4).
+    cfg = LlmConfig(provider="opencode_zen", base_url="", model="gpt-oss")
     msg = _llm_unhealthy_warning(cfg)
-    assert "opencode-zen" in msg
-    assert GATEWAYS["opencode-zen"]["base_url"] in msg
-    assert "ASSISTANT_LLM__API_KEY" in msg
+    assert "opencode_zen" in msg
+    assert GATEWAYS["opencode_zen"]["base_url"] in msg
+    assert "ASSISTANT_LLM__OPENCODE_ZEN_API_KEY" in msg
 
 
 def test_unhealthy_warning_ollama_gives_ollama_serve_message():

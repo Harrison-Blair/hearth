@@ -74,7 +74,7 @@ LLM_TIER_STYLE = {"up": "green", "degraded": "yellow", "down": "red"}
 
 def _provider_label(name: str) -> str:
     """Short display name that fits the 40-col status line."""
-    return "zen" if name == "opencode-zen" else name
+    return "zen" if name == "opencode_zen" else name
 
 
 def _ollama_in_chain(llm) -> bool:
@@ -355,8 +355,8 @@ class AssistantTUI(App):
 
     async def _probe_provider(self, name: str) -> bool:
         llm = self._config.llm
-        if name == "opencode-zen":
-            return await discovery.zen_health(llm.base_url, llm.api_key)
+        if name == "opencode_zen":
+            return await discovery.zen_health(llm.base_url, llm.opencode_zen_api_key)
         return await discovery.ollama_health(llm.host)
 
     async def _check_llm_health(self) -> None:
@@ -381,7 +381,7 @@ class AssistantTUI(App):
                 host=llm.host,
                 provider=llm.provider,
                 base_url=llm.base_url,
-                api_key=llm.api_key,
+                api_key=getattr(llm, f"{llm.provider}_api_key", ""),
                 fallback=llm.fallback,
             ) if field.options else []
             if inspect.isawaitable(result):
@@ -418,7 +418,7 @@ class AssistantTUI(App):
             return
         # Zen models live server-side; /v1/models returns only ids (no
         # sizes/params/quant), so the Ollama-rich detail panel doesn't apply.
-        if self._config.llm.provider == "opencode-zen":
+        if self._config.llm.provider == "opencode_zen":
             detail.update(f"{name}: server-side model · details unavailable")
             return
         host = self._config.llm.host

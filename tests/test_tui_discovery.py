@@ -354,13 +354,13 @@ def test_stt_model_options_are_static_and_nonempty():
 
 
 def test_llm_provider_options_static():
-    assert discovery.llm_provider_options() == ["ollama", "opencode-zen"]
+    assert discovery.llm_provider_options() == ["ollama", "opencode_zen"]
 
 
 def test_llm_fallback_options_static_includes_none():
     opts = discovery.llm_fallback_options()
     assert opts[0] == ""  # "" = no fallback, listed first
-    assert "ollama" in opts and "opencode-zen" in opts
+    assert "ollama" in opts and "opencode_zen" in opts
 
 
 async def test_zen_health_true_when_models_ok(monkeypatch):
@@ -471,7 +471,7 @@ async def test_llm_model_options_routes_to_zen(monkeypatch):
     monkeypatch.setattr(discovery, "zen_model_options", fake_zen)
     monkeypatch.setattr(discovery, "ollama_model_options", fake_ollama)
     opts = await discovery.llm_model_options(
-        provider="opencode-zen", base_url="https://zen/v1", api_key="k",
+        provider="opencode_zen", base_url="https://zen/v1", api_key="k",
     )
     assert opts == [("m1", "m1")]
 
@@ -503,10 +503,10 @@ async def test_llm_fallback_model_options_routes_by_fallback_provider(monkeypatc
     monkeypatch.setattr(discovery, "ollama_model_options", fake_ollama)
     # The fallback model picker keys off `fallback`, NOT `provider`.
     assert await discovery.llm_fallback_model_options(
-        provider="opencode-zen", fallback="ollama", host="http://h",
+        provider="opencode_zen", fallback="ollama", host="http://h",
     ) == [("ollama-m", "ollama-m")]
     assert await discovery.llm_fallback_model_options(
-        provider="ollama", fallback="opencode-zen", base_url="https://zen/v1", api_key="k",
+        provider="ollama", fallback="opencode_zen", base_url="https://zen/v1", api_key="k",
     ) == [("zen-m", "zen-m")]
     # No fallback configured -> still lists local models so one can be chosen.
     assert await discovery.llm_fallback_model_options(fallback="", host="http://h") == [
