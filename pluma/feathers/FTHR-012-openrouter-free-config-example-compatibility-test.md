@@ -60,14 +60,14 @@ Implementation order fixed: (1) tests; (2) confirm FAIL against unchanged code (
 file absent); (3) implement until green.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and
+- [x] AC-1: The tests listed above were observed failing before implementation and
       pass after.
-- [ ] AC-2: `model: openrouter/free` reaches the wire verbatim and
+- [x] AC-2: `model: openrouter/free` reaches the wire verbatim and
       `tools`/`response_format` are present on the calls that need them, with no
       branch special-casing that id (PLM-004 AC-5, FC-8).
-- [ ] AC-3: Both `config.yaml` and `default-config.yaml` carry a commented,
+- [x] AC-3: Both `config.yaml` and `default-config.yaml` carry a commented,
       copy-pasteable `openrouter/free` example (provider / model / api_key-via-env /
       fallback + caveats); `default-config.yaml`'s `base_url` is blank so a provider
       switch needs no base_url edit; no API key appears in any committed file
       (PLM-004 AC-6, FC-7).
-- [ ] AC-4: `ruff check assistant tests` and the full suite pass with no network.
+- [x] AC-4: `ruff check assistant tests` and the full suite pass with no network.
