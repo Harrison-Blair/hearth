@@ -1,7 +1,7 @@
 ---
 id: PLM-004
 title: OpenRouter via a generic OpenAI-compatible LLM gateway
-status: hatched
+status: fledged
 priority: P2
 authored: 2026-07-07T23:05:24Z
 agent: fledge-orchestrate/planning
@@ -75,26 +75,26 @@ Numbered, testable statements of behavior. Referenced downstream as FC-1, FC-2, 
 
 ## Acceptance Criteria
 Checkbox list of verifiable conditions under which this plumage is considered fledged, one `- [ ] AC-N: …` line each. Authored unchecked; checked only via `fledge criteria check` at plumage closeout.
-- [ ] AC-1: With an OpenRouter key configured and `provider: openrouter`, a voice
+- [x] AC-1: With an OpenRouter key configured and `provider: openrouter`, a voice
       turn reaches OpenRouter's `/chat/completions` at the OpenRouter base URL and
       returns a spoken answer; a tool-requiring turn sends the `tools` schema and a
       returned tool call is parsed back.
-- [ ] AC-2: `provider: opencode-zen` produces the same requests and behavior as
+- [x] AC-2: `provider: opencode-zen` produces the same requests and behavior as
       before the change — the existing Zen wire + retry/guard tests pass unchanged
       against the generic provider.
-- [ ] AC-3: The gateway table resolves `openrouter` → the OpenRouter base URL and
+- [x] AC-3: The gateway table resolves `openrouter` → the OpenRouter base URL and
       `opencode-zen` → the Zen base URL; a blank `base_url` uses the table default
       while an explicit `base_url` overrides it.
-- [ ] AC-4: The composition root treats `openrouter` as a remote gateway everywhere
+- [x] AC-4: The composition root treats `openrouter` as a remote gateway everywhere
       it treated `opencode-zen` as one (endpoint logged, boot warning names the
       gateway, health path taken), verified without a hard-coded vendor check.
-- [ ] AC-5: With `model: openrouter/free`, the provider sends `openrouter/free`
+- [x] AC-5: With `model: openrouter/free`, the provider sends `openrouter/free`
       verbatim and includes `tools` / `response_format` on the calls that need them,
       with no special-casing of that id.
-- [ ] AC-6: A single shared `api_key` (from `ASSISTANT_LLM__API_KEY`) is used; no
+- [x] AC-6: A single shared `api_key` (from `ASSISTANT_LLM__API_KEY`) is used; no
       key appears in any committed file. Both config files carry the commented
       `openrouter/free` example.
-- [ ] AC-7: With `provider: openrouter` and `fallback` set to Ollama (or unset), a
+- [x] AC-7: With `provider: openrouter` and `fallback` set to Ollama (or unset), a
       remote failure falls back to local Ollama; the full test suite passes offline
       with the remote stubbed.
 
