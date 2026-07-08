@@ -2,7 +2,7 @@
 id: FTHR-013
 title: "Config core + provider rename — .env loading, per-provider LLM keys, opencode_zen (daemon + TUI)"
 plumage: PLM-005
-status: hatching
+status: fledged
 priority: P2
 depends_on: []
 oversight: merge
