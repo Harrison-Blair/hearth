@@ -47,7 +47,7 @@ llm:
   serve_cmd:
   - ollama
   - serve
-  api_key: ''            # OpenRouter key via ASSISTANT_LLM__API_KEY (required; no anonymous tier)
+  # api keys → .env; see .env.example
   base_url: ''           # blank → OpenRouter default from the GATEWAYS table
   fallback: ollama
   fallback_model: qwen3:14b
@@ -56,9 +56,9 @@ llm:
   # currently-free models. Caveats: a key is still required (no anonymous tier) and
   # free models rate-limit and rotate, so availability isn't guaranteed.
   # Previous config — OpenCode Zen as the primary remote gateway. Swap the active
-  # values above back to these to switch (token via ASSISTANT_LLM__API_KEY):
+  # values above back to these to switch (token via ASSISTANT_LLM__OPENCODE_ZEN_API_KEY):
   # llm:
-  #   provider: "opencode-zen"
+  #   provider: "opencode_zen"
   #   model: "gemma4:12b"
   #   base_url: "https://opencode.ai/zen/v1"   # or blank for the table default
   #   fallback: "ollama"
@@ -103,9 +103,8 @@ web_search:
   max_snippet_chars: 500
   max_rounds: 2
   progress_updates: true
-  tavily_api_key: ''
+  # api keys → .env; see .env.example
   tavily_endpoint: https://api.tavily.com/search
-  exa_api_key: ''
 weather:
   latitude: 33.749
   longitude: -84.38798

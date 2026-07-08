@@ -50,7 +50,7 @@ stt:
   hallucination_max_rms: 300.0
 
 llm:
-  provider: "openrouter"  # ollama | opencode-zen | openrouter
+  provider: "openrouter"  # ollama | opencode_zen | openrouter
   model: "openrouter/free"
   host: "http://localhost:11434"
   timeout: 60.0
@@ -58,9 +58,8 @@ llm:
   num_ctx: 8192           # context window passed to Ollama (options.num_ctx)
   think: false            # keep thinking-model reasoning off on chat paths (voice latency)
   serve_cmd: ["ollama", "serve"]   # command the TUI runs to (re)start the LLM server
-  # OpenCode Zen (provider: "opencode-zen") or OpenRouter (provider: "openrouter").
-  # Token read from ASSISTANT_LLM__API_KEY — never commit it here.
-  api_key: ""             # set via env var, not here
+  # OpenCode Zen (provider: "opencode_zen") or OpenRouter (provider: "openrouter").
+  # api keys → .env; see .env.example
   # Blank = use the selected provider's default base URL from the GATEWAYS table
   # (assistant/llm/openai_compatible_provider.py). Set only to override that default
   # (e.g. a self-hosted OpenAI-compatible endpoint).
@@ -131,9 +130,8 @@ web_search:
   max_snippet_chars: 500  # truncate each result body
   max_rounds: 2           # agentic search rounds before giving up
   progress_updates: true  # speak "searching..." style updates mid-turn
-  tavily_api_key: ""      # set via ASSISTANT_WEB_SEARCH__TAVILY_API_KEY, not here
+  # api keys → .env; see .env.example
   tavily_endpoint: "https://api.tavily.com/search"
-  exa_api_key: ""         # set via ASSISTANT_WEB_SEARCH__EXA_API_KEY, not here
 
 weather:
   latitude: 33.749                    # home location (Atlanta, GA)
