@@ -25,7 +25,7 @@ def _llm(provider="ollama", fallback=""):
 
 
 def test_provider_label_shortens_zen():
-    assert _provider_label("opencode-zen") == "zen"
+    assert _provider_label("opencode_zen") == "zen"
     assert _provider_label("ollama") == "ollama"
 
 
@@ -41,7 +41,7 @@ def test_derive_tier():
 
 
 def test_llm_status_line_provider_aware():
-    llm = _llm("opencode-zen", "ollama")
+    llm = _llm("opencode_zen", "ollama")
     assert _llm_status_line(llm, True, True, "up") == "zen ✓ · ollama ✓"
     assert _llm_status_line(llm, False, True, "degraded") == "zen ✗ · ollama ✓ (degraded)"
     assert _llm_status_line(_llm("ollama"), True, None, "up") == "ollama ✓"
@@ -55,9 +55,9 @@ def test_llm_status_line_provider_aware():
 
 def test_ollama_in_chain():
     assert _ollama_in_chain(_llm("ollama", "")) is True
-    assert _ollama_in_chain(_llm("opencode-zen", "ollama")) is True
-    assert _ollama_in_chain(_llm("opencode-zen", "")) is False
-    assert _ollama_in_chain(_llm("opencode-zen", "opencode-zen")) is False
+    assert _ollama_in_chain(_llm("opencode_zen", "ollama")) is True
+    assert _ollama_in_chain(_llm("opencode_zen", "")) is False
+    assert _ollama_in_chain(_llm("opencode_zen", "opencode_zen")) is False
 
 
 # ---- app-level health/gating ----------------------------------------------------
@@ -70,7 +70,8 @@ def _fake_config(provider="ollama", fallback=""):
             fallback=fallback,
             host="http://127.0.0.1:11434",
             base_url="https://zen.example/v1",
-            api_key="sk-test",
+            openrouter_api_key="",
+            opencode_zen_api_key="sk-test",
             model="qwen2.5:3b",
             serve_cmd=["ollama", "serve"],
         ),
@@ -108,7 +109,7 @@ async def test_check_llm_health_routes_probes_and_derives_tier(monkeypatch):
 
     monkeypatch.setattr(discovery, "zen_health", fake_zen_health)
     monkeypatch.setattr(discovery, "ollama_health", fake_ollama_health)
-    app = _make_app(monkeypatch, "opencode-zen", "ollama")
+    app = _make_app(monkeypatch, "opencode_zen", "ollama")
     await app._check_llm_health()
     assert ("zen", "https://zen.example/v1", "sk-test") in calls
     assert ("ollama", "http://127.0.0.1:11434") in calls
@@ -129,7 +130,7 @@ async def test_check_llm_health_no_fallback_skips_second_probe(monkeypatch):
 
     monkeypatch.setattr(discovery, "zen_health", fake_zen_health)
     monkeypatch.setattr(discovery, "ollama_health", fake_ollama_health)
-    app = _make_app(monkeypatch, "opencode-zen")
+    app = _make_app(monkeypatch, "opencode_zen")
     await app._check_llm_health()
     assert calls == ["zen"]
     assert app._llm_tier == "up"
@@ -140,7 +141,7 @@ async def test_ensure_ollama_skipped_when_ollama_not_in_chain(monkeypatch):
         raise AssertionError("ollama_health called for a Zen-only chain")
 
     monkeypatch.setattr(discovery, "ollama_health", fail_health)
-    app = _make_app(monkeypatch, "opencode-zen")
+    app = _make_app(monkeypatch, "opencode_zen")
     await app._ensure_ollama()
     assert app.ollama.started == 0
 
@@ -156,7 +157,7 @@ async def test_ensure_ollama_starts_when_ollama_in_chain_and_down(monkeypatch):
 
     monkeypatch.setattr(discovery, "ollama_health", fake_ollama_health)
     monkeypatch.setattr(app_module, "free_ollama_port", fake_free_port)
-    app = _make_app(monkeypatch, "opencode-zen", "ollama")
+    app = _make_app(monkeypatch, "opencode_zen", "ollama")
     app._open_ollama_log = lambda: None
     app.run_worker = lambda coro, **k: coro.close()
     await app._ensure_ollama()
@@ -164,7 +165,7 @@ async def test_ensure_ollama_starts_when_ollama_in_chain_and_down(monkeypatch):
 
 
 async def test_ollama_restart_noop_when_not_in_chain(monkeypatch):
-    app = _make_app(monkeypatch, "opencode-zen")
+    app = _make_app(monkeypatch, "opencode_zen")
     restarted = []
     app.ollama.restart = lambda: restarted.append(True)
     await app._on_ollama_restart()

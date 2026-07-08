@@ -416,8 +416,8 @@ async def test_picking_llm_provider_persists_and_restarts(monkeypatch):
     monkeypatch.setattr(configfile, "write_fields", lambda path, values: written.update(values))
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()
-        await app._on_llm_identity_picked(_field(("llm", "provider")), "opencode-zen")
-        assert written == {("llm", "provider"): "opencode-zen"}
+        await app._on_llm_identity_picked(_field(("llm", "provider")), "opencode_zen")
+        assert written == {("llm", "provider"): "opencode_zen"}
         assert app.supervisor.restarts == 1
 
 
@@ -709,7 +709,7 @@ async def test_restart_llm_button_hidden_without_ollama_in_chain(monkeypatch):
         await pilot.pause()
         row = app._home.query_one("#row-ollama-restart")
         assert row.display is True  # default config: ollama is the primary
-        app._config.llm.provider = "opencode-zen"
+        app._config.llm.provider = "opencode_zen"
         app._config.llm.fallback = ""
         app._refresh_status()
         await pilot.pause()
