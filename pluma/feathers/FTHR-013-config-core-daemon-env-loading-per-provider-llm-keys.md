@@ -100,4 +100,4 @@ the expected reason; (3) implement until they pass.
 - [x] AC-5: The TUI uses `opencode_zen` in its pickers, label, health probe, and
       identity handler with no `opencode-zen` literal remaining in `tui/`, and reads
       the per-provider key rather than `llm.api_key` (TUI side of PLM-005 FC-5).
-- [x] AC-6: `ruff check assistant tests` and the full suite pass offline.
+- [ ] AC-6: `ruff check assistant tests` and the full suite pass offline.
