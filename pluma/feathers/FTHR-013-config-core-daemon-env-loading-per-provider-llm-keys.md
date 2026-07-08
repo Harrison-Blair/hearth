@@ -89,15 +89,15 @@ Fixed order: (1) write the tests; (2) confirm they FAIL against unchanged code f
 the expected reason; (3) implement until they pass.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and
+- [x] AC-1: The tests listed above were observed failing before implementation and
       pass after.
-- [ ] AC-2: The daemon loads `.env` directly with precedence
+- [x] AC-2: The daemon loads `.env` directly with precedence
       init > env > `.env` > `config.yaml` (PLM-005 FC-1, FC-2).
-- [ ] AC-3: Each gateway uses its own per-provider key selected automatically; no
+- [x] AC-3: Each gateway uses its own per-provider key selected automatically; no
       shared `llm.api_key` exists (PLM-005 FC-3, FC-4).
-- [ ] AC-4: `opencode_zen` resolves as the gateway in the table and daemon
+- [x] AC-4: `opencode_zen` resolves as the gateway in the table and daemon
       diagnostics; `opencode-zen` no longer resolves (daemon side of PLM-005 FC-5).
-- [ ] AC-5: The TUI uses `opencode_zen` in its pickers, label, health probe, and
+- [x] AC-5: The TUI uses `opencode_zen` in its pickers, label, health probe, and
       identity handler with no `opencode-zen` literal remaining in `tui/`, and reads
       the per-provider key rather than `llm.api_key` (TUI side of PLM-005 FC-5).
-- [ ] AC-6: `ruff check assistant tests` and the full suite pass offline.
+- [x] AC-6: `ruff check assistant tests` and the full suite pass offline.
