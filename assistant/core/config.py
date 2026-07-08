@@ -123,12 +123,14 @@ class LlmConfig(BaseModel):
     # local `ollama serve` as a child (no sudo); systemd users can point it at
     # e.g. ["systemctl", "--user", "restart", "ollama"].
     serve_cmd: list[str] = ["ollama", "serve"]
-    # OpenAI-compatible gateway providers (provider: "opencode-zen" |
-    # "openrouter"). The bearer token is read from the ASSISTANT_LLM__API_KEY env
-    # var — never commit it to config.yaml. base_url blank uses that provider's
-    # gateway default (see llm/openai_compatible_provider.py:GATEWAYS); any
-    # OpenAI-compatible endpoint can be set explicitly to override it.
-    api_key: str = ""
+    # Per-provider bearer tokens for OpenAI-compatible gateways. Supply via env:
+    # ASSISTANT_LLM__OPENROUTER_API_KEY or ASSISTANT_LLM__OPENCODE_ZEN_API_KEY
+    # (or in .env) — never commit keys to config.yaml.
+    # base_url blank uses that provider's gateway default
+    # (see llm/openai_compatible_provider.py:GATEWAYS); any OpenAI-compatible
+    # endpoint can be set explicitly to override it.
+    openrouter_api_key: str = ""
+    opencode_zen_api_key: str = ""
     base_url: str = ""
     # Secondary provider used when the primary raises (transport failure,
     # timeout, malformed response). Empty = no fallback. ``fallback_model``
@@ -353,6 +355,7 @@ class LoggingConfig(BaseModel):
 class Config(BaseSettings):
     model_config = SettingsConfigDict(
         yaml_file="config.yaml",
+        env_file=".env",
         env_prefix="ASSISTANT_",
         env_nested_delimiter="__",
         extra="ignore",
@@ -386,5 +389,5 @@ class Config(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Precedence: explicit init args > env vars > config.yaml.
-        return (init_settings, env_settings, YamlConfigSettingsSource(settings_cls))
+        # Precedence: explicit init args > env vars > .env > config.yaml.
+        return (init_settings, env_settings, dotenv_settings, YamlConfigSettingsSource(settings_cls))

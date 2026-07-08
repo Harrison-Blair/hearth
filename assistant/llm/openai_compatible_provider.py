@@ -231,6 +231,6 @@ class OpenAICompatibleProvider(LLMProvider):
 # Known OpenAI-compatible gateways: config provider name -> base URL + any
 # headers needed beyond bearer auth. Add an entry here to support a new gateway.
 GATEWAYS: dict[str, dict] = {
-    "opencode-zen": {"base_url": "https://opencode.ai/zen/v1", "extra_headers": {}},
+    "opencode_zen": {"base_url": "https://opencode.ai/zen/v1", "extra_headers": {}},
     "openrouter": {"base_url": "https://openrouter.ai/api/v1", "extra_headers": {}},
 }
