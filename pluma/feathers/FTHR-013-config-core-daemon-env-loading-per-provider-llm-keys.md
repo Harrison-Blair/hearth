@@ -1,8 +1,8 @@
 ---
 id: FTHR-013
-title: "Config core — daemon .env loading + per-provider LLM keys"
+title: "Config core + provider rename — .env loading, per-provider LLM keys, opencode_zen (daemon + TUI)"
 plumage: PLM-005
-status: pipping
+status: hatching
 priority: P2
 depends_on: []
 oversight: merge
@@ -11,16 +11,20 @@ agent: fledge-orchestrate/planning
 fledge_version: 0.2.0
 ---
 
-# FTHR-013: Config core — daemon .env loading + per-provider LLM keys
+# FTHR-013: Config core + provider rename — .env loading, per-provider LLM keys, opencode_zen (daemon + TUI)
 
 ## Description
 The tracer slice. Makes the daemon load `.env` directly and replaces the single
 shared LLM key with per-provider keys, proving the end-to-end path: a key in
 `.env` → daemon loads it → `_build_one_llm` selects the selected provider's key →
-provider built. Renames the `opencode-zen` gateway to `opencode_zen` on the
-**daemon side** (gateway table, config, boot diagnostics). Drops `llm.api_key`.
-Satisfies PLM-005 FC-1, FC-2, FC-3, FC-4 and the daemon half of FC-5; establishes
-the `*_api_key` field contract FTHR-014/015 compose against.
+provider built. Renames the `opencode-zen` provider to `opencode_zen` across **both the daemon and
+the TUI** (gateway table, config, boot diagnostics, TUI pickers/label/health probe),
+and drops `llm.api_key` everywhere it is read — including the TUI, which consumes it
+in `_probe_provider` and `_select_options`. The rename and the `api_key` removal are
+one atomic cross-cutting change (this feather absorbs the former FTHR-014, since the
+TUI reads `llm.api_key` and the two edits are entangled in the same functions).
+Satisfies PLM-005 FC-1, FC-2, FC-3, FC-4, FC-5; establishes the `*_api_key` field
+contract FTHR-015 composes against.
 
 ## Affected Modules
 - **`assistant/core/config.py`** — add `env_file=".env"` to `SettingsConfigDict`;
@@ -38,10 +42,21 @@ the `*_api_key` field contract FTHR-014/015 compose against.
   (currently masks `llm.api_key`) to mask the per-provider key fields. Diagnostics
   already key off `GATEWAYS`, so `opencode_zen` flows through. See
   `.fledge/nest/entry-points.md` → where the LLM provider is registered.
+- **`tui/app.py`** — `_probe_provider` (match `"opencode_zen"` and pass the
+  per-provider key `llm.opencode_zen_api_key` to `discovery.zen_health`),
+  `_select_options` (replace `api_key=llm.api_key` with the selected provider's key,
+  `getattr(llm, f"{llm.provider}_api_key", "")`), `_provider_label` (match
+  `"opencode_zen"`, keep the short `"zen"` display sugar), and the
+  `llm.provider == "opencode-zen"` check (~L421). See `.fledge/nest/modules.md` → `tui/`.
+- **`tui/discovery.py`** — provider/fallback option lists and the
+  `provider == "opencode-zen"` / `fallback == "opencode-zen"` branches
+  (~L173/178/235/247) → `opencode_zen`.
 - **`tests/`** — `test_config.py` (drop `api_key`; add per-provider fields +
   `.env`-loading + precedence tests), `test_llm_dispatch.py` (`opencode_zen`
   resolution + per-provider key selection), `test_app_llm_diagnostics.py` (repoint
-  to `opencode_zen`). **TUI files/tests are untouched — that is FTHR-014.**
+  to `opencode_zen`), and the TUI tests `test_tui_app.py` / `test_tui_discovery.py` /
+  `test_tui_screens.py` (repoint `opencode-zen` → `opencode_zen`; drop `api_key`
+  references).
 
 ## Approach
 Test-first. `.env` loading: `env_file=".env"` + `dotenv_settings` in the source
@@ -65,6 +80,10 @@ New/updated (all offline; httpx stubbed where a provider is built):
 - **rename** — `GATEWAYS["opencode_zen"]` resolves the Zen base URL; `"opencode-zen"`
   is absent (no longer a gateway).
 - **no shared key** — `LlmConfig` has no `api_key` attribute.
+- **TUI rename + keys** — `discovery.llm_provider_options()` returns
+  `["ollama", "opencode_zen"]` (and fallback options include it); no `opencode-zen`
+  literal remains in `tui/`; `_provider_label("opencode_zen") == "zen"`; the TUI
+  health probe/discovery read the per-provider key, not `llm.api_key`.
 
 Fixed order: (1) write the tests; (2) confirm they FAIL against unchanged code for
 the expected reason; (3) implement until they pass.
@@ -77,5 +96,8 @@ the expected reason; (3) implement until they pass.
 - [ ] AC-3: Each gateway uses its own per-provider key selected automatically; no
       shared `llm.api_key` exists (PLM-005 FC-3, FC-4).
 - [ ] AC-4: `opencode_zen` resolves as the gateway in the table and daemon
-      diagnostics; `opencode-zen` no longer resolves (daemon half of PLM-005 FC-5).
-- [ ] AC-5: `ruff check assistant tests` and the full suite pass offline.
+      diagnostics; `opencode-zen` no longer resolves (daemon side of PLM-005 FC-5).
+- [ ] AC-5: The TUI uses `opencode_zen` in its pickers, label, health probe, and
+      identity handler with no `opencode-zen` literal remaining in `tui/`, and reads
+      the per-provider key rather than `llm.api_key` (TUI side of PLM-005 FC-5).
+- [ ] AC-6: `ruff check assistant tests` and the full suite pass offline.
