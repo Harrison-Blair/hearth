@@ -2,7 +2,7 @@
 id: FTHR-012
 title: "openrouter/free config example + compatibility test"
 plumage: PLM-004
-status: egg
+status: fledged
 priority: P2
 depends_on: [FTHR-010]
 authored: 2026-07-07T23:33:04Z
