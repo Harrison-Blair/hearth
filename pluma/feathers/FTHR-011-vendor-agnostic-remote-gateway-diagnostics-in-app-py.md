@@ -57,12 +57,12 @@ Implementation order fixed: (1) tests; (2) confirm FAIL against unchanged code (
 helpers don't exist / Zen is hard-coded); (3) implement until green.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and
+- [x] AC-1: The tests listed above were observed failing before implementation and
       pass after.
-- [ ] AC-2: With `provider: openrouter`, the boot "Config:" log shows the OpenRouter
+- [x] AC-2: With `provider: openrouter`, the boot "Config:" log shows the OpenRouter
       endpoint and a boot-time unhealthy LLM logs a warning naming OpenRouter (not
       Zen) with its base_url — driven by `GATEWAYS`, with no `== "opencode-zen"`
       check remaining in these branches (PLM-004 AC-4, FC-5).
-- [ ] AC-3: `provider: opencode-zen` and `provider: ollama` diagnostics are
+- [x] AC-3: `provider: opencode-zen` and `provider: ollama` diagnostics are
       unchanged in substance (same endpoint and message content as before).
-- [ ] AC-4: `ruff check assistant tests` and the full suite pass with no network.
+- [x] AC-4: `ruff check assistant tests` and the full suite pass with no network.

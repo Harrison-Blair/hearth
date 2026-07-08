@@ -131,6 +131,33 @@ def _build_llm(cfg: LlmConfig) -> LLMProvider:
     return FallbackLLMProvider(primary, fallback)
 
 
+def _gateway_base_url(cfg: LlmConfig, provider: str | None = None) -> str | None:
+    """The base URL a gateway provider will use, or ``None`` for Ollama.
+
+    ``provider`` defaults to ``cfg.provider``; ``_build_one_llm`` passes it
+    explicitly since the fallback provider it builds may differ from the
+    primary one named on ``cfg``.
+    """
+    provider = cfg.provider if provider is None else provider
+    if provider not in GATEWAYS:
+        return None
+    return cfg.base_url or GATEWAYS[provider]["base_url"]
+
+
+def _llm_unhealthy_warning(cfg: LlmConfig) -> str:
+    """Message logged when the boot-time LLM health check fails."""
+    if cfg.provider in GATEWAYS:
+        return (
+            f"Remote LLM gateway {cfg.provider} not ready "
+            f"(base_url={_gateway_base_url(cfg)}, model={cfg.model}); answers will "
+            "fail until it's reachable. Verify ASSISTANT_LLM__API_KEY and network."
+        )
+    return (
+        f"Ollama not ready (host={cfg.host}, model={cfg.model}); answers will fail "
+        f"until it's up. Run `ollama serve` and `ollama pull {cfg.model}`."
+    )
+
+
 def _build_one_llm(cfg: LlmConfig, provider: str, model: str) -> LLMProvider:
     if provider in GATEWAYS:
         if not cfg.api_key:
@@ -143,7 +170,7 @@ def _build_one_llm(cfg: LlmConfig, provider: str, model: str) -> LLMProvider:
         return OpenAICompatibleProvider(
             model=model,
             api_key=cfg.api_key,
-            base_url=cfg.base_url or gateway["base_url"],
+            base_url=_gateway_base_url(cfg, provider),
             timeout=cfg.timeout,
             health_timeout=cfg.health_timeout,
             max_retries=cfg.max_retries,
@@ -183,9 +210,7 @@ def main() -> None:
         runs_to_keep=config.logging.runs_to_keep,
     )
 
-    llm_endpoint = (
-        config.llm.base_url if config.llm.provider == "opencode-zen" else config.llm.host
-    )
+    llm_endpoint = _gateway_base_url(config.llm) or config.llm.host
     log.info("Personal assistant booting (v%s)", __import__("assistant").__version__)
     log.info(
         "Config: wake=%r models=%s | stt=%s | llm=%s/%s@%s | tts=%s",
@@ -241,21 +266,7 @@ async def _run(config: Config, devices: DeviceSelection) -> None:
     llm = _build_llm(config.llm)
     llm_healthy = await llm.health()
     if not llm_healthy:
-        if config.llm.provider == "opencode-zen":
-            log.warning(
-                "OpenCode Zen not ready (base_url=%s, model=%s); answers will fail "
-                "until it's reachable. Verify ASSISTANT_LLM__API_KEY and network.",
-                config.llm.base_url,
-                config.llm.model,
-            )
-        else:
-            log.warning(
-                "Ollama not ready (host=%s, model=%s); answers will fail until it's up. "
-                "Run `ollama serve` and `ollama pull %s`.",
-                config.llm.host,
-                config.llm.model,
-                config.llm.model,
-            )
+        log.warning(_llm_unhealthy_warning(config.llm))
     store = ReminderStore(config.storage.db_path)
     search, search_routes = _build_search(config.web_search)
     weather = OpenMeteoWeather(
