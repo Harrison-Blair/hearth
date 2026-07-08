@@ -1,72 +1,62 @@
 ---
-generated: 2026-07-07T22:56:23Z
-commit: 58fb2ba9bbeefc5db7d530261bcb3450573048fa
+generated: 2026-07-08T00:34:07Z
+commit: 0a67e65dc3d33b2e9c911f1296eef515124fa678
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Architecture
 
-Offline-first voice assistant ("Calcifer") plus a separate Textual monitor TUI. The runtime is a single async loop that turns spoken audio into a routed skill action and speaks a persona-flavored reply. Everything is interface-per-capability: the pipeline depends only on ABCs, and one composition root (`assistant/app.py`) constructs and injects concrete providers. This document describes the runtime flow, the seams that keep the dependency graph acyclic, and how the three most recent plumages (self-update, AI-first search, persona revoice) thread through it.
+An offline-first voice assistant ("Calcifer") that listens for a wake word, transcribes a command, routes it to a skill via an LLM tool-calling loop, and speaks the reply. Everything that can run locally does; remote services (LLM gateways, web search, weather, calendar) are optional accelerators behind interfaces with local fallbacks. Deployment target is a Raspberry Pi 5; development/verification happens on Linux desktop first.
 
-## The pipeline loop
+## The pipeline
 
-`assistant/core/pipeline.py:VoicePipeline` is the state machine:
+The single async loop lives in `assistant/core/pipeline.py:VoicePipeline.run()`:
 
 > wake word → record (VAD) → transcribe (STT) → route (orchestrator) → skill → speak (TTS)
 
-- **Wake** — `wake/livekit_detector.py:LivekitWakeDetector.process(frame)` yields a `WakeEvent(name, score)` after `trigger_frames` consecutive high-scoring frames over a rolling 2s window; the model artifact is `models/wake/calcifer.onnx` (`wake/registry.py` derives spoken phrases from the manifest).
-- **Record** — `audio/recorder.py:VadRecorder` collects PCM until trailing silence, timeout, or cap; `audio/mic_hub.py:MicHub` fans frames to the recorder plus a synchronous *tap* so wake detection continues during playback (barge-in). Optional AEC (`audio/aec.py:SpeexEchoCanceller`) subtracts speaker output from the mic.
-- **Transcribe** — `stt/faster_whisper_stt.py:FasterWhisperSTT.transcribe(bytes)`; near-silent hallucinations are filtered by an RMS gate in the pipeline.
-- **Route** — `core/orchestrator.py:Orchestrator.handle()` runs the tool-calling loop (see below).
-- **Speak** — the pipeline's `_speak(text, voiced=False)` choke point runs text through `core/revoice.py:Revoicer` (unless already `voiced`) then `tts/piper_tts.py:PiperTTS.synthesize()`. Output is serialized against capture by `core/arbiter.py:AudioArbiter` (a single async lock).
+`VoicePipeline` depends only on capability ABCs (`assistant/audio/base.py:AudioIn`/`AudioOut`, `assistant/stt/base.py:SpeechToText`, `assistant/tts/base.py:TextToSpeech`, `assistant/wake/base.py:WakeDetector`, `assistant/llm/base.py:LLMProvider`); it never imports a concrete provider. Alternate entry points into the same route/speak path: `submit_text()` (typed command from the TUI), `request_listen()` (tap-to-listen, skip wake), `cancel()`.
 
-All capability methods are `async`; blocking native work (Whisper, Piper, Speex, PortAudio) is pushed to `asyncio.to_thread()` or callback threads.
+## Interface-per-capability
 
-## Routing: the orchestrator tool-calling loop
+Each capability is its own package with an ABC in `base.py` and concrete implementation(s) beside it: `wake/`, `stt/`, `llm/`, `tts/`, `nlu/`, `audio/`, `search/`, `weather/`, `calendar/`, plus `scheduling/` and `storage/`. `sync/` and `connectivity/` are deliberate stub seams (`assistant/sync/base.py:SyncAdapter`, `assistant/connectivity/base.py:ConnectivityService`/`ProviderRouter`) — intentional future contracts, not dead code. Adding or swapping an implementation means coding against the `base.py` ABC; the pipeline must never reach for a concrete type.
 
-`core/orchestrator.py:Orchestrator` is the router. It exposes each skill intent as an OpenAI-style tool schema via `SkillRegistry.tool_schemas()` and asks the LLM to either call one tool (its arguments populate `Intent.slots`) or answer directly. Supports `tool_mode` = native/json/auto, a `max_tool_rounds` cap, and an optional two-stage **verify loop** (`core/verify.py`): a *pre* stage reviews the tool pick + args and a *post* stage reviews the drafted answer, each able to approve, reject, or rewrite. Any LLM/JSON failure or `turn_timeout_s` expiry degrades to the `default=True` skill (`skills/general.py:GeneralSkill`), which itself handles the offline case with a spoken canned message. Routing never hard-codes skill names.
+## Composition root: app.py
 
-## Composition root
+`assistant/app.py` is the only wiring point. `main()` builds `Config()`, sets up logging, selects audio devices; `_run(config, devices)` constructs every concrete implementation (`PiperTTS`, `LivekitWakeDetector`, `FasterWhisperSTT`, LLM providers, skills, search/weather/calendar providers, schedulers, stores) and injects them into `VoicePipeline`. Construction-time choices (which skills, the default skill, which LLM provider) live here, not inside components. Concurrent tasks run via `asyncio.gather(pipeline.run(), scheduler.run(), control.run(), [calendar_watcher.run()])`; cleanup `.aclose()`/`.close()` in a finally block.
 
-`assistant/app.py` is the only wiring point (`_run()` async composition; `main()` entrypoint). It reads `Config`, selects audio devices, constructs every concrete implementation, wires shared state, boots subsystems concurrently via `asyncio.gather()` (pipeline, `ReminderScheduler`, `CalendarWatcher`, `ControlChannel`), and runs graceful boot health checks. Components receive primitive/config values, never the whole `Config` object, so they stay unit-testable. Secrets (`api_key`, calendar ids) are masked in the logged config dump.
+## LLM provider path (post-PLM-004)
 
-## Interface-per-capability seams
+The LLM layer is a vendor-neutral OpenAI-compatible gateway plus a local Ollama path, composed with an exception-based fallback. See `entry-points.md` and `data-model.md` for full detail. Key files:
 
-Each capability is a package with a `base.py` ABC and concrete implementations beside it: `wake/`, `stt/`, `tts/`, `llm/`, `audio/`, `search/`, `weather/`, `calendar/`, `nlu/`, plus `scheduling/` and `storage/`. `sync/` and `connectivity/` are deliberate no-op stub ABCs reserving future seams (Phase-6 connectivity routing, calendar upstream sync) — not dead code. **The pipeline imports only ABCs; concrete types appear only in `app.py`.**
+- `assistant/llm/base.py` — `LLMProvider` ABC: `complete()`, `chat()`, `chat_tools()`, `health()`, `aclose()`; `ChatResponse(content, tool_calls)`.
+- `assistant/llm/openai_compatible_provider.py` — `OpenAICompatibleProvider` (generic `/chat/completions`) + the `GATEWAYS` table mapping provider name → `{base_url, extra_headers}`. Current entries: `opencode-zen` (`https://opencode.ai/zen/v1`) and `openrouter` (`https://openrouter.ai/api/v1`). `OpenCodeZenProvider`/`opencode_zen_provider.py` no longer exist — the generic class replaced them (PLM-004 / FTHR-010).
+- `assistant/llm/ollama_provider.py` — `OllamaProvider`, the local/offline path and default fallback.
+- `assistant/llm/fallback_provider.py` — `FallbackLLMProvider(primary, fallback)`; delegates to primary and only falls back on exception (a valid-but-empty response does not fall back).
+- `assistant/app.py:_build_llm`/`_build_one_llm`/`_gateway_base_url`/`_llm_unhealthy_warning` — resolve `LlmConfig` into providers, health-check at boot, and log a vendor-neutral warning driven by `GATEWAYS[provider]` rather than hard-coded vendor checks.
 
-`core/events.py` holds the shared dataclasses (`WakeEvent`, `Turn`, `Command`, `ToolCall`, `Intent`, `SkillResult`) that flow between stages. They live in `core/` precisely so capability packages can pass them without importing each other — this is the rule that keeps the graph acyclic.
+Remote is never a hard dependency: providers health-check at boot (`await llm.health()`) and degrade with a logged warning rather than crashing.
 
-## Shared runtime state
+## Routing: skills as plug-ins
 
-`core/standdown.py:StandDown` is a single "stop listening" flag built in `app.py` and threaded into the pipeline, reminder scheduler, calendar watcher, control channel, and `StandDownSkill`. Consumers poll `.active` on their own tick (no background timer), so a timed stand-down simply expires and a daemon restart clears it. `core/state.py:StateEmitter` writes `@@STATE {json}` lines to stdout that the TUI reads (`NullStateEmitter` on an interactive terminal). `core/control.py:ControlChannel` reads stdin commands (TEXT, SET, SAY, LISTEN, CANCEL, STOP, RESUME) from the TUI.
+Routing is a tool-calling loop in `assistant/core/orchestrator.py:Orchestrator.handle()`. Each skill (`assistant/skills/base.py:Skill` subclass) declares `name` + `intents`; `SkillRegistry.tool_schemas()` exposes every intent as an OpenAI-style function tool. The LLM either calls one tool (its arguments populate `Intent.slots`) or answers directly. Any LLM/JSON failure, unknown tool, tool-repeat-cap breach, or turn timeout degrades to the `default=True` skill (`GeneralSkill`), which handles the offline case with a spoken message. An optional pre/post **verify** loop (`assistant/core/verify.py`) can approve/rewrite/reject a tool pick or answer; it fails open (a `None` verdict approves). Routing never hard-codes skill names.
 
-## The LLM path (first-class — the next feature targets it)
+## Speech flavoring (persona)
 
-The LLM layer (`assistant/llm/`) sits behind `base.py:LLMProvider` (async `complete` / `chat` / `chat_tools` / `health` / `aclose`, returning `ChatResponse{content, tool_calls}`). Three concrete providers:
+Every spoken reply sounds like the Calcifer persona. `SkillResult.voiced` marks replies already persona-flavored (skip the revoicer); everything else is restyled live at the speak choke point by `assistant/core/revoice.py:Revoicer` (one LLM call, digit-preservation guard, circuit-breaker cooldown). LLM-free "canned" lines (`assistant/core/persona.py:canned()`) provide in-character error/offline text. Persona is applied only to spoken output — never to tool-decision, verify-decision, or routing prompts (enforced by `tests/test_speech_invariants.py`).
 
-- `ollama_provider.py:OllamaProvider` — local Ollama (`/api/generate`, `/api/chat`); health checks that the specific model is pulled; honors a `think` flag (suppresses reasoning for JSON output).
-- `opencode_zen_provider.py:OpenCodeZenProvider` — remote OpenAI-compatible `/chat/completions` gateway; retry/backoff with jitter on 429/5xx/transport, never on 4xx-auth; raises `LLMResponseError(retryable: bool)` on malformed/empty 200s; health only probes reachability. **Landed after PLM-002; the newest provider.**
-- `fallback_provider.py:FallbackLLMProvider` — wraps a primary and a fallback; catches any primary exception and retries on the fallback (empty responses do *not* trigger fallback — the orchestrator handles those). `health()` ORs both.
+## Shared records and acyclic graph
 
-`app.py:_build_llm` / `_build_one_llm` is the dispatch: `provider == "opencode-zen"` → `OpenCodeZenProvider`, otherwise `OllamaProvider`; wrapped in `FallbackLLMProvider` when `LlmConfig.fallback` is set and differs from the primary. The boot health check seeds the `Revoicer` so a down LLM doesn't add latency to first replies. See `data-model.md` for the full `LlmConfig`, and `testing.md` for the httpx.MockTransport wire/guard seams.
+`assistant/core/events.py` holds the dataclasses that flow between stages (`WakeEvent`, `Command`, `Intent`, `SkillResult`, `Turn`, `ToolCall`). They live in `core/` so capability packages can pass them without importing each other, keeping the dependency graph acyclic. `assistant/core/standdown.py:StandDown` is a single shared "stop listening" state, threaded into the pipeline, schedulers, watcher, and control channel; consumers poll `.active` on their own tick (no background timer).
 
-## Recent plumages threaded through the architecture
+## Proactive announcements
 
-- **PLM-001 self-update / restart-in-place** — `skills/update.py:UpdateSkill` does a two-phase confirm, then sets `SkillResult.restart=True`; the pipeline honors it *after* `_speak()` finishes so the sign-off is audible, then `core/selfupdate.py:restart_in_place()` does `os.execv` (same PID, fresh interpreter loads on-disk code). The TUI `DaemonSupervisor` survives the re-exec (pdeathsig).
-- **PLM-002 AI-first web search** — `search/` gained keyed AI providers `TavilySearch` (synthesized answer) and `ExaSearch` (semantic highlights) alongside keyless `WikipediaSearch`/`DdgsSearch`; `search/multi.py:MultiSearch` fans out concurrently, round-robin merges, dedupes by URL. `skills/web_search.py:WebSearchSkill` runs an agentic refine→search→assess loop that classifies query type (factual→Tavily, semantic→Exa) and falls back to the keyless tier with a spoken notice.
-- **PLM-003 persona-flavored revoice** — `core/revoice.py:Revoicer` restyles every unvoiced reply at the `_speak` choke point (circuit breaker, digit-preservation guard, bounded timeout). `SkillResult.voiced=True` marks already-persona-flavored text to bypass. `core/persona.py:canned()` supplies LLM-free template lines for error/offline paths. `ReminderScheduler` and `CalendarWatcher` also route announcements through the revoicer. Invariant: routing/verify *decision* prompts stay persona-free; persona appears only on spoken output.
+Two background loops speak unprompted: `assistant/scheduling/scheduler.py:ReminderScheduler` (fires due reminders/timers, catch-up summary on boot) and `assistant/scheduling/calendar_watcher.py:CalendarWatcher` (announces upcoming calendar events within a lead window, deduped across restarts). Both serialize audio through `assistant/core/arbiter.py:AudioArbiter` so announcements never collide with the capture/playback path or self-trigger the wake word.
 
-## The monitor TUI (one-directional dependency)
+## The monitor TUI (separate package)
 
-`tui/` is a top-level sibling package (`python -m tui`) that supervises the daemon as a child process over the stdin control channel and reads its stdout log/state feed. It imports only `assistant.core.config.Config` and `assistant.wake.registry` — never the pipeline, skills, or native deps. **Nothing under `assistant/` may import `tui`.** Its deployment target is the Pi 5's 320×480 portrait touchscreen (~40×30 cells), touch-only; every screen must fit 40 columns (enforced by `tests/test_tui_screens.py`).
+`tui/` is a sibling top-level package (run with `python -m tui`) that supervises the daemon as a child process (`python -m assistant.app`) over a stdin control channel and parses its stdout (`@@STATE {json}` feed + log lines). It targets the Pi 5's 320×480 portrait display (~40×30 cells), touch-only. The dependency is strictly one-directional: `tui/` imports only `assistant.core.config.Config` and `assistant.wake.registry`; nothing under `assistant/` imports `tui`. This lets the daemon run headless while the TUI runs elsewhere.
 
-## Offline-first principle
+## Configuration and secrets
 
-Local implementations are the guaranteed path; remote/cloud (OpenCode Zen, Tavily, Exa, Google Calendar) always sits behind an interface with a local fallback. Providers health-check at boot and degrade with a logged warning rather than crashing. Config is the single source of truth (`core/config.py`), so the Raspberry Pi 5 deployment is config-only.
-
-## Open Questions
-
-- `FallbackLLMProvider` holds both primary and fallback provider instances simultaneously (each with its own pooled httpx client) — connection/memory cost is paid whether or not the fallback is ever used.
-- `Orchestrator.delegate_direct_answers` implies two modes for no-tool answers (passthrough vs. re-voice through the default skill); the production setting isn't visible outside `app.py`.
-- Whether a daemon restart after *broken* on-disk code surfaces a distinct "update failed" state to the TUI vs. a generic stopped-daemon state (flagged in PLM-001 as a safety follow-up).
+`assistant/core/config.py` (pydantic-settings) is the single source of truth: `config.yaml` → typed `*Config` models, overridable by `ASSISTANT_*` env vars with `__` for nesting. Precedence is init args > env > `config.yaml` (`Config.settings_customise_sources`). Secrets (LLM/search API keys, calendar credentials) are separated from configuration and delivered via environment rather than committed YAML; the monitor TUI merges a `.env` file into the daemon's process environment at (re)start (`tui/envfile.py` + `tui/supervisor.py`) — the daemon's pydantic-settings does not itself load `.env`. See `conventions.md` and `data-model.md`.

@@ -8,6 +8,10 @@ Harness runtime behavior for fledge's Tier C team loop on Claude Code. The workf
 
 **Precondition:** the session is inside tmux (`test -n "$TMUX"`). If not, split-pane teammate display is unavailable. `implementation.md` §1 surfaces this via a `confirm-gate`: stop and restart inside tmux (recommended), or proceed degraded with in-process teammates (no panes; teammates still run, you just can't watch them in split view).
 
+## Orchestrator name (how teammates reach you)
+
+The agent-neutral skill calls you `fledge-orchestrator`; on Claude Code that role **is** the team lead, and the harness registers the lead under the fixed name **`team-lead`** — you cannot rename yourself. `team-lead` is the name teammates must use to `SendMessage` you; `fledge-orchestrator` is not a routable address here. So whenever a spawn prompt or protocol says to give a worker "your name (the orchestrator's name)", pass **`team-lead`**. (`fledge-orchestrator` still appears as the `fledge brood --owner` lock label, which is an audit tag, not a message address — leave it.)
+
 ## Spawning and addressing teammates
 
 - Spawn a teammate of a given agent type (e.g. `fledge-brooder`) named per the penguin-species scheme in `implementation.md` §3.1. The teammate's agent definition (`.claude/agents/fledge-<role>.md`) is its system prompt; the spawn prompt you pass is its task context. Both are the teammate's entire context — it inherits no conversation history.

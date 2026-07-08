@@ -1,59 +1,77 @@
 ---
-generated: 2026-07-07T22:56:23Z
-commit: 58fb2ba9bbeefc5db7d530261bcb3450573048fa
+generated: 2026-07-08T00:34:07Z
+commit: 0a67e65dc3d33b2e9c911f1296eef515124fa678
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Testing
 
-The suite is ~84 files under `tests/` (~26k LOC across the two core batches plus TUI and eval), run with **pytest + pytest-asyncio in `asyncio_mode = "auto"`** (from `pyproject.toml`) — so `async def test_...` needs no marker. Everything native (LLM, HTTP, audio devices, ONNX models, `os.execv`) is stubbed, so `pip install -e ".[dev]"` alone runs the whole suite offline.
+87 files under `tests/` (~1300+ test functions). pytest with `asyncio_mode = auto` (`pyproject.toml`) — `async def test_...` runs without a marker. The suite is hermetic: no real Ollama, Piper, faster-whisper, livekit, microphone, GPU, or network. `pip install -e ".[dev]"` is enough. Lint: `ruff check assistant tests` (line-length 100).
 
 ## Running
-
-```bash
+```
 pytest                                            # all
 pytest tests/test_pipeline.py                     # one file
-pytest tests/test_router.py -k route_falls_back   # one test
-ruff check assistant tests                        # lint
-ASSISTANT_EVAL=1 pytest tests/eval/test_tool_eval.py   # opt-in live LLM eval
+pytest tests/test_openai_compatible_provider.py   # LLM gateway
+pytest tests/test_config.py -k env                # one pattern
+ASSISTANT_EVAL=1 pytest tests/eval/               # opt-in eval (needs live Ollama)
 ```
 
-## Test-doubling patterns
+## How isolation is achieved
+- **HTTP:** `httpx.MockTransport(handler)` + `monkeypatch` of the `AsyncClient` factory intercepts every provider request (Ollama, OpenAI-compatible gateways, Tavily, Exa, Wikipedia, Open-Meteo, Google Calendar). Handlers assert on `json.loads(request.content)` and return `httpx.Response`.
+- **Native libs:** `sys.modules["speexdsp"] = None` (forces AEC passthrough), monkeypatched `PiperVoice.load`, injected `FakeWakeWordModel`, stubbed `sounddevice`. Model paths are passed but never loaded.
+- **Storage:** `:memory:` SQLite for logic tests; `tmp_path` for persistence/reopen/migration tests.
+- **Time & clocks:** constructor `now=lambda: dt` for Clock/Reminder/Timer/StandDown/scheduler/watcher; `FakeClock` for StandDown; monotonic-based timeout tests use small budgets.
+- **LLM:** scripted/fake providers implementing the full `LLMProvider` interface — `ScriptedLLM`, `FakeLLM`, `StubLLM`, `TaggingRevoicer`, and the production `ReplayProvider` (`tests/eval/replay.py`).
+- **Config:** `monkeypatch.setenv("ASSISTANT_*", ...)`; TUI tests use an autouse hermetic-config fixture seeding `Config` from model defaults so they don't read the developer's `config.yaml`.
 
-- **HTTP wire mocking** — `httpx.MockTransport` via a shared `_patch_transport(monkeypatch, handler)` helper that routes an `AsyncClient` through a handler `(httpx.Request) -> httpx.Response`. Handlers inspect URL/headers/JSON body (often capturing into a dict) and return crafted responses or raise `ConnectError`. Used for every LLM and web-search provider, weather, Google Calendar, and TUI discovery.
-- **Monkeypatch import stubbing** — `monkeypatch.setattr(module, "NativeClass", Fake)` replaces speexdsp, sounddevice, `piper.PiperVoice`, livekit wake model, `ddgs.DDGS` at import time.
-- **Fakes/spies** — inline classes prefixed `Fake*` or descriptive: `FakeLLM`/`ScriptedLLM` (scripted response queues that record `.calls`/`.prompts`/`.messages`; `IndexError` when exhausted fails the test), `FakeTTS`/spy-TTS (accumulates `.spoke`), `TaggingRevoicer` (marks revoiced output with `<<REVOICED>>`), `FakeClock` (`.now` + `advance(dt)`), `FakeProvider`/`FakeWeather`/`FakeSearch`/`FakeStore`, `FakeVad`/`FakeWakeWordModel`, `FakeSupervisor`/`FakePipeline`/`FakeOut` (TUI). Test skills: `EchoSkill`, `DataOnlySkill`, `FallbackSkill`, `OtherSkill`.
-- **Databases** — real SQLite against `:memory:` or `tmp_path`; reopened with a new instance to prove persistence/migration.
+## Coverage map (by area)
 
-## LLM provider coverage (the next feature's safety net)
+### Config & LLM path (tests-core — first-class for the LLM/secrets feature)
+- `test_config.py` — `*Config` defaults, `ASSISTANT_*` env override, `config.yaml` composition, `WakeConfig.model_refs()` precedence, JSON/bool env parsing.
+- `test_llm_dispatch.py` — `_build_one_llm` resolves provider name → concrete type via `GATEWAYS`; blank `base_url` uses table default, explicit overrides; unknown provider → `OllamaProvider`.
+- `test_app_llm_diagnostics.py` — `_gateway_base_url` lookup + override; `_llm_unhealthy_warning` for openrouter/opencode-zen/ollama (no network).
+- `test_openai_compatible_provider.py` — chat/complete/chat_tools OpenAI contract; blank `api_key` omits `Authorization`; `response_format` on `json=True`; tool-call parsing (string vs dict args); null content → "".
+- `test_openai_compatible_provider_guards.py` — `LLMResponseError` on empty choices / missing message / non-JSON / non-dict body; retry policy (429/5xx/transport/malformed-200 retried; 400/401/403 not); `max_retries=2` = 3 attempts; payload stable across retries.
+- `test_openrouter_compat.py` — `openrouter/free` model id reaches the wire verbatim; tools + `response_format` declared with no special-casing.
+- `test_fallback_provider.py` — primary used when healthy; fallback only on exception; empty primary response does NOT fall back; `health()` is logical OR; label passthrough.
+- `test_ollama_provider.py` — Ollama HTTP contract, `think`/`num_ctx` threading, tracing, `health()` via `/api/tags`.
+- `test_replay_provider.py` — content-hash replay keying, strict vs empty on-miss, FIFO for repeated calls.
 
-- **`tests/test_zen_provider.py`** — `OpenCodeZenProvider` wire tests over `httpx.MockTransport` on `/chat/completions`: `complete`/`chat`/`chat_tools` shapes, `Bearer {key}` auth header (omitted when key is empty), `json=True` adds `response_format`, system message prepended to messages, null content→`""`, whitespace stripped, tool_calls rebuilt.
-- **`tests/test_zen_provider_guards.py`** — retry/guard policy: `LLMResponseError(retryable=…)` on empty choices / missing message / non-JSON / non-dict body; 429 and 503 and transport `ConnectError` retry (respecting `max_retries`); 401 does **not** retry (fails immediately); `retry_backoff_s=0.0` keeps tests fast.
-- **`tests/test_ollama_provider.py`** — `/api/generate` fields (model/prompt/system/think/num_ctx/format); `think=False` when `json=True`; labeled INFO trace logging with `latency_ms` in `record.data`.
-- **`tests/test_fallback_provider.py`** — primary→fallback delegation on raise; an empty `chat_tools` response does **not** fall back; `health()` ORs both providers.
-- **`tests/eval/`** — orchestrator routing accuracy. `run_eval.py` (live, opt-in `ASSISTANT_EVAL=1`, skips if Ollama down) scores each of 23 `dataset.py` cases on tool-name + required-arg correctness against a ≥0.90 gate. `run_replay.py` re-runs captured real turns through `Orchestrator._decide()` with `ReplayProvider` (responses keyed by SHA-256 of `(kind, label, payload)`, so any prompt/tool change misses and forces re-capture) asserting exact reproducibility (score == 1.0). `test_replay_eval.py` skips when `captures/` has no turn records; workflow is capture (`extract.py`) → curate → replay.
+### Orchestration, verify, persona, speech (tests-core)
+- `test_orchestrator.py` — tool dispatch → `Intent.slots`; native vs JSON fallback; `_TOOL_REPEAT_CAP=2`; turn timeout → fallback; unknown tool → general; persona-free tool-decision; turn record fields.
+- `test_orchestrator_verify.py` — pre/post stages, filler via `on_say` (voiced, bypasses revoicer), verdict JSON, per-stage `max_verify_rounds`, `verify.enabled=False` byte-identical.
+- `test_persona.py` — suffix composition, per-skill injection points, `canned()` determinism under a seeded RNG, canned keys (error_generic, cant_help, llm_offline, no_answer, unexpected_reply, update_signoff).
+- `test_verify.py` — verdict JSON parsing, stage-specific fields, fail-open on malformed.
+- `test_revoice.py` — timeout/error/empty/digit-mutation → plain; circuit-breaker + cooldown; seeded-unhealthy immediate passthrough.
+- `test_speech_invariants.py` — exhaustive "nothing unflavored reaches TTS": deterministic skill revoiced; `voiced=True` bypasses; verify filler bypasses; `canned()` bypasses; `_speak()` defaults `voiced=False`.
 
-## Core coverage by area
+### Pipeline & lifecycle (tests-core)
+- `test_pipeline.py` (largest) — full wake→TTS loop, confident-threshold greeting, multi-sentence split, revoice vs bypass, conversation/followup, decision prompt, barge-in, expects-reply/`handle_reply`, error/can't-help canned paths.
+- `test_control.py` — control verbs (TEXT/LISTEN/CANCEL/STOP/SAY/SET) dispatch; case-insensitive.
+- `test_conversation.py` — add/trim/history copy isolation. `test_standdown.py` — engage/resume/remaining with fake clock. `test_state.py` — `@@STATE` JSONL emitter + null emitter. `test_selfupdate.py` — `restart_in_place` os.execv target. `test_logging.py` — JsonlFormatter, run_id, prune. `test_manifest.py`/`test_train_batch.py`/`test_voice_download.py` — training/registry/discovery logic.
 
-- **Config** (`test_config.py`, `test_configfile.py`) — pydantic defaults, env-override precedence (var > yaml > default), type coercion (bool/float/list-JSON), every config block; TUI persistence via `write_fields`.
-- **Pipeline/orchestrator** (`test_pipeline.py`, `test_orchestrator.py`, `test_orchestrator_verify.py`) — wake→record→STT→route→TTS with fake stages; followup windows; multi-round tool loops with data-only skills; fallback on LLM failure; verify pre/post approve/reject/rewrite; filler-on-reject only when persona + `spoken_feedback`; TimeoutError → best draft; per-stage `max_verify_rounds` subcap; disabled = byte-identical.
-- **Persona/revoice invariants** (`test_persona.py`, `test_revoice.py`, `test_speech_invariants.py`) — suffix/strength composition; revoice timeout/circuit/digit-preservation; **spy-TTS + `TaggingRevoicer` prove every string reaching TTS is either revoiced, `voiced=True`, or from `canned()`** — four path classes (deterministic→revoiced, persona-marked bypass, verify filler bypass, canned error bypass) plus the `_speak` default-`voiced=False` pin. This is the PLM-003/FTHR-009 hardening guarantee; each invariant test is demonstrated failing under a deliberate seam break.
-- **Skills** — per-skill tests with fakes: clock (ordinals/12h), reminder/timer (relative/recurring parse, LLM slot extraction, `kind`), weather (geocode+summary), calendar (CRUD + blocklist), web_search (refine→assess→retry, injection content passed unchanged), general (history order, error fallback), stand_down (duration/indefinite), update (confirm→restart + canned signoff).
-- **Search providers (PLM-002)** — `test_tavily_provider.py`/`test_exa_provider.py`/`test_wikipedia_provider.py` (httpx mock: result mapping, snippet truncation, api-key headers, answer-block synthesis, injection content unchanged, health), `test_ddgs_provider.py` (FakeDDGS context manager), `test_multi_search.py` (round-robin interleave, URL dedup, cap, skip-failed, all-fail reraise, any-healthy).
-- **Audio** (`test_aec`, `test_audio_processing`, `test_devices`, `test_earcon`, `test_mic_hub`, `test_piper_tts`, `test_recorder`) — subframe AEC pairing + missing-dep passthrough, normalization edges, device resolution, earcon distinctness, TTS length_scale plumbing, VAD end/timeout/cancel/min-speech/max-cap, MicHub tap/drain/overflow-drop.
-- **Wake** (`test_livekit_detector.py`) — window fill, ordered samples, threshold firing, `reset`, `score_interval` skip, `trigger_frames` consecutive-hit debounce, streak reset.
-- **Scheduling/storage/control/state** — scheduler (fire/delete/retry/defer, boot catch-up coalesce, arbiter, standdown, revoice), watcher (announce/dedupe-across-restart/reschedule/all-day-skip/blocklist/imminent/standdown/fallback-revoicer), reminder+calendar stores (migration, dedupe key, purge, reopen), control channel verbs, `StateEmitter` JSONL, conversation trim, standdown engage/resume/expiry, logging JSONL + `prune_runs`, selfupdate `os.execv` target.
+### Skills & capabilities (tests-features, 34 files)
+- Skills: `test_{clock,general,reminder,timer,stand_down,update,weather,web_search,calendar}_skill.py`, `test_skill_base.py` — handle/handle_reply, slot usage, LLM integration, persona fallback, error recovery.
+- Search providers: `test_{ddgs,tavily,exa,wikipedia}_provider.py`, `test_multi_search.py` — result mapping, **API-key auth (constructor `api_key`, x-api-key/body param)**, snippet truncation, injection passthrough, round-robin merge/dedup, skip-failing-provider.
+- Calendar/scheduling: `test_calendar_{skill,blocklist,extraction,state_store,watcher}.py`, `test_google_calendar.py`, `test_reminder_store.py` (incl. legacy-schema migration), `test_scheduler.py`.
+- Audio/wake: `test_{aec,audio_processing,earcon,mic_hub,piper_tts,recorder,devices,livekit_detector,wake_registry}.py`. Utilities: `test_timespec.py`, `test_eval_extract.py`.
 
-## TUI coverage (`tests/test_tui_*.py`, 16 files)
+### TUI (tests-tui, 16 files)
+- `test_tui_screens.py` — the deployment-size gate: renders every screen at `SIZE=(40,30)` and asserts `_assert_fits_40_cols` (`region.right <= 40`, `max_scroll_x == 0`).
+- `test_tui_app.py` / `test_tui_ollama.py` — LLM health tier (up/degraded/down), status-line ≤38 chars, provider routing, Ollama autostart.
+- `test_tui_config_schema.py` / `test_tui_configfile.py` / `test_tui_envfile.py` — config-form field kinds, env-name generation, nested YAML writes, `.env` parsing (config/secrets editing surface).
+- `test_tui_discovery.py` — Ollama endpoints, **Zen auth header omitted when key blank**, wake globbing, 72h registry cache. `test_tui_supervisor.py` — subprocess lifecycle + `PR_SET_PDEATHSIG` survives `os.execv`. Plus logparse/logcolor/collapse/reflow/runlog/widgets/control/selection.
 
-Textual's `app.run_test(size=SIZE)` async harness with a pilot for clicks/keys. **`SIZE = (40, 30)` and `test_tui_screens.py:_assert_fits_40_cols()` are the deployment gate**: every non-hidden widget must satisfy `region.right <= 40` and `max_scroll_x == 0` across all screens (portrait 320×480). Also: supervisor env-merge + pdeathsig survival across `os.execv` re-exec (multi-stage subprocess scripts), control TEXT/SET dispatch, LLM tier badges (up/degraded/down), Ollama/Zen discovery over httpx mock (health, model options, registry scrape + 72h cache, pull progress, delete), log parse/color/collapse/reflow, run-log rotation, config-schema field metadata + coercion, Stepper bounds, NavBar dots. Hermetic autouse fixture patches `discovery.current_config()` to typed defaults (never reads yaml).
+### Eval harness (tests-eval, `tests/eval/`)
+Two opt-in gates scoring `Orchestrator._decide` (skills never execute):
+- **Live eval** (`run_eval.py`, `test_tool_eval.py`) — 24-case dataset (`dataset.py:Case`) against the configured Ollama model through a production-mirroring orchestrator (`build_orchestrator`); asserts `score ≥ 0.90`. Skips unless `ASSISTANT_EVAL=1` and Ollama reachable.
+- **Replay eval** (`run_replay.py`, `test_replay_eval.py`) — offline re-run of captured turns with `ReplayProvider` serving recorded LLM responses keyed by SHA256 of `(kind, label, payload)` (tool names sorted for stable hashing); asserts `score == 1.0`. Skips when no captures exist, so a fresh checkout stays green. Workflow: run daemon → `python -m tests.eval.extract <jsonl> -o captures/<name>.jsonl` → curate → replay.
 
-## Test-first discipline (PLM feathers)
-
-Every feather (FTHR-001..009) wrote its tests failing first against unchanged code, then confirmed passing; hardening tests (FTHR-009) verify invariants by deliberate seam breaks. No test invokes real network, native ML deps, or `os.execv`. Full green suite is an acceptance criterion on every feather. This matches the repo/user convention: a test only counts if it fails when the behavior breaks.
+## Test-first discipline
+Feathers (`pluma/feathers/`) mandate: write the test, confirm it fails against unchanged code for the stated reason, then implement to green. Provider-rename work (FTHR-010) repointed `test_zen_provider.py` → `test_openai_compatible_provider.py` to prove behavior-preserving backward compatibility.
 
 ## Open Questions
-
-- No cross-domain integration tests (e.g. calendar extraction → TTS → arbiter) or latency/performance gates were observed beyond unit coverage and the opt-in eval.
-- Whether any pre-recorded `tests/eval/captures/*.jsonl` are checked in, or must be recorded fresh per developer, is unresolved.
+- No `VERSION` file exists in the repo root, so scouts and these docs record `fledge_version: unknown`; confirm whether a version source is expected.
+- Live/replay eval scores are model-dependent; the replay gate only enforces once a baseline capture is committed (none may be present in a fresh checkout).

@@ -33,7 +33,7 @@ Phases below refer to primitives by name ("run a `confirm-gate`", "spawn a `spaw
 ## Ground rules (all phases)
 
 - Verify this is a fledge-managed repo (a `.fledge/` directory exists at the git root). If not, stop and ask whether to initialize one (`fledge init` creates the scaffold).
-- Deterministic spec operations go through the `fledge` CLI — never hand-edit what it can write. Creation: `fledge new plumage|feather` (ID allocation, filenames, frontmatter). Status: `fledge status <ID> <new>`. Other frontmatter fields: `fledge set`. Readiness/structure: `fledge ready`, `fledge vee`. Validation: `fledge preen`. Feather claims: `fledge brood`/`abandon`/`broods`. Spec *bodies* (prose sections) are yours to write and edit directly.
+- Deterministic spec operations go through the `fledge` CLI — never hand-edit what it can write. Creation: `fledge new plumage|feather` (ID allocation, filenames, frontmatter). Status: `fledge status <ID> <new>`. Other frontmatter fields: `fledge set`. Readiness/structure: `fledge ready`, `fledge vee`, and `fledge unfledged` to survey all non-fledged plumage and feathers (`--plumage`/`--feathers` to scope, `--json` for a machine-readable contract). Validation: `fledge preen`. Feather claims: `fledge brood`/`abandon`/`broods`. Spec *bodies* (prose sections) are yours to write and edit directly.
 - Run `fledge preen` as a pre-flight before closing any phase; fix errors before proceeding.
 - All generated files carry frontmatter with authored/generated datetime (UTC ISO 8601), authoring agent, and `fledge_version` — `fledge new` stamps these automatically.
 - Decisions belong to the user; facts belong in the repo. Look up facts, interrogate for decisions.

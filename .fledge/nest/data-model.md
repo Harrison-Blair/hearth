@@ -1,91 +1,85 @@
 ---
-generated: 2026-07-07T22:56:23Z
-commit: 58fb2ba9bbeefc5db7d530261bcb3450573048fa
+generated: 2026-07-08T00:34:07Z
+commit: 0a67e65dc3d33b2e9c911f1296eef515124fa678
 agent: fledge-forager
 fledge_version: unknown
 ---
 
 # Data Model
 
-The core data types that flow through the pipeline, the LLM contract types, capability payloads, configuration models, and the two SQLite schemas. Most are frozen-ish dataclasses in `core/events.py` or per-capability `base.py` files; configuration is pydantic-settings.
+Core types, config schema, and persisted tables. Pipeline records live in `assistant/core/events.py`; the config schema is `assistant/core/config.py`; persistence is SQLite under `assistant/storage/`.
 
-## Pipeline event records (`core/events.py`)
+## Pipeline records (`assistant/core/events.py`)
 
-These are the shared cross-stage records — they live in `core/` so capability packages pass them without importing each other.
+- `WakeEvent(name: str, score: float)` — a wake detection (`name` is the phrase; some tests refer to it as `phrase`).
+- `Turn(role: str, content: str)` — `role` ∈ "user"/"assistant"; conversation history unit.
+- `Command(text: str, spoken: bool, history: list[Turn])` — one routed utterance.
+- `ToolCall(name: str, arguments: dict)` — an LLM-selected function call.
+- `Intent(type: str, slots: dict, raw_text: str)` — routed direction; `type` is the skill/intent name, `slots` are the tool arguments.
+- `SkillResult(speech: str, data: dict | None, success: bool, expects_reply: bool, restart: bool, voiced: bool)` — a skill's output. `voiced=True` means already persona-flavored (skip the revoicer); `restart=True` triggers in-place re-exec; `expects_reply=True` routes the next turn to `handle_reply`.
 
-- `WakeEvent` — `name: str, score: float`. A detected wake word.
-- `Turn` — `role: str, content: str`. One message in conversation history.
-- `Command` — `text: str, spoken: bool, history: list[Turn]`. A routable user utterance (`spoken` distinguishes voice from TUI-typed).
-- `ToolCall` — `name: str, arguments: dict`. The model's requested skill invocation.
-- `Intent` — `type: str, slots: dict, raw_text: str`. Routed intent; tool-call arguments populate `slots`.
-- `SkillResult` — `speech: str, data: dict | None, success: bool = True, expects_reply: bool = False, restart: bool = False, voiced: bool = False`. A skill's outcome. `restart` triggers self-update (PLM-001); `voiced=True` bypasses the revoice seam (PLM-003); `expects_reply` drives two-phase confirmations; empty `speech` + `data` signals "tool loop continues".
+## LLM types (`assistant/llm/`)
 
-## LLM contract types (`llm/base.py`)
+- `ChatResponse(content: str = "", tool_calls: list[ToolCall] = [])` (`base.py`).
+- `LLMResponseError(message, *, retryable: bool)` (`openai_compatible_provider.py`) — raised on non-JSON body, empty `choices`, or missing `message`; `retryable` distinguishes transient (truncated 200) from config bugs (4xx-auth).
+- `GATEWAYS: dict[str, dict]` (`openai_compatible_provider.py`) — `{"opencode-zen": {"base_url": "https://opencode.ai/zen/v1", "extra_headers": {}}, "openrouter": {"base_url": "https://openrouter.ai/api/v1", "extra_headers": {}}}`. Add an entry to support a new gateway.
+- OpenAI wire shapes: request `{"model", "messages":[{"role","content"}], "stream": false, ["response_format": {"type":"json_object"}], ["tools": [...]]}`; response `{"choices":[{"message":{"content", "tool_calls":[{"function":{"name","arguments": str|dict}}]}}]}`. Tool `arguments` arrive as a JSON string from OpenAI-style gateways (parsed via `json.loads`) or an object from Ollama.
 
-- `LLMProvider` (ABC) — `async complete(prompt, *, system=None, json=False, label="") -> str`; `async chat(messages, *, system=None, label="") -> str`; `async chat_tools(messages, *, system=None, tools=None, label="") -> ChatResponse`; `async health() -> bool`; `async aclose() -> None`.
-- `ChatResponse` (dataclass, `base.py`) — `content: str = ""`, `tool_calls: list[ToolCall] = field(default_factory=list)`.
-- `LLMResponseError` (exception, `opencode_zen_provider.py`) — carries `retryable: bool`; raised on malformed/empty 200 responses. `retryable=True` for empty choices, missing message, non-JSON/non-dict body; drives the retry decision alongside HTTP status.
+## Verify (`assistant/core/verify.py`)
 
-Provider constructors (all primitives, no `Config`):
-- `OllamaProvider(model, host, timeout, health_timeout, num_ctx, think)`.
-- `OpenCodeZenProvider(model, api_key, base_url, timeout, health_timeout, max_retries, retry_backoff_s)`.
-- `FallbackLLMProvider(primary, fallback)`.
+- `Verdict(decision, feedback, reason, rewritten_tool, rewritten_arguments, rewritten_speech)` — `decision` ∈ "approve"/"rewrite"/"reject"; pre-stage carries `rewritten_tool`/`rewritten_arguments`, post-stage carries `rewritten_speech`. Malformed JSON → safe defaults (fail-open). `Stage = Literal["pre","post"]`.
 
-## Verify types (`core/verify.py`)
+## Config schema (`assistant/core/config.py`)
 
-- `Verdict` — `decision, feedback, reason, rewritten_tool, rewritten_arguments, rewritten_speech`. Pre-stage populates `rewritten_tool`/`rewritten_arguments`; post-stage populates `rewritten_speech`; malformed JSON fails open (approve).
+`Config(BaseSettings)` composes 16 nested `*Config` `BaseModel`s. LLM- and secrets-relevant models first:
 
-## Capability payloads
+### LlmConfig (first-class for the upcoming feature)
+Defaults reflect a fully-local Ollama profile; `config.yaml` overrides them to the OpenRouter profile (see below).
+- Local/Ollama: `provider="ollama"`, `model="qwen2.5:3b-instruct"`, `host="http://localhost:11434"`, `timeout=60.0`, `health_timeout=5.0`, `num_ctx=8192`, `think=False`, `serve_cmd=["ollama","serve"]`.
+- Gateway (OpenAI-compatible): `api_key=""`, `base_url=""` — `api_key` is the bearer token, read from `ASSISTANT_LLM__API_KEY` (never committed); blank `base_url` uses the provider's `GATEWAYS` default.
+- Fallback: `fallback=""` (empty = none), `fallback_model=""` (defaults to `model`).
+- `max_retries=2` (transient only; 4xx-auth never retried).
+- `system_prompt` — voice-optimized default ("Answers are read aloud, reply in one or two short plain sentences…").
 
-**Search (`search/base.py`)**
-- `SearchResult` — `title, snippet, source (domain), url`. Tavily's synthesized answer is embedded as a `SearchResult(source="tavily", title="answer")`.
+### WebSearchConfig (per-provider-secret precedent)
+- `providers=["ddgs","wikipedia"]`, `language`, `region`, `result_count`, `max_results`, `timeout`, `max_snippet_chars`, `max_rounds`, `progress_updates`.
+- Per-provider secrets/config: **`tavily_api_key=""`**, `tavily_endpoint="https://api.tavily.com/search"`, **`exa_api_key=""`**. These keyed-provider fields are the existing precedent for storing per-provider secrets on a config model; keys arrive via `ASSISTANT_WEB_SEARCH__TAVILY_API_KEY` / `ASSISTANT_WEB_SEARCH__EXA_API_KEY`.
 
-**Weather (`weather/base.py`)**
-- `Place` — `name, latitude, longitude`.
-- `Forecast` — `location: str`, `current: dict` (temp, apparent, description, wind, humidity), `daily: list[dict]` (date, weekday, description, high, low, precip_prob, precip, wind_max), `units: dict` (temp/wind/precip symbols).
+### Other config models
+- `AudioConfig` (input/output device, sample_rate, channels, block_size, output_volume, normalize flags/thresholds); `RecorderConfig` (VAD aggressiveness, silence_ms, max_ms, start_timeout_ms, min_speech_ms, preroll_frames); `WakeConfig` (model_path(s), threshold, score_interval, trigger_frames, confident_threshold; `model_refs()`, `phrases()`); `SttConfig` (model, device, compute_type, cpu_threads, language, beam_size, vad_filter, initial_prompt, thresholds, hallucination phrases).
+- `PersonaConfig` (enabled=True, strength="terse"|"expansive", revoice_enabled, revoice_timeout_s); `AgentConfig` (tool_mode "native"/"json"/"auto", max_tool_rounds, turn_timeout_s); `VerifyConfig` (enabled, pre, post, max_verify_rounds, spoken_feedback).
+- `TtsConfig` (voice, model_path, length_scale, ack_phrases, unsure_ack_phrases, ack_delay_s); `StorageConfig` (db_path); `SchedulingConfig` (poll_seconds).
+- `WeatherConfig` (latitude, longitude, location_name, timezone, unit fields, forecast_days, endpoints); `CalendarConfig` (enabled, credentials_path, calendar ids, timeout, watcher settings, blocked_titles, hidden_tag); `ConversationConfig` (enabled, followup_window_ms, max_history_turns, decision_* fields, decline/end phrase lists).
+- `AecConfig` (enabled=False, frame_ms, filter_length_ms, extra_delay_ms); `BargeInConfig` (enabled, threshold, trigger_frames); `LoggingConfig` (level, dir, file_enabled, file_level, rotate_max_bytes, rotate_backups, runs_to_keep).
 
-**Calendar (`calendar/base.py`, `calendar/extraction.py`)**
-- `CalendarEvent` — `id, calendar_id, title, start (tz-aware), end, all_day: bool, description`.
-- `ExtractedEvent` — `title, start, end`. `EventManagementAction` — `action, target_index, new_date (YYYY-MM-DD), new_start_time (HH:MM), new_title`. `EventReminderRequest` — `target_index, lead_minutes (default 15)`. `BlockRequest` — `action ("block"|"unblock"|"list"|"none"), pattern`.
+## NLU / calendar extraction types
 
-**NLU timespec (`nlu/timespec.py`)**
-- `ReminderSpec` — `due_at (epoch float), message, interval (seconds | None one-shot)`.
-- `ManagementAction` — `action ("cancel"|"reschedule"|"rename"|"none"), target_index, new_at_time, new_delay_seconds, new_message`.
+- `ReminderSpec(due_at: float, message: str, interval: float | None)`, `ManagementAction(action, target_index, new_at_time, new_delay_seconds, new_message)` (`assistant/nlu/timespec.py`).
+- `ExtractedEvent(title, start, end)`, `EventManagementAction(action, target_index, new_date, new_start_time, new_title)`, `EventReminderRequest(target_index, lead_minutes)`, `BlockRequest(action, pattern)` (`assistant/calendar/extraction.py`).
 
-## Configuration (`core/config.py`)
+## Capability value types
 
-`Config` (pydantic-settings `BaseSettings`) composes 18 sub-configs: `AudioConfig, RecorderConfig, WakeConfig, SttConfig, LlmConfig, PersonaConfig, AgentConfig, VerifyConfig, TtsConfig, StorageConfig, SchedulingConfig, WebSearchConfig, WeatherConfig, CalendarConfig, ConversationConfig, AecConfig, BargeInConfig, LoggingConfig`. Every field is mirrored in `config.yaml` and `default-config.yaml`.
+- `SearchResult(title, snippet, source, url)` (`assistant/search/base.py`) — `source` is the domain; a Tavily synthesized answer rides as a `SearchResult` with `source="tavily"`.
+- `Place(name, latitude, longitude)`, `Forecast(location, current: dict, daily: list[dict], units: dict)` (`assistant/weather/base.py`).
+- `CalendarEvent(id, calendar_id, title, start, end, all_day, description)` (`assistant/calendar/base.py`; `start`/`end` tz-aware).
 
-Key models (see `dependencies.md`/`entry-points.md` for how they're consumed):
+## Persisted SQLite (`assistant/storage/`)
 
-- **`LlmConfig`** (the next feature's focus) — `provider` (`ollama` | `opencode-zen`), `model`, `host`, `timeout`, `health_timeout`, `num_ctx`, `think`, `serve_cmd`, `api_key`, `base_url`, `fallback`, `fallback_model`, `max_retries`, `system_prompt`. `provider` selects the primary in `app.py:_build_one_llm`; `fallback`/`fallback_model` build the secondary wrapped in `FallbackLLMProvider`; `api_key`/`base_url`/`max_retries` feed `OpenCodeZenProvider`; `host`/`num_ctx`/`think` feed `OllamaProvider`.
-- **`PersonaConfig`** — `enabled, strength (terse|expansive), revoice_enabled, revoice_timeout_s`.
-- **`AgentConfig`** — `tool_mode (native|json|auto), max_tool_rounds, turn_timeout_s`.
-- **`VerifyConfig`** — `enabled, pre, post, max_verify_rounds, spoken_feedback`.
-- **`WebSearchConfig`** — `providers, language, region, result_count, max_results, timeout, max_snippet_chars, max_rounds, progress_updates, tavily_api_key, exa_api_key, endpoints`.
-- **`WeatherConfig`** — `latitude, longitude, location_name, timezone (auto|IANA), unit fields, forecast_days, timeout, endpoints`.
-- **`CalendarConfig`** — `enabled, credentials_path, personal_calendar_id, calcifer_calendar_id, timeout, watcher_enabled, watcher_poll_seconds, watcher_lead_minutes, blocked_titles, hidden_tag`.
-- **`SttConfig`** — `model, device, compute_type, cpu_threads, language, beam_size, vad_filter, initial_prompt, no_speech_threshold, log_prob_threshold, hallucination_max_rms`.
-- **`WakeConfig`** — `model_paths, threshold (0.66), score_interval, trigger_frames, confident_threshold (0.85)`.
-- **`AudioConfig`/`RecorderConfig`/`TtsConfig`/`AecConfig`/`BargeInConfig`/`ConversationConfig`/`StorageConfig`/`SchedulingConfig`/`LoggingConfig`** — device/rate/threshold/path tunables (see `default-config.yaml` for the exhaustive list with inline comments).
+Both stores open with `journal_mode=WAL, synchronous=NORMAL`; timestamps are UTC epoch seconds; methods are synchronous single statements run on the event loop.
 
-## SQLite schemas (`storage/`)
-
-**`ReminderStore` — `reminders` table** (`reminders.py`, WAL, `synchronous=NORMAL`):
-`id INTEGER PK AUTOINCREMENT`, `due_at REAL NOT NULL` (indexed), `speech TEXT NOT NULL`, `created_at REAL NOT NULL`, `kind TEXT NOT NULL DEFAULT 'reminder'` (also `'timer'`), `label TEXT`, `interval REAL` (recurrence delta; NULL = one-shot). Dataclass `Reminder(id, due_at, speech, kind, label, interval)`.
-
-**`CalendarStateStore`** (`calendar_state.py`, WAL, `synchronous=NORMAL`):
-- `announced_events` — `event_id TEXT`, `start_at REAL`, `announced_at REAL`; PK `(event_id, start_at)` (rescheduled event = new `start_at` = re-announced).
-- `blocked_titles` — `pattern TEXT PRIMARY KEY`, `created_at REAL`.
+- `reminders` (`storage/reminders.py`): `id INTEGER PK AUTOINCREMENT, due_at REAL, speech TEXT, created_at REAL, kind TEXT DEFAULT 'reminder', label TEXT, interval REAL`; index `ix_reminders_due(due_at)`. Legacy DBs are migrated (ALTER adds `kind`/`label`/`interval`). `Reminder(id, due_at, speech, kind, label, interval)`. `kind` ∈ "reminder"/"timer"; non-null `interval` = recurring.
+- `announced_events` (`storage/calendar_state.py`): `event_id TEXT, start_at REAL, announced_at REAL, PK(event_id, start_at)` — watcher dedup; purged daily.
+- `blocked_titles` (`storage/calendar_state.py`): `pattern TEXT PK, created_at REAL` — voice-added calendar blocklist patterns.
 
 ## TUI data types (`tui/`)
 
-Discovery/display records: `OllamaModel`, `OllamaModelDetail`, `RegistryModel`, `RegistryTag`, `RegistryVoice`, `PullProgress`, `LogLine`/`ParsedLogLine`, `Field` (config-schema entry: `key: tuple, label, kind, lo/hi/step, options`).
+`Field(key: tuple, label, kind, options, lo, hi, step)` (`config_schema.py`, `FIELDS` list drives the config form). Discovery dataclasses (`discovery.py`): `OllamaModel`, `OllamaModelDetail`, `RegistryModel`, `RegistryTag`, `PullProgress`, `RegistryVoice`. `LogLine(timestamp, level, logger, message, raw)` (`logparse.py`).
 
-## Eval types (`tests/eval/`)
+## Config profiles (as shipped)
 
-`Case(utterance, tool, required_args, arg_contains, note)`, `CaseResult`, `TurnResult`, `ReplayProvider` (keyed by `replay_key(kind, label, payload)` SHA-256), `ReplayMiss` exception.
+- `config.yaml` (committed active profile — post-PLM-004): `llm.provider: openrouter`, `model: openrouter/free`, `base_url: ''` (→ OpenRouter default), `api_key: ''` (supplied via `ASSISTANT_LLM__API_KEY`), `fallback: ollama`, `fallback_model: qwen3:14b`. `web_search.providers: [ddgs, wikipedia]`, `tavily_api_key: ''`, `exa_api_key: ''`.
+- `default-config.yaml` (reference/reset source): same OpenRouter-primary shape but `fallback_model: qwen2.5:3b-instruct`; comments document a commented-out fully-local profile.
+- `.env.example` (secrets template): documents `ASSISTANT_*` names; still shows an Ollama-primary example plus an "OpenCode Zen" section (`BASE_URL=https://opencode.ai/zen/v1`). See Open Questions.
 
 ## Open Questions
-
-- Exact field list on the daemon JSONL `turn` / `llm.*` capture records is inferred from `extract.py`/`replay.py`, not formally documented.
+- `.env.example` has not been updated to the OpenRouter-primary profile now in `config.yaml`/`default-config.yaml`; its worked example still names Ollama/OpenCode Zen. Confirm whether this template lag is intentional before relying on it as the canonical secrets example.

@@ -2,7 +2,7 @@
 
 The team-loop (Tier C) worker roles, agent-neutral. These are spawned workers: a spawn prompt is a worker's entire context (it inherits no conversation history) and must be fully self-contained. A `spawn-worker` is fresh, named, addressable, killable, may idle, and returns one final message.
 
-A worker's spawn prompt tells it which protocol below to follow (brooder or skua), plus its name, feather ID, worktree/branch, evidence-file path, assigned counterpart's name, and the orchestrator's name (`fledge-orchestrator`).
+A worker's spawn prompt tells it which protocol below to follow (brooder or skua), plus its name, feather ID, worktree/branch, evidence-file path, assigned counterpart's name, and the orchestrator's name (the harness-assigned name the orchestrator supplies — address the orchestrator by exactly that name; e.g. on Claude Code it is `team-lead`).
 
 ## Brooder
 
@@ -10,7 +10,7 @@ A fledge brooder is spawned by the orchestrator with one feather spec and a dedi
 
 ### Communication rules
 
-A brooder may message exactly two parties, addressed by name: its assigned skua (named in its spawn prompt) and the orchestrator (addressed as `fledge-orchestrator`). Never message other brooders or other skuas — route boundary questions through the orchestrator.
+A brooder may message exactly two parties, addressed by name: its assigned skua (named in its spawn prompt) and the orchestrator (addressed by the orchestrator name given in its spawn prompt). Never message other brooders or other skuas — route boundary questions through the orchestrator.
 
 Two hard prohibitions:
 
@@ -42,7 +42,7 @@ A fledge skua is a persistent worker spawned by the orchestrator for the whole i
 
 ### Communication rules
 
-A skua may message exactly two kinds of parties, addressed by name: the brooder whose review request it is handling, and the orchestrator (addressed as `fledge-orchestrator`). Never message other skuas or brooders not in an active review.
+A skua may message exactly two kinds of parties, addressed by name: the brooder whose review request it is handling, and the orchestrator (addressed by the orchestrator name given in its spawn prompt). Never message other skuas or brooders not in an active review.
 
 Two hard prohibitions:
 
