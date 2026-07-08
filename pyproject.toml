@@ -1,0 +1,58 @@
+[project]
+name = "personal-assistant"
+version = "0.1.0"
+description = "Offline-first voice personal assistant"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "pyyaml>=6",
+    "sounddevice>=0.4",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# Per-phase heavy/native deps, installed as each phase lands.
+tts = ["piper-tts"]
+# livekit-wakeword's runtime: onnxruntime + numpy, with the mel/embedding models
+# bundled in the wheel. Training deps ([train,eval,export], torch) live in the
+# separate .venv-train (see training/bootstrap.sh), never the runtime venv.
+wake = ["livekit-wakeword"]
+stt = ["faster-whisper"]
+vad = ["webrtcvad", "setuptools<81"]  # webrtcvad imports pkg_resources (removed in setuptools 81)
+llm = ["httpx"]  # async HTTP client for the Ollama provider
+nlu = ["dateparser"]
+scheduling = ["apscheduler"]
+search = ["httpx", "ddgs"]  # httpx for the Wikipedia API, ddgs for DuckDuckGo
+# google-auth mints/refreshes the service-account token (via its sync `requests`
+# transport); all Calendar v3 REST calls go through async httpx.
+gcal = ["httpx", "google-auth", "requests"]
+# Acoustic echo cancellation for barge-in (audio/aec.py). Source build with a C
+# extension: needs libspeexdsp headers first (sudo apt install libspeexdsp-dev).
+# Deliberately NOT in `all` until the build is validated on the Pi 5; the app
+# degrades to a passthrough mic when the import fails.
+aec = ["speexdsp"]
+# Monitor TUI: supervises the daemon as a child process. Deliberately NOT in
+# `all` — the Pi may run the TUI separately, and it imports no native deps.
+# textual pinned to 8.2.x: collapse.py and the log widgets poke RichLog
+# internals verified against 8.2.7.
+tui = ["textual~=8.2", "httpx"]  # httpx for live Ollama model discovery
+dev = ["pytest", "pytest-asyncio", "ruff"]
+# Every runtime capability in one shot.
+all = ["personal-assistant[tts,wake,stt,vad,llm,nlu,scheduling,search,gcal]"]
+
+[project.scripts]
+assistant = "assistant.app:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["assistant*", "tui*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -1,0 +1,22 @@
+# Wake phrases to train, one per line — input for train_batch.py.
+# Blank lines and #-comments are ignored (trailing comments too).
+# Each phrase trains sequentially into models/wake/<slug>.onnx and is recorded
+# in the manifest. Pick distinctive 2+ syllable phrases; short common words
+# false-trigger. Uncomment / add your candidates below, then:
+#   training/.venv-train/bin/python training/train_batch.py            # full runs
+#   training/.venv-train/bin/python training/train_batch.py --smoke    # quick plumbing
+#
+# calcifer
+# hey calcifer
+# hey penguin
+# athena
+#
+calcifer
+hey calcifer
+hello calcifer
+
+fire demon
+
+penguin
+hey penguin
+hello penguin

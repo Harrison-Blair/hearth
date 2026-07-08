@@ -1,0 +1,117 @@
+from assistant.core import persona
+from assistant.core.events import Command, Intent, Turn
+from assistant.skills.general import GeneralSkill
+
+
+class FakeLLM:
+    def __init__(self, answer="", exc=None, styled=None, complete_exc=None):
+        self.answer = answer
+        self.exc = exc
+        self.styled = styled
+        self.complete_exc = complete_exc
+        self.calls = []
+        self.complete_calls = []
+
+    async def chat(self, messages, *, system=None, label=""):
+        self.calls.append((messages, system))
+        if self.exc:
+            raise self.exc
+        return self.answer
+
+    async def complete(self, prompt, *, system=None, json=False, label=""):  # noqa: A002
+        self.complete_calls.append((prompt, system, label))
+        if self.complete_exc:
+            raise self.complete_exc
+        return self.styled
+
+    async def health(self):
+        return True
+
+
+async def test_returns_llm_answer():
+    llm = FakeLLM("Paris.")
+    result = await GeneralSkill(llm, "be brief").handle(
+        Command("capital of France"), Intent("general")
+    )
+    assert result.speech == "Paris."
+    assert result.success
+    assert result.voiced  # the system prompt already carries persona -> skip revoicing
+    # Empty history -> a single user message.
+    assert llm.calls == [([{"role": "user", "content": "capital of France"}], "be brief")]
+
+
+async def test_history_precedes_current_text():
+    llm = FakeLLM("1965.")
+    history = [Turn("user", "who wrote Dune"), Turn("assistant", "Frank Herbert.")]
+    await GeneralSkill(llm, "be brief").handle(
+        Command("when did he die", history=history), Intent("general")
+    )
+    messages, _ = llm.calls[0]
+    assert messages == [
+        {"role": "user", "content": "who wrote Dune"},
+        {"role": "assistant", "content": "Frank Herbert."},
+        {"role": "user", "content": "when did he die"},
+    ]
+
+
+async def test_empty_answer_is_unsuccessful():
+    result = await GeneralSkill(FakeLLM(""), "x").handle(Command("?"), Intent("general"))
+    assert not result.success
+    assert result.speech == "Sorry, I don't have an answer for that."
+    # FTHR-007: canned() at the speak site marks it voiced -> the Revoicer
+    # seam never tries to restyle a template.
+    assert result.voiced
+
+
+async def test_llm_error_is_handled():
+    skill = GeneralSkill(FakeLLM(exc=RuntimeError("boom")), "x")
+    result = await skill.handle(Command("?"), Intent("general"))
+    assert not result.success
+    assert result.speech == "Sorry, I couldn't reach my language model."
+    assert result.voiced
+
+
+async def test_llm_error_persona_enabled_carries_registry_variant():
+    skill = GeneralSkill(FakeLLM(exc=RuntimeError("boom")), "x", persona_enabled=True)
+    result = await skill.handle(Command("?"), Intent("general"))
+    assert not result.success
+    assert result.voiced
+    assert result.speech in persona._CANNED["llm_offline"][1]
+
+
+async def test_no_answer_persona_enabled_carries_registry_variant():
+    skill = GeneralSkill(FakeLLM(""), "x", persona_enabled=True)
+    result = await skill.handle(Command("?"), Intent("general"))
+    assert not result.success
+    assert result.voiced
+    assert result.speech in persona._CANNED["no_answer"][1]
+
+
+async def test_draft_is_restyled_not_reanswered():
+    # A draft (the model's own direct answer) must be re-voiced, never re-derived:
+    # the re-answer path (chat) would let a refusal turn into a fabricated success.
+    llm = FakeLLM(answer="SHOULD NOT BE USED", styled="Ugh, no — I can't do recurring reminders.")
+    intent = Intent("general", slots={"draft": "I cannot set recurring reminders."})
+    result = await GeneralSkill(llm, "be brief").handle(Command("remind me every 15 min"), intent)
+    assert result.speech == "Ugh, no — I can't do recurring reminders."
+    assert result.voiced  # restyled through the persona system prompt
+    assert llm.complete_calls  # restyled via complete()
+    assert llm.calls == []  # never re-answered via chat()
+    # The draft (ground truth) is carried into the restyle prompt.
+    assert "I cannot set recurring reminders." in llm.complete_calls[0][0]
+
+
+async def test_restyle_falls_back_to_draft_on_error():
+    llm = FakeLLM(complete_exc=RuntimeError("boom"))
+    intent = Intent("general", slots={"draft": "I can't reach your calendar right now."})
+    result = await GeneralSkill(llm, "x").handle(Command("what's on my calendar"), intent)
+    assert result.speech == "I can't reach your calendar right now."  # verbatim, never lost
+    assert not result.voiced  # restyle failed -> the draft was never actually persona'd
+
+
+async def test_restyle_empty_falls_back_to_draft():
+    llm = FakeLLM(styled="   ")
+    intent = Intent("general", slots={"draft": "I cannot set recurring reminders."})
+    result = await GeneralSkill(llm, "x").handle(Command("remind me every 15 min"), intent)
+    assert result.speech == "I cannot set recurring reminders."
+    assert not result.voiced  # restyle came back blank -> the draft was never persona'd
