@@ -2,7 +2,7 @@
 id: FTHR-011
 title: Vendor-agnostic remote-gateway diagnostics in app.py
 plumage: PLM-004
-status: egg
+status: fledged
 priority: P2
 depends_on: [FTHR-010]
 authored: 2026-07-07T23:30:26Z
