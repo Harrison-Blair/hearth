@@ -50,8 +50,8 @@ stt:
   hallucination_max_rms: 300.0
 
 llm:
-  provider: "ollama"      # ollama | opencode-zen | openrouter
-  model: "qwen2.5:3b-instruct"
+  provider: "openrouter"  # ollama | opencode-zen | openrouter
+  model: "openrouter/free"
   host: "http://localhost:11434"
   timeout: 60.0
   health_timeout: 5.0     # shorter timeout for the startup health check
@@ -67,18 +67,17 @@ llm:
   base_url: ""
   # Secondary provider used when the primary raises (transport failure/timeout).
   # Empty = no fallback. fallback_model defaults to model when blank.
-  fallback: ""            # e.g. "ollama" to fall back to local when Zen is down
-  fallback_model: ""
+  fallback: "ollama"      # local fallback when OpenRouter is unreachable or keyless
+  fallback_model: "qwen2.5:3b-instruct"   # must be a real local model, not openrouter/free
   max_retries: 2          # retries on transient (429/5xx/transport) LLM failures; 4xx-auth never retried
-  # OpenRouter's free router (provider: "openrouter", model: "openrouter/free")
-  # filters to a capable model at $0 cost among currently-free models. Caveats: an
-  # API key is still required (OpenRouter has no anonymous tier); free models are
-  # rate-limited and rotate over time, so availability isn't guaranteed.
+  # Active: OpenRouter's free router (provider "openrouter", model "openrouter/free")
+  # filters to a capable model at $0 among currently-free models. Caveats: a key is
+  # still required (no anonymous tier) and free models rate-limit and rotate.
+  # Fully-local default (no key, offline-first) — swap the active values to these:
   # llm:
-  #   provider: "openrouter"
-  #   model: "openrouter/free"
-  #   api_key: ""           # set via ASSISTANT_LLM__API_KEY, not here
-  #   fallback: "ollama"
+  #   provider: "ollama"
+  #   model: "qwen2.5:3b-instruct"
+  #   fallback: ""
 
 persona:
   enabled: true           # on = Calcifer character on final spoken replies only; false = neutral voice

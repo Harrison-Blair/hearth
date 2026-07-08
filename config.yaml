@@ -37,8 +37,8 @@ stt:
   log_prob_threshold: -1.0
   hallucination_max_rms: 300.0
 llm:
-  provider: opencode-zen
-  model: gemma4:12b
+  provider: openrouter
+  model: openrouter/free
   host: http://localhost:11434
   timeout: 60.0
   health_timeout: 5.0
@@ -47,20 +47,22 @@ llm:
   serve_cmd:
   - ollama
   - serve
-  api_key: ''
-  base_url: https://opencode.ai/zen/v1
+  api_key: ''            # OpenRouter key via ASSISTANT_LLM__API_KEY (required; no anonymous tier)
+  base_url: ''           # blank → OpenRouter default from the GATEWAYS table
   fallback: ollama
   fallback_model: qwen3:14b
   max_retries: 2
-  # OpenRouter's free router (provider: "openrouter", model: "openrouter/free")
-  # filters to a capable model at $0 cost among currently-free models. Caveats: an
-  # API key is still required (OpenRouter has no anonymous tier); free models are
-  # rate-limited and rotate over time, so availability isn't guaranteed.
+  # Active: OpenRouter's free router filters to a capable model at $0 among
+  # currently-free models. Caveats: a key is still required (no anonymous tier) and
+  # free models rate-limit and rotate, so availability isn't guaranteed.
+  # Previous config — OpenCode Zen as the primary remote gateway. Swap the active
+  # values above back to these to switch (token via ASSISTANT_LLM__API_KEY):
   # llm:
-  #   provider: "openrouter"
-  #   model: "openrouter/free"
-  #   api_key: ""           # set via ASSISTANT_LLM__API_KEY, not here
+  #   provider: "opencode-zen"
+  #   model: "gemma4:12b"
+  #   base_url: "https://opencode.ai/zen/v1"   # or blank for the table default
   #   fallback: "ollama"
+  #   fallback_model: "qwen3:14b"
 persona:
   enabled: true
   strength: terse
