@@ -2,7 +2,7 @@
 id: FTHR-015
 title: "Secrets/config surface — strip secrets from YAML, secrets-only .env.example"
 plumage: PLM-005
-status: egg
+status: fledged
 priority: P2
 depends_on: [FTHR-013]
 authored: 2026-07-08T01:04:05Z
