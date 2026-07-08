@@ -1,7 +1,7 @@
 ---
 id: PLM-005
 title: "Secrets in .env, configuration in config.yaml — per-provider LLM credentials"
-status: hatched
+status: fledged
 priority: P2
 authored: 2026-07-08T00:59:24Z
 agent: fledge-orchestrate/planning
@@ -58,19 +58,19 @@ Numbered, testable statements of behavior. Referenced downstream as FC-1, FC-2, 
 
 ## Acceptance Criteria
 Checkbox list of verifiable conditions under which this plumage is considered fledged, one `- [ ] AC-N: …` line each. Authored unchecked; checked only via `fledge criteria check` at plumage closeout.
-- [ ] AC-1: With a directly-launched daemon and `ASSISTANT_LLM__OPENROUTER_API_KEY`
+- [x] AC-1: With a directly-launched daemon and `ASSISTANT_LLM__OPENROUTER_API_KEY`
       in `.env`, an `openrouter` turn uses that key; switching to
       `provider: opencode_zen` with `ASSISTANT_LLM__OPENCODE_ZEN_API_KEY` set uses
       the zen key — with no other edit.
-- [ ] AC-2: An exported `ASSISTANT_*` var overrides the same key from `.env`, which
+- [x] AC-2: An exported `ASSISTANT_*` var overrides the same key from `.env`, which
       overrides `config.yaml`.
-- [ ] AC-3: No shared `llm.api_key` exists; per-provider keys are the sole LLM
+- [x] AC-3: No shared `llm.api_key` exists; per-provider keys are the sole LLM
       credential source and the selected provider's key is chosen automatically.
-- [ ] AC-4: `opencode_zen` works end-to-end (daemon build, TUI picker/label,
+- [x] AC-4: `opencode_zen` works end-to-end (daemon build, TUI picker/label,
       diagnostics); `opencode-zen` no longer resolves as that gateway.
-- [ ] AC-5: `config.yaml` and `default-config.yaml` contain no api-key fields
+- [x] AC-5: `config.yaml` and `default-config.yaml` contain no api-key fields
       (committing them cannot leak a secret); the full suite passes offline.
-- [ ] AC-6: `.env.example` lists only the credential vars and no non-secret
+- [x] AC-6: `.env.example` lists only the credential vars and no non-secret
       overrides.
 
 ## Out of Scope
