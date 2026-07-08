@@ -148,9 +148,27 @@ $ pytest tests/test_tui_app.py tests/test_tui_discovery.py tests/test_tui_screen
 ## AC-6
 
 ```
-$ ruff check assistant tests
+$ ruff check assistant tests tui
 All checks passed!
 
 $ pytest
-873 passed, 2 skipped, 1 warning in 22.09s
+873 passed, 2 skipped, 1 warning in 21.97s
 ```
+
+### Test isolation fix (post-merge red-path)
+
+After merging into `main`, `tests/test_config.py::test_loads_yaml_and_overrides_defaults` failed
+on the main repo because a real `.env` (containing `ASSISTANT_STT__MODEL=base.en`) sat in the
+working directory. The feature is correct — `.env` overrides `config.yaml` — but tests must be
+isolated from a developer's machine environment.
+
+**Reproduce:** place `ASSISTANT_STT__MODEL=base.en` in a worktree `.env`, run
+`pytest tests/test_config.py -q` → 1 failure (`'base.en' != 'medium'`).
+
+**Fix:** `tests/conftest.py` (new file) — autouse fixture that sets
+`Config.model_config["env_file"] = None` via `monkeypatch`, neutralizing any CWD `.env` for
+the whole suite. Tests that explicitly exercise `.env` loading pass `Config(_env_file=<tmp>)`,
+which overrides the fixture; those tests remain meaningful and green.
+
+**Verify:** with the throwaway `.env` still present → `ruff check assistant tests tui` clean +
+`pytest` 873 passed. Remove throwaway `.env`, confirm same result.
