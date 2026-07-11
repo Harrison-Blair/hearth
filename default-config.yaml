@@ -1,217 +1,60 @@
-# Personal assistant configuration.
-# Every device id, model path, and threshold lives here so the Raspberry Pi
-# port is config-only. Values may also be overridden by ASSISTANT_* env vars
-# (nested with a double underscore, e.g. ASSISTANT_LLM__MODEL).
-
-audio:
-  # input/output may be: null (system default), an integer device index,
-  # or a substring of the device name to match.
-  input: null
-  output: null
-  sample_rate: 16000
-  channels: 1
-  block_size: 1280        # 80ms frames at 16kHz (wake-word frame size)
-  output_volume: 0.5      # 0.5 = half volume; 1.0 = full
-  normalize: true              # peak-normalize the utterance before STT
-  normalize_target_peak: 0.97  # target peak as fraction of full scale
-  normalize_rms_floor: 200.0   # skip normalize below this int16 RMS (noise gate)
-  min_transcribe_rms: 0.0      # >0 skips STT on near-silent captures (anti-hallucination); ~200-400 is a sane start once capture-log RMS is known
-
-recorder:
-  aggressiveness: 2         # WebRTC VAD sensitivity, 0 (lax) - 3 (strict)
-  silence_ms: 1500          # trailing silence that ends an utterance
-  max_ms: 30000             # hard cap; long enough for multi-clause utterances + the verify loop
-  start_timeout_ms: 5000    # give up if no speech starts after wake
-  min_speech_ms: 150        # cumulative voiced ms before speech "starts"; rejects one-frame VAD blips; keep low enough to catch a bare "no"
-  preroll_frames: 6         # ~0.5s kept before wake to recover a clipped command
-
-wake:
-  model_path: "models/wake/calcifer.onnx"   # trained "Calcifer" model
-  threshold: 0.66             # set from the manifest's optimal threshold after training
-  score_interval: 1           # score every Nth 80ms frame; raise to 2-4 on the Pi to cut CPU
-  trigger_frames: 1           # consecutive over-threshold frames to fire; raise to 2 to debounce noise
-  confident_threshold: 0.85   # scores at/above this get a confident ack; below, an unsure one
-
-stt:
-  model: "distil-small.en"   # Pi-tuned: distil-whisper, big accuracy win over base.en at int8
-  compute_type: "int8"
-  cpu_threads: 4             # 0 = ctranslate2 auto; pin to the Pi 5's core count
-  language: "en"
-  beam_size: 1            # 1 = greedy decode; higher = slower but more accurate
-  vad_filter: false       # recorder already endpoints; a 2nd VAD re-clips and drops leading words
-  # Optional vocabulary/spelling bias. Empty by default: a strong prompt biases
-  # free-form transcription toward the listed phrasings.
-  initial_prompt: ""
-  no_speech_threshold: 0.6   # segments likelier than this to be silence are dropped; lower = stricter
-  log_prob_threshold: -1.0   # discard decodes with avg logprob below this
-  # A low-energy capture whose whole transcript is only known whisper artifacts
-  # ("thank you", YouTube outros — see SttConfig.hallucination_phrases) is
-  # treated as silence. Applies below this raw int16 RMS; 0 = filter off.
-  hallucination_max_rms: 300.0
+# hearth configuration reference. Every field here has a comment explaining
+# the knob. Values may also be overridden by HEARTH_* env vars (nested with a
+# double underscore, e.g. HEARTH_STORAGE__DB_PATH) or, for secrets only, a
+# .env file (see .env.example).
 
 llm:
-  provider: "openrouter"  # ollama | opencode_zen | openrouter
-  model: "openrouter/free"
-  host: "http://localhost:11434"
-  timeout: 60.0
-  health_timeout: 5.0     # shorter timeout for the startup health check
-  num_ctx: 8192           # context window passed to Ollama (options.num_ctx)
-  think: false            # keep thinking-model reasoning off on chat paths (voice latency)
-  serve_cmd: ["ollama", "serve"]   # command the TUI runs to (re)start the LLM server
-  # OpenCode Zen (provider: "opencode_zen") or OpenRouter (provider: "openrouter").
-  # api keys → .env; see .env.example
-  # Blank = use the selected provider's default base URL from the GATEWAYS table
-  # (assistant/llm/openai_compatible_provider.py). Set only to override that default
-  # (e.g. a self-hosted OpenAI-compatible endpoint).
-  base_url: ""
-  # Secondary provider used when the primary raises (transport failure/timeout).
-  # Empty = no fallback. fallback_model defaults to model when blank.
-  fallback: "ollama"      # local fallback when OpenRouter is unreachable or keyless
-  fallback_model: "qwen2.5:3b-instruct"   # must be a real local model, not openrouter/free
-  max_retries: 2          # retries on transient (429/5xx/transport) LLM failures; 4xx-auth never retried
-  # Active: OpenRouter's free router (provider "openrouter", model "openrouter/free")
-  # filters to a capable model at $0 among currently-free models. Caveats: a key is
-  # still required (no anonymous tier) and free models rate-limit and rotate.
-  # Fully-local default (no key, offline-first) — swap the active values to these:
-  # llm:
-  #   provider: "ollama"
-  #   model: "qwen2.5:3b-instruct"
-  #   fallback: ""
+  # backends: named LLM endpoints. "local" and "remote" are the Phase 0 pair;
+  # tiers.default/tiers.tool pick which backend serves which role. Field
+  # names here are a boundary contract other feathers (the router) consume —
+  # keep them stable.
+  backends:
+    local:
+      base_url: "http://localhost:11434/v1"   # Ollama's OpenAI-compatible endpoint
+      model: "qwen3:14b"
+      api_key_env: null            # local backend needs no key
+      supports_tools: true
+      supports_streaming: true     # present but unused in Phase 0
+      context_window: 8192
+      cost_tier: "free"
+      enabled: true
+    remote:
+      base_url: ""                 # blank = OpenRouter's default base URL
+      model: "openrouter/free"
+      api_key_env: "HEARTH_LLM__OPENROUTER_API_KEY"  # name of the env var holding the secret
+      supports_tools: true
+      supports_streaming: true
+      context_window: 8192
+      cost_tier: "free"
+      enabled: true
+  tiers:
+    default: local    # backend used for ordinary turns
+    tool: remote       # backend used for tool-calling rounds
+  timeout: 60.0         # per-request timeout, seconds
+  max_retries: 2        # retries on transient (429/5xx/transport) failures
 
-persona:
-  enabled: true           # on = Calcifer character on final spoken replies only; false = neutral voice
-  strength: "terse"       # terse | expansive: 1–2 sentence quip vs. a bit more room
-  revoice_enabled: true   # live-restyle plain skill replies in persona at the pipeline's speak choke point
-  revoice_timeout_s: 5.0  # bounds the live revoice LLM call
+veneer:
+  host: "127.0.0.1"    # bind address for the local control surface
+  port: 8765
+
+tool:
+  wikipedia_enabled: true    # register the Wikipedia lookup tool
+  wikipedia_language: "en"
 
 agent:
-  tool_mode: "auto"       # native | json | auto: native Ollama tool-calling, JSON fallback
-  max_tool_rounds: 3      # cap on tool-call rounds before the model must answer directly
-  turn_timeout_s: 45.0    # whole-turn budget; fits the verify loop + one reject re-loop
+  max_tool_rounds: 3     # cap on tool-call rounds before the model must answer directly
+  turn_timeout_s: 45.0    # whole-turn budget
+  tool_mode: "auto"      # native | json | auto: native tool-calling, JSON fallback
 
-verify:
-  enabled: true           # master kill switch; off = today's single-pass behavior
-  pre: true               # pre-tool gate: review pick+args before the skill runs
-  post: true              # post-tool check: review the answer before speech
-  max_verify_rounds: 2    # per-stage sub-cap (rejects) within agent.max_tool_rounds
-  spoken_feedback: true   # speak "let me double check" fillers on a reject
-
-tts:
-  voice: "en_US-lessac-medium"
-  model_path: "models/piper/en_US-lessac-medium.onnx"
-  # Piper speaking rate (length_scale): >1 slower, <1 faster.
-  length_scale: 1.0
-  # Wake-acknowledgement pool; one phrase is chosen at random per wake whose
-  # score is at/above wake.confident_threshold.
-  ack_phrases:
-    - "Hello!"
-    - "What can I help you with?"
-    - "Yes?"
-  # Spoken instead on a low-confidence wake (score between wake.threshold and
-  # wake.confident_threshold), signalling the pickup was uncertain.
-  unsure_ack_phrases:
-    - "Did you say something?"
-    - "What was that?"
-  ack_delay_s: 0.3               # beat of silence before the wake ack plays; 0 = instant
-
-storage:
-  db_path: "assistant.db"
-
-scheduling:
-  poll_seconds: 1.0       # how often the scheduler checks for due reminders
-
-web_search:
-  providers: [ddgs, wikipedia] # fan-out set; order = merge priority
-  language: "en"          # Wikipedia language variant
-  region: "us-en"         # DuckDuckGo region
-  result_count: 3         # results fetched per provider
-  max_results: 5          # merged results cap fed to the LLM
-  timeout: 10.0
-  max_snippet_chars: 500  # truncate each result body
-  max_rounds: 2           # agentic search rounds before giving up
-  progress_updates: true  # speak "searching..." style updates mid-turn
-  # api keys → .env; see .env.example
-  tavily_endpoint: "https://api.tavily.com/search"
-
-weather:
-  latitude: 33.749                    # home location (Atlanta, GA)
-  longitude: -84.38798
-  location_name: "Atlanta"            # spoken label for "here"
-  timezone: "auto"                    # IANA tz or "auto" (resolve from coordinates)
-  temperature_unit: "fahrenheit"      # fahrenheit | celsius
-  wind_speed_unit: "mph"              # mph | kmh | ms | kn
-  precipitation_unit: "inch"          # inch | mm
-  forecast_days: 16                   # days of daily outlook (Open-Meteo max is 16)
-  timeout: 10.0
-  forecast_endpoint: "https://api.open-meteo.com/v1/forecast"
-  geocoding_endpoint: "https://geocoding-api.open-meteo.com/v1/search"
-
-calendar:
-  enabled: false            # gates skill registration and the watcher entirely
-  # Google service-account JSON used to mint API tokens; ~ is expanded.
-  credentials_path: "~/.config/calcifer/google-service-account.json"
-  personal_calendar_id: ""  # read-only for the service account
-  calcifer_calendar_id: ""  # read-write; events Calcifer creates live here
-  timeout: 10.0
-  watcher_enabled: true     # watcher's state at boot; voice toggle overrides at runtime
-  watcher_poll_seconds: 300.0  # how often the watcher polls the calendars
-  watcher_lead_minutes: 15  # announce events starting within this window
-  # Title patterns never surfaced in queries or announcements (substring,
-  # case/emoji-insensitive); the "stop bringing up ..." voice command adds more.
-  blocked_titles: []
-  # Events whose description contains this marker are hidden the same way —
-  # the way to mute a read-only personal-calendar event at source in Google's UI.
-  hidden_tag: "[hidden]"
+persona:
+  enabled: true    # on = Calcifer character on final spoken replies only
 
 conversation:
-  enabled: true             # keep listening for follow-ups after the assistant speaks
-  followup_window_ms: 6000  # silence after which a conversation closes
-  max_history_turns: 12     # messages kept in-session (user + assistant each 1)
-  # After each completed reply the LLM decides: keep listening silently (the
-  # reply asked a question), check in once with a soft ready-tone (at most
-  # once per conversation), or end the conversation. Nothing is spoken at a
-  # conversation boundary. Falls back to a silent reopen (silence-closed loop)
-  # if the LLM misses the budget or is offline.
-  decision_enabled: true
-  decision_timeout_s: 4.0      # decision must land by mic-open or it's dropped
-  end_phrases:                 # follow-up utterances that close the conversation without routing
-  - goodbye
-  - bye
-  - that's all
-  - that is all
-  - i'm done
-  - i am done
-  - we're done
-  - we are done
-  - nevermind
-  - never mind
+  max_history_turns: 12    # messages kept in-session (user + assistant each 1)
 
-aec:
-  # Speex acoustic echo cancellation: subtracts what the speaker is playing from
-  # the mic stream, so barge-in can hear the wake word over the assistant's own
-  # voice. Needs the optional native extra:
-  #   sudo apt install libspeexdsp-dev && pip install -e ".[aec]"
-  # When disabled or the import fails, the mic passes through unchanged.
-  enabled: false
-  frame_ms: 20           # speex processes 10-20 ms frames
-  filter_length_ms: 200  # echo tail the canceller adapts over
-  extra_delay_ms: 0      # output-path latency compensation; tune on-device
-
-barge_in:
-  # Speaking the wake word over the assistant's reply cuts playback and reopens
-  # the mic. Off by default until echo cancellation is validated on-device:
-  # without AEC the mic hears the assistant's own reply, and the gates below
-  # are the only guard against self-triggering.
-  enabled: false
-  threshold: 0.80    # extra score gate on wake events while we speak (>= wake.threshold)
-  trigger_frames: 3  # consecutive gated hits required to barge (self-echo debounce)
-  announcements: false # also barge into reminder/calendar announcements
+storage:
+  db_path: "hearth.db"    # sqlite database path
 
 logging:
-  level: "INFO" # console (stderr) level; the TUI parses that format
-  dir: "logs" # per-run log files land here (gitignored)
-  file_enabled: true # write per-run plain-text + JSONL files
-  file_level: "INFO" # file handlers' level; set DEBUG when deep-debugging
-  rotate_max_bytes: 10485760 # size cap per file within a run (10 MiB)
-  rotate_backups: 3 # rotated chunks kept per file within a run
-  runs_to_keep: 20 # runs retained at boot; older pruned (0 = keep all)
+  level: "INFO"    # console (stderr) log level
+  dir: "logs"      # per-run log files land here (gitignored)
