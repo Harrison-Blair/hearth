@@ -32,3 +32,37 @@ async def test_local_backend_parses_completion(llm_config, canned_completion):
     assert seen_requests[0].url.path.endswith("/chat/completions")
 
     await client.aclose()
+
+
+async def test_local_backend_still_parses(llm_config, canned_completion):
+    """After the FTHR-004 base-class refactor, LocalBackend still parses tool calls."""
+    backend_config = llm_config.backends["local"]
+    body = canned_completion(
+        text=None,
+        tool_calls=[
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": '{"query": "fire"}'},
+            }
+        ],
+        finish_reason="tool_calls",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=backend_config.base_url
+    )
+    backend = LocalBackend(backend_config, client=client, name="local", tier="default")
+
+    result = await backend.complete([Message(role="user", content="hi")], tools=None)
+
+    assert result.text is None
+    assert result.finish_reason == "tool_calls"
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "lookup"
+    assert result.tool_calls[0].arguments == {"query": "fire"}
+
+    await client.aclose()

@@ -44,8 +44,8 @@ Written test-first (write → observe FAIL → implement to green). Hermetic via
 - `test_local_backend_still_parses` — FTHR-002's local parse behavior is preserved after the base-class refactor. (AC-2)
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: A Remote (OpenRouter) backend implements the `Brain` protocol alongside Local, both advertising `supports_tools`/`supports_streaming`/`context_window`/`cost_tier` (satisfies PLM-001 FC-3).
-- [ ] AC-3: Tier selection is deterministic and config-driven via declared tier roles, with tool-turn → tool tier, chat-turn → default tier, and a working per-turn override; no complexity heuristic (satisfies PLM-001 FC-4, FC-5).
-- [ ] AC-4: With the remote tier disabled by config, all turns (chat and tool) are served by local and the spine is fully functional local-only (satisfies PLM-001 FC-6, contributes to PLM AC-4).
-- [ ] AC-5: The `routing_decision` event records the selected tier, backend, and reason for each turn (contributes to PLM-001 FC-12).
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: A Remote (OpenRouter) backend implements the `Brain` protocol alongside Local, both advertising `supports_tools`/`supports_streaming`/`context_window`/`cost_tier` (satisfies PLM-001 FC-3).
+- [x] AC-3: Tier selection is deterministic and config-driven via declared tier roles, with tool-turn → tool tier, chat-turn → default tier, and a working per-turn override; no complexity heuristic (satisfies PLM-001 FC-4, FC-5).
+- [x] AC-4: With the remote tier disabled by config, all turns (chat and tool) are served by local and the spine is fully functional local-only (satisfies PLM-001 FC-6, contributes to PLM AC-4).
+- [x] AC-5: The `routing_decision` event records the selected tier, backend, and reason for each turn (contributes to PLM-001 FC-12).
