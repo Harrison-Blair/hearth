@@ -10,6 +10,7 @@ failing brain never crashes the orchestrator's turn.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from hearth.brain.base import Message, ToolSpec
 from hearth.brain.errors import BrainError
@@ -18,6 +19,8 @@ from hearth.events import EventSink, null_sink
 from hearth.loop import run_react_rounds
 from hearth.memory.log import EventLog
 from hearth.tools.registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 SPEC = ToolSpec(
     name="consult_brain",
@@ -43,11 +46,33 @@ class BrainConsult:
         tool_registry: ToolRegistry,
         log: EventLog,
         config,
+        transcript=None,
     ) -> None:
         self._router = router
         self._tool_registry = tool_registry
         self._log = log
         self._config = config
+        self._transcript = transcript
+
+    def _log_model(self, selection) -> None:
+        try:
+            model = self._config.llm.backends[selection.backend_name].model
+            logger.info(
+                "consult turn model backend=%s tier=%s model=%s",
+                selection.backend_name,
+                selection.tier,
+                model,
+            )
+        except Exception:  # never let logging break a turn (AC-5)
+            pass
+
+    def _append_transcript(self, session_id: str, line: str) -> None:
+        if self._transcript is None:
+            return
+        try:
+            self._transcript.append(session_id, line)
+        except Exception:  # never let a transcript write break a turn (AC-5)
+            pass
 
     async def __call__(
         self,
@@ -57,6 +82,8 @@ class BrainConsult:
         emit: EventSink = null_sink,
     ) -> str:
         selection = self._router.select(tier_override="tool")
+        self._log_model(selection)
+        self._append_transcript(session_id, f"consult query: {query}")
         messages: list[Message] = [
             Message(role="system", content=self._config.persona.brain_guard_prompt),
             Message(role="user", content=query),
@@ -85,9 +112,11 @@ class BrainConsult:
                 ),
                 timeout=self._config.agent.consult_timeout_s,
             )
+            findings = result.text or "consult_brain: no findings."
         except BrainError:
-            return "consult_brain: couldn't reach the external knowledge source right now."
+            findings = "consult_brain: couldn't reach the external knowledge source right now."
         except asyncio.TimeoutError:
-            return "consult_brain: that took too long, continuing without it."
+            findings = "consult_brain: that took too long, continuing without it."
 
-        return result.text or "consult_brain: no findings."
+        self._append_transcript(session_id, f"consult findings: {findings}")
+        return findings

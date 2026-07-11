@@ -12,12 +12,15 @@ orchestrator incorporates into its own answer.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from hearth.brain.base import BrainResult, Message
 from hearth.brain.router import Router
 from hearth.events import EventSink, ToolActivity, null_sink
 from hearth.memory.log import EventLog
 from hearth.persona import restyle
+
+logger = logging.getLogger(__name__)
 
 
 async def run_react_rounds(
@@ -80,11 +83,35 @@ async def run_react_rounds(
 
 
 class Loop:
-    def __init__(self, router: Router, log: EventLog, config, consult=None) -> None:
+    def __init__(
+        self, router: Router, log: EventLog, config, consult=None, transcript=None
+    ) -> None:
         self._router = router
         self._log = log
         self._config = config
         self._consult = consult
+        self._transcript = transcript
+
+    def _log_model(self, role: str, selection) -> None:
+        try:
+            model = self._config.llm.backends[selection.backend_name].model
+            logger.info(
+                "%s turn model backend=%s tier=%s model=%s",
+                role,
+                selection.backend_name,
+                selection.tier,
+                model,
+            )
+        except Exception:  # never let logging break a turn (AC-5)
+            pass
+
+    def _append_transcript(self, session_id: str, line: str) -> None:
+        if self._transcript is None:
+            return
+        try:
+            self._transcript.append(session_id, line)
+        except Exception:  # never let a transcript write break a turn (AC-5)
+            pass
 
     async def run_turn(
         self,
@@ -94,6 +121,7 @@ class Loop:
         emit: EventSink = null_sink,
     ) -> str:
         self._log.append(session_id, turn_id, "user_input", "user", {"text": transcript})
+        self._append_transcript(session_id, f"user: {transcript}")
 
         # Reconstruct history from the log itself (no separate history store):
         # keep only the conversational turn types, then bound to the last
@@ -131,6 +159,7 @@ class Loop:
                 "reason": selection.reason,
             },
         )
+        self._log_model("orchestrator", selection)
 
         # Stashed so `_consult_dispatch` (whose shape is fixed to
         # `dispatch(name, args) -> str` by `run_react_rounds`) can forward
@@ -166,6 +195,7 @@ class Loop:
         answer = await restyle(answer_text, ctx=None)
 
         self._log.append(session_id, turn_id, "final_answer", "brain", {"text": answer})
+        self._append_transcript(session_id, f"answer: {answer}")
         return answer
 
     async def _consult_dispatch(self, name: str, args: dict) -> str:
