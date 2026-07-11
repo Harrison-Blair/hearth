@@ -2,7 +2,7 @@
 id: FTHR-004
 title: Router widening remote backend and tier routing
 plumage: PLM-001
-status: egg
+status: hatching
 priority: P0
 depends_on: [FTHR-002]
 oversight: merge

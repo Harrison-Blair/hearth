@@ -2,7 +2,7 @@
 id: FTHR-003
 title: Veneer WebSocket contract client and daemon
 plumage: PLM-001
-status: egg
+status: hatching
 priority: P0
 depends_on: [FTHR-002]
 oversight: merge
