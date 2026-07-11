@@ -1,7 +1,7 @@
 ---
 id: PLM-001
 title: "Hearth Phase 0 — Orchestration Spine"
-status: hatched
+status: fledged
 priority: P0
 authored: 2026-07-10T23:20:08Z
 agent: fledge-orchestrate/planning
@@ -45,14 +45,14 @@ This also re-establishes the project's identity: the runtime package, console co
 15. FC-15: The automated test suite is hermetic: LLM backends are exercised against an in-process fake OpenAI-compatible endpoint, and the Wikipedia tool against a stubbed HTTP response. A real end-to-end run against live Ollama, live OpenRouter, and live Wikipedia is documented as a manual smoke check and is not a gating automated test.
 
 ## Acceptance Criteria
-- [ ] AC-1: With only the local tier enabled, a multi-turn conversation — including at least one turn that uses the Wikipedia tool — completes end-to-end over the WebSocket veneer contract, and every turn's defined event set (user_input, routing_decision, tool_call, observation, final_answer) is appended to the event log.
-- [ ] AC-2: The same conversation, run with the remote tier enabled and selected by config for tool-using turns, completes successfully with tool-calling working identically from the ReAct loop's perspective (same event sequence shape, same veneer contract behavior).
-- [ ] AC-3: The ReAct loop performs a real Wikipedia tool call (against a stubbed HTTP response in the automated suite; against the live API in the manual smoke check) and incorporates the returned observation into its final answer.
-- [ ] AC-4: With the remote tier disabled by config, every turn type (pure-chat and tool-using) is served by the local tier and the spine remains fully functional with no dependency on the remote provider.
-- [ ] AC-5: The Layer 2 read seam, the veneer contract, and the persona restyle stage each exist as clean, typed interfaces with a stub or no-op implementation behind them, such that a later phase can attach a real implementation without modifying the spine's existing code paths.
-- [ ] AC-6: For a tool-using turn, the veneer receives a ToolActivity start/end signal carrying only the tool's coarse label; inspection of every outbound veneer message for that turn confirms no tool query, arguments, or observation content ever crosses the veneer boundary.
-- [ ] AC-7: The runtime console command is `hearth`, and CI, `Makefile`, and release artifact naming reference `hearth` rather than `assistant`.
-- [ ] AC-8: The automated test suite runs hermetically (fake LLM endpoint, stubbed Wikipedia HTTP) and passes under `pytest`; a separate manual smoke procedure against live Ollama + OpenRouter + Wikipedia is documented.
+- [x] AC-1: With only the local tier enabled, a multi-turn conversation — including at least one turn that uses the Wikipedia tool — completes end-to-end over the WebSocket veneer contract, and every turn's defined event set (user_input, routing_decision, tool_call, observation, final_answer) is appended to the event log.
+- [x] AC-2: The same conversation, run with the remote tier enabled and selected by config for tool-using turns, completes successfully with tool-calling working identically from the ReAct loop's perspective (same event sequence shape, same veneer contract behavior).
+- [x] AC-3: The ReAct loop performs a real Wikipedia tool call (against a stubbed HTTP response in the automated suite; against the live API in the manual smoke check) and incorporates the returned observation into its final answer.
+- [x] AC-4: With the remote tier disabled by config, every turn type (pure-chat and tool-using) is served by the local tier and the spine remains fully functional with no dependency on the remote provider.
+- [x] AC-5: The Layer 2 read seam, the veneer contract, and the persona restyle stage each exist as clean, typed interfaces with a stub or no-op implementation behind them, such that a later phase can attach a real implementation without modifying the spine's existing code paths.
+- [x] AC-6: For a tool-using turn, the veneer receives a ToolActivity start/end signal carrying only the tool's coarse label; inspection of every outbound veneer message for that turn confirms no tool query, arguments, or observation content ever crosses the veneer boundary.
+- [x] AC-7: The runtime console command is `hearth`, and CI, `Makefile`, and release artifact naming reference `hearth` rather than `assistant`.
+- [x] AC-8: The automated test suite runs hermetically (fake LLM endpoint, stubbed Wikipedia HTTP) and passes under `pytest`; a separate manual smoke procedure against live Ollama + OpenRouter + Wikipedia is documented.
 
 ## Out of Scope
 
