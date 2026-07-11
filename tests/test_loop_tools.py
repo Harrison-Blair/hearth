@@ -1,18 +1,20 @@
-"""Loop tool rounds: dispatch, observation incorporation, tool-tier routing,
-round cap, and content-free ToolActivity emission. Hermetic via MockTransport
-and a stubbed ToolRegistry (wikipedia.py itself is tested in test_wikipedia.py)."""
+"""Loop/consult_brain: the orchestrator offers only `consult_brain` at the
+local tier; a `consult_brain` call drives a nested ReAct round on the remote
+tier over the wikipedia registry, whose result becomes the orchestrator's
+own observation. `wikipedia_search` is never offered at the top level.
+Hermetic via a host-keyed MockTransport (local vs remote)."""
 from __future__ import annotations
 
 import json
 
 import httpx
 
+from conftest import HostRouter
 from hearth.brain.base import ToolSpec
 from hearth.brain.router import Router
-from hearth.events import ToolActivity
 from hearth.loop import Loop
 from hearth.memory.log import EventLog
-
+from hearth.tools.consult import BrainConsult
 
 SEARCH_SPEC = ToolSpec(
     name="wikipedia_search",
@@ -39,10 +41,24 @@ class _FakeRegistry:
 
 
 class _Agent:
-    def __init__(self, max_tool_rounds: int = 3, turn_timeout_s: float = 45.0, tool_mode: str = "auto"):
+    def __init__(
+        self,
+        max_consult_rounds: int = 3,
+        max_tool_rounds: int = 3,
+        turn_timeout_s: float = 45.0,
+        consult_timeout_s: float = 30.0,
+        tool_mode: str = "auto",
+    ):
+        self.max_consult_rounds = max_consult_rounds
         self.max_tool_rounds = max_tool_rounds
         self.turn_timeout_s = turn_timeout_s
+        self.consult_timeout_s = consult_timeout_s
         self.tool_mode = tool_mode
+
+
+class _Persona:
+    def __init__(self, system_prompt: str = "You are Calcifer."):
+        self.system_prompt = system_prompt
 
 
 class _Conversation:
@@ -51,9 +67,10 @@ class _Conversation:
 
 
 class _Config:
-    def __init__(self, agent: _Agent | None = None, max_history_turns: int = 12):
+    def __init__(self, agent: _Agent | None = None, persona: _Persona | None = None, max_history_turns: int = 12):
         self.conversation = _Conversation(max_history_turns)
         self.agent = agent or _Agent()
+        self.persona = persona or _Persona()
 
 
 def _tool_call_completion(name: str, arguments: dict, call_id: str = "call_1") -> dict:
@@ -77,135 +94,160 @@ def _tool_call_completion(name: str, arguments: dict, call_id: str = "call_1") -
     }
 
 
-def _make_router(handler, llm_config):
-    backend_config = llm_config.backends["local"]
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url=backend_config.base_url)
-    return Router(llm_config, clients={"local": client}), client
+def _chat_completion(text: str) -> dict:
+    return {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
 
 
-async def test_loop_tool_round_incorporates_observation(tmp_path, llm_config, canned_completion):
+def _build(two_tier_llm_config, local_handler, remote_handler):
+    router_fn = HostRouter({"local-llm.test": local_handler, "remote-llm.test": remote_handler})
+    clients = {
+        name: httpx.AsyncClient(transport=httpx.MockTransport(router_fn), base_url=backend.base_url)
+        for name, backend in two_tier_llm_config.backends.items()
+    }
+    router = Router(two_tier_llm_config, clients=clients)
+    return router, clients, router_fn
+
+
+async def test_orchestrator_first_request_offers_consult_brain_at_default_tier(
+    tmp_path, two_tier_llm_config
+):
     requests_seen = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def local_handler(request, n):
         requests_seen.append(json.loads(request.content))
-        if len(requests_seen) == 1:
-            return httpx.Response(200, json=_tool_call_completion("wikipedia_search", {"query": "Test"}))
-        return httpx.Response(200, json=canned_completion(text="Answer based on OBSERVATION_TEXT"))
+        return httpx.Response(200, json=_chat_completion("hi there"))
 
-    router, client = _make_router(handler, llm_config)
+    def remote_handler(request, n):
+        raise AssertionError("remote should not be called for a plain chat turn")
+
+    router, clients, router_fn = _build(two_tier_llm_config, local_handler, remote_handler)
     log = EventLog(str(tmp_path / "events.db"))
     registry = _FakeRegistry()
+    consult = BrainConsult(router, registry, log, _Config())
+
+    loop = Loop(router, log, _Config(), consult=consult)
+    answer = await loop.run_turn("s1", "t1", "hello")
+
+    assert answer == "hi there"
+    assert router_fn.counts["local-llm.test"] == 1
+    assert router_fn.counts.get("remote-llm.test", 0) == 0
+
+    tool_names = [t["function"]["name"] for t in requests_seen[0].get("tools", [])]
+    assert tool_names == ["consult_brain"]
+
+    routing = next(e for e in log.read_session("s1") if e.type == "routing_decision")
+    assert routing.payload["tier"] == "default"
+    assert routing.payload["backend_name"] == "local"
+
+    for client in clients.values():
+        await client.aclose()
+
+
+async def test_consult_dispatches_nested_wikipedia_search(tmp_path, two_tier_llm_config):
+    def local_handler(request, n):
+        if n == 1:
+            return httpx.Response(
+                200, json=_tool_call_completion("consult_brain", {"query": "Ada Lovelace"})
+            )
+        return httpx.Response(200, json=_chat_completion("Ada Lovelace was a mathematician."))
+
+    def remote_handler(request, n):
+        if n == 1:
+            return httpx.Response(
+                200, json=_tool_call_completion("wikipedia_search", {"query": "Ada Lovelace"})
+            )
+        return httpx.Response(200, json=_chat_completion("Findings: Ada Lovelace, mathematician."))
+
+    router, clients, router_fn = _build(two_tier_llm_config, local_handler, remote_handler)
+    log = EventLog(str(tmp_path / "events.db"))
+    registry = _FakeRegistry()
+    consult = BrainConsult(router, registry, log, _Config())
+
+    loop = Loop(router, log, _Config(), consult=consult)
     emitted = []
 
     async def emit(event):
         emitted.append(event)
 
-    loop = Loop(router, log, _Config(), registry=registry)
-    answer = await loop.run_turn("s1", "t1", "look it up", emit=emit)
+    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace", emit=emit)
 
-    assert answer == "Answer based on OBSERVATION_TEXT"
-    assert registry.dispatched == [("wikipedia_search", {"query": "Test"})]
+    assert answer == "Ada Lovelace was a mathematician."
+    assert registry.dispatched == [("wikipedia_search", {"query": "Ada Lovelace"})]
+    assert router_fn.counts["local-llm.test"] == 2
+    assert router_fn.counts["remote-llm.test"] == 2
+
+    assert [(e.phase, e.label) for e in emitted] == [
+        ("start", "consult"),
+        ("start", "search"),
+        ("end", "search"),
+        ("end", "consult"),
+    ]
 
     events = log.read_session("s1")
     assert [e.type for e in events] == [
         "user_input",
         "routing_decision",
         "tool_call",
+        "tool_call",
+        "observation",
         "observation",
         "final_answer",
     ]
-    assert events[2].payload == {"name": "wikipedia_search", "arguments": {"query": "Test"}}
-    assert events[3].payload == {"name": "wikipedia_search", "result": "OBSERVATION_TEXT"}
+    assert events[2].payload == {"name": "consult_brain", "arguments": {"query": "Ada Lovelace"}}
+    assert events[3].payload == {"name": "wikipedia_search", "arguments": {"query": "Ada Lovelace"}}
+    assert events[4].payload == {"name": "wikipedia_search", "result": "OBSERVATION_TEXT"}
+    assert events[5].payload == {"name": "consult_brain", "result": "Findings: Ada Lovelace, mathematician."}
 
-    assert len(emitted) == 2
-    assert [(e.phase, e.label) for e in emitted] == [("start", "search"), ("end", "search")]
-
-    # Second request's messages include the tool call + tool result round-trip.
-    second_request_roles = [m["role"] for m in requests_seen[1]["messages"]]
-    assert "assistant" in second_request_roles
-    assert "tool" in second_request_roles
-
-    await client.aclose()
+    for client in clients.values():
+        await client.aclose()
 
 
-async def test_tool_turn_uses_tool_tier(tmp_path, llm_config, canned_completion):
-    requests_seen = []
+async def test_wikipedia_search_never_offered_at_top_level(tmp_path, two_tier_llm_config):
+    def local_handler(request, n):
+        body = json.loads(request.content)
+        tool_names = [t["function"]["name"] for t in body.get("tools", [])]
+        assert "wikipedia_search" not in tool_names
+        return httpx.Response(200, json=_chat_completion("hi"))
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests_seen.append(json.loads(request.content))
-        if len(requests_seen) == 1:
-            return httpx.Response(200, json=_tool_call_completion("wikipedia_search", {"query": "Test"}))
-        return httpx.Response(200, json=canned_completion(text="final"))
+    def remote_handler(request, n):
+        raise AssertionError("remote should not be called")
 
-    router, client = _make_router(handler, llm_config)
+    router, clients, router_fn = _build(two_tier_llm_config, local_handler, remote_handler)
     log = EventLog(str(tmp_path / "events.db"))
     registry = _FakeRegistry()
+    consult = BrainConsult(router, registry, log, _Config())
+    loop = Loop(router, log, _Config(), consult=consult)
 
-    loop = Loop(router, log, _Config(), registry=registry)
-    await loop.run_turn("s1", "t1", "look it up")
+    await loop.run_turn("s1", "t1", "hello")
 
-    events = log.read_session("s1")
-    routing = next(e for e in events if e.type == "routing_decision")
-    assert routing.payload["tier"] == "tool"
-
-    # First request carried the tool spec.
-    assert requests_seen[0]["tools"][0]["function"]["name"] == "wikipedia_search"
-
-    await client.aclose()
+    for client in clients.values():
+        await client.aclose()
 
 
-async def test_max_tool_rounds_cap(tmp_path, llm_config):
-    requests_seen = []
+async def test_nested_tool_round_cap(tmp_path, two_tier_llm_config):
+    def local_handler(request, n):
+        if n == 1:
+            return httpx.Response(200, json=_tool_call_completion("consult_brain", {"query": "x"}))
+        return httpx.Response(200, json=_chat_completion("done"))
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests_seen.append(json.loads(request.content))
-        return httpx.Response(200, json=_tool_call_completion("wikipedia_search", {"query": "Test"}))
+    def remote_handler(request, n):
+        return httpx.Response(200, json=_tool_call_completion("wikipedia_search", {"query": "x"}))
 
-    router, client = _make_router(handler, llm_config)
+    router, clients, router_fn = _build(two_tier_llm_config, local_handler, remote_handler)
     log = EventLog(str(tmp_path / "events.db"))
     registry = _FakeRegistry()
+    consult_config = _Config(agent=_Agent(max_tool_rounds=2))
+    consult = BrainConsult(router, registry, log, consult_config)
 
-    loop = Loop(router, log, _Config(agent=_Agent(max_tool_rounds=2)), registry=registry)
+    loop = Loop(router, log, _Config(), consult=consult)
     answer = await loop.run_turn("s1", "t1", "look it up")
 
     assert isinstance(answer, str)
     assert answer
 
     tool_call_events = [e for e in log.read_session("s1") if e.type == "tool_call"]
-    assert len(tool_call_events) == 2
+    nested_calls = [e for e in tool_call_events if e.payload["name"] == "wikipedia_search"]
+    assert len(nested_calls) == 2
 
-    await client.aclose()
-
-
-async def test_toolactivity_label_only(tmp_path, llm_config, canned_completion):
-    requests_seen = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests_seen.append(json.loads(request.content))
-        if len(requests_seen) == 1:
-            return httpx.Response(
-                200,
-                json=_tool_call_completion("wikipedia_search", {"query": "a secret query"}),
-            )
-        return httpx.Response(200, json=canned_completion(text="final"))
-
-    router, client = _make_router(handler, llm_config)
-    log = EventLog(str(tmp_path / "events.db"))
-    registry = _FakeRegistry(observation="a secret observation body")
-    emitted: list[ToolActivity] = []
-
-    async def emit(event):
-        emitted.append(event)
-
-    loop = Loop(router, log, _Config(), registry=registry)
-    await loop.run_turn("s1", "t1", "look it up", emit=emit)
-
-    assert len(emitted) == 2
-    for event in emitted:
-        assert isinstance(event, ToolActivity)
-        assert vars(event).keys() == {"turn_id", "phase", "label"}
-        assert event.label == "search"
-        assert "secret" not in event.label
-        assert event.phase in ("start", "end")
-
-    await client.aclose()
+    for client in clients.values():
+        await client.aclose()

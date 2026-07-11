@@ -1,4 +1,8 @@
-"""Router.select: deterministic, config-driven tier routing with gating and override."""
+"""Router.select: deterministic, config-driven tier routing -- always the
+default/local tier unless explicitly overridden -- plus brain_available()
+gating (FTHR-009: the `tools_available` signal that used to promote a turn
+to the tool tier is gone; that's now `consult_brain`'s job via
+`tier_override="tool"`)."""
 from __future__ import annotations
 
 import httpx
@@ -49,36 +53,32 @@ def clients() -> dict[str, httpx.AsyncClient]:
     }
 
 
-async def test_tool_turn_routes_to_tool_tier(clients):
+async def test_select_default_ignores_tools_available(clients):
+    """`select()` with no override always resolves the default/local tier --
+    there is no `tools_available` signal anymore that can promote it to
+    remote (that's what `consult_brain` + `tier_override` are for now)."""
     router = Router(make_config(remote_enabled=True), clients=clients)
-    selection = router.select(tools_available=True)
-    assert selection.tier == "tool"
-    assert selection.backend_name == "remote"
-    assert selection.reason == "tool-turn→tool tier"
-    assert selection.brain._client is clients["remote"]
-
-
-async def test_chat_turn_routes_to_default(clients):
-    router = Router(make_config(remote_enabled=True), clients=clients)
-    selection = router.select(tools_available=False)
+    selection = router.select()
     assert selection.tier == "default"
     assert selection.backend_name == "local"
     assert selection.reason == "chat-turn→default tier"
     assert selection.brain._client is clients["local"]
 
 
-async def test_remote_disabled_falls_back_to_local(clients):
-    router = Router(make_config(remote_enabled=False), clients=clients)
-    selection = router.select(tools_available=True)
-    assert selection.backend_name == "local"
-    assert selection.reason == "tool tier disabled; local fallback"
-    assert selection.brain._client is clients["local"]
-
-
-async def test_tier_override_forces_tier(clients):
+async def test_select_tier_override_reaches_remote(clients):
     router = Router(make_config(remote_enabled=True), clients=clients)
-    selection = router.select(tools_available=False, tier_override="tool")
+    selection = router.select(tier_override="tool")
     assert selection.tier == "tool"
     assert selection.backend_name == "remote"
     assert selection.reason == "override:tool"
     assert selection.brain._client is clients["remote"]
+
+
+async def test_brain_available_true_when_remote_enabled(clients):
+    router = Router(make_config(remote_enabled=True), clients=clients)
+    assert router.brain_available() is True
+
+
+async def test_brain_available_false_when_remote_disabled(clients):
+    router = Router(make_config(remote_enabled=False), clients=clients)
+    assert router.brain_available() is False

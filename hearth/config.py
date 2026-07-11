@@ -74,10 +74,13 @@ class AgentConfig(BaseModel):
     max_tool_rounds: int = 3
     turn_timeout_s: float = 45.0
     tool_mode: str = "auto"
+    max_consult_rounds: int = 3
+    consult_timeout_s: float = 30.0
 
 
 class PersonaConfig(BaseModel):
     enabled: bool = True
+    system_prompt: str = ""
 
 
 class ConversationConfig(BaseModel):

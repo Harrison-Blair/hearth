@@ -50,9 +50,9 @@ Written test-first, all hermetic via `httpx.MockTransport` (extend `conftest.py`
 Implementation order: write/rework the tests above against the unchanged code, run them, capture the failures (old routing/tool-shape assertions failing, new test modules failing on missing `consult.py`/`brain_available`/`run_react_rounds`), then implement `errors`-adjacent extraction + inversion + `consult.py` + config/app wiring until green.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above (reworked and new) were observed failing before implementation for the expected reason and pass after.
-- [ ] AC-2: The top turn's first request goes to the **local** backend (`qwen3:14b`), carries the Calcifer system message as `messages[0]`, and offers exactly `consult_brain` (never `wikipedia_search`); the logged `routing_decision.tier == "default"`. Satisfies PLM-002 FC-1, FC-2.
-- [ ] AC-3: A `consult_brain` call runs the **remote** brain (via `Router.select(tier_override="tool")`) over the wikipedia registry; its findings return as the orchestrator's observation and the final answer incorporates them. Satisfies PLM-002 FC-2.
-- [ ] AC-4: `wikipedia_search` is invoked **only** inside the nested brain loop — never offered or callable from the top-level orchestrator turn. Satisfies PLM-002 FC-3.
-- [ ] AC-5: A `BrainError` from the remote brain inside a consult becomes a graceful text observation; the orchestrator still produces a persona answer (the turn does not crash). Satisfies PLM-002 FC-5.
-- [ ] AC-6: With the remote/brain disabled (`Router.brain_available()` false), `consult_brain` is not offered and every turn is served local-only, matching PLM-001's fallback. Satisfies PLM-002 FC-6.
+- [x] AC-1: The tests listed above (reworked and new) were observed failing before implementation for the expected reason and pass after.
+- [x] AC-2: The top turn's first request goes to the **local** backend (`qwen3:14b`), carries the Calcifer system message as `messages[0]`, and offers exactly `consult_brain` (never `wikipedia_search`); the logged `routing_decision.tier == "default"`. Satisfies PLM-002 FC-1, FC-2.
+- [x] AC-3: A `consult_brain` call runs the **remote** brain (via `Router.select(tier_override="tool")`) over the wikipedia registry; its findings return as the orchestrator's observation and the final answer incorporates them. Satisfies PLM-002 FC-2.
+- [x] AC-4: `wikipedia_search` is invoked **only** inside the nested brain loop — never offered or callable from the top-level orchestrator turn. Satisfies PLM-002 FC-3.
+- [x] AC-5: A `BrainError` from the remote brain inside a consult becomes a graceful text observation; the orchestrator still produces a persona answer (the turn does not crash). Satisfies PLM-002 FC-5.
+- [x] AC-6: With the remote/brain disabled (`Router.brain_available()` false), `consult_brain` is not offered and every turn is served local-only, matching PLM-001's fallback. Satisfies PLM-002 FC-6.

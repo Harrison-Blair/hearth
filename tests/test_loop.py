@@ -10,14 +10,30 @@ from hearth.loop import Loop
 from hearth.memory.log import EventLog
 
 
+PERSONA_PROMPT = "You are Calcifer."
+
+
 class _Conversation:
     def __init__(self, max_history_turns: int) -> None:
         self.max_history_turns = max_history_turns
 
 
+class _Agent:
+    def __init__(self, max_consult_rounds: int = 3, turn_timeout_s: float = 45.0) -> None:
+        self.max_consult_rounds = max_consult_rounds
+        self.turn_timeout_s = turn_timeout_s
+
+
+class _Persona:
+    def __init__(self, system_prompt: str = PERSONA_PROMPT) -> None:
+        self.system_prompt = system_prompt
+
+
 class _Config:
     def __init__(self, max_history_turns: int = 12) -> None:
         self.conversation = _Conversation(max_history_turns)
+        self.agent = _Agent()
+        self.persona = _Persona()
 
 
 def _make_router(handler, llm_config):
@@ -67,15 +83,16 @@ async def test_loop_multi_turn_reconstructs_history(tmp_path, llm_config, canned
     await loop.run_turn("s1", "t2", "second message")
     await loop.run_turn("s1", "t3", "third message")
 
-    # Second turn's request includes the first exchange.
+    # Second turn's request carries the persona system prompt as messages[0]
+    # (FTHR-009), then the first exchange.
     second_contents = [m["content"] for m in requests_seen[1]["messages"]]
-    assert second_contents == ["first message", "answer 1", "second message"]
+    assert second_contents == [PERSONA_PROMPT, "first message", "answer 1", "second message"]
 
     # Third turn's request drops the first exchange (bounded by max_history_turns=1)
     # but retains the second.
     third_contents = [m["content"] for m in requests_seen[2]["messages"]]
     assert "first message" not in third_contents
-    assert third_contents == ["second message", "answer 2", "third message"]
+    assert third_contents == [PERSONA_PROMPT, "second message", "answer 2", "third message"]
 
     await client.aclose()
 

@@ -16,6 +16,7 @@ async def _run_daemon() -> int:
     from hearth.config import Settings
     from hearth.loop import Loop
     from hearth.memory.log import EventLog
+    from hearth.tools.consult import BrainConsult
     from hearth.tools.registry import ToolRegistry
     from hearth.veneer.server import Veneer
 
@@ -39,8 +40,12 @@ async def _run_daemon() -> int:
     try:
         router = Router(settings.llm, clients=clients)
         log = EventLog(settings.storage.db_path)
-        registry = ToolRegistry(tool_config=settings.tool, client=tool_client)
-        loop = Loop(router, log, settings, registry=registry)
+        # Wikipedia now lives brain-side only: the top-level orchestrator
+        # never holds this registry directly, it reaches it exclusively
+        # through consult_brain's nested ReAct loop.
+        wiki_registry = ToolRegistry(tool_config=settings.tool, client=tool_client)
+        consult = BrainConsult(router, wiki_registry, log, settings)
+        loop = Loop(router, log, settings, consult=consult)
         veneer = Veneer(loop, log, settings)
         await veneer.serve(settings.veneer.host, settings.veneer.port)
     finally:

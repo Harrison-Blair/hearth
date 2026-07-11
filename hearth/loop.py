@@ -1,10 +1,13 @@
-"""Loop.run_turn: history-aware, logged conversation turn with ReAct tool rounds.
+"""Loop.run_turn: persona-voiced local orchestrator with a nested
+consult_brain tool, and the shared `run_react_rounds` ReAct engine used by
+both the top-level orchestrator turn and a nested brain consult.
 
-Thought -> Action -> Observation: when the registry offers tools and
-`agent.tool_mode` isn't "off", the turn routes to the tool tier and, while the
-brain keeps returning tool calls (capped at `agent.max_tool_rounds`), dispatches
-each call, logs `tool_call`/`observation`, and emits a content-free
-`ToolActivity` (phase + label only) through `emit` for the veneer.
+Thought -> Action -> Observation: the top-level turn is always served by the
+local tier, carrying a Calcifer persona system prompt, and offers exactly one
+tool -- `consult_brain(query)` -- gated on `router.brain_available()`.
+Calling it runs a nested ReAct round on the remote tier over the real data
+tools (see `hearth.tools.consult`); its findings return as an observation the
+orchestrator incorporates into its own answer.
 """
 from __future__ import annotations
 
@@ -15,15 +18,73 @@ from hearth.brain.router import Router
 from hearth.events import EventSink, ToolActivity, null_sink
 from hearth.memory.log import EventLog
 from hearth.persona import restyle
-from hearth.tools.registry import ToolRegistry
+
+
+async def run_react_rounds(
+    *,
+    brain,
+    messages: list[Message],
+    tools,
+    dispatch,
+    round_cap: int,
+    log: EventLog,
+    session_id: str,
+    turn_id: str,
+    emit: EventSink,
+    label_for,
+) -> BrainResult:
+    """Thought -> Action -> Observation over `brain`, capped at `round_cap`
+    tool rounds. Shared by the orchestrator's own turn and a nested brain
+    consult -- no duplicated ReAct logic between the two call sites."""
+    result = await brain.complete(messages, tools=tools)
+
+    round_count = 0
+    while result.tool_calls and round_count < round_cap:
+        round_count += 1
+        messages.append(
+            Message(role="assistant", content=result.text, tool_calls=result.tool_calls)
+        )
+        for call in result.tool_calls:
+            label = label_for(call.name)
+
+            await emit(ToolActivity(turn_id, "start", label))
+            log.append(
+                session_id,
+                turn_id,
+                "tool_call",
+                "loop",
+                {"name": call.name, "arguments": call.arguments},
+            )
+            try:
+                observation = await dispatch(call.name, call.arguments)
+            except Exception as exc:  # tool failure becomes an observation, not a crash
+                observation = f"error: {exc}"
+            log.append(
+                session_id,
+                turn_id,
+                "observation",
+                "tool",
+                {"name": call.name, "result": observation},
+            )
+            await emit(ToolActivity(turn_id, "end", label))
+
+            messages.append(
+                Message(role="tool", content=observation, tool_call_id=call.id)
+            )
+
+        result = await brain.complete(messages, tools=tools)
+
+    if result.tool_calls and not result.text:
+        result.text = "I wasn't able to finish that within the allowed tool rounds."
+    return result
 
 
 class Loop:
-    def __init__(self, router: Router, log: EventLog, config, registry: ToolRegistry = None) -> None:
+    def __init__(self, router: Router, log: EventLog, config, consult=None) -> None:
         self._router = router
         self._log = log
         self._config = config
-        self._registry = registry if registry is not None else ToolRegistry()
+        self._consult = consult
 
     async def run_turn(
         self,
@@ -46,20 +107,19 @@ class Loop:
         ]
         bounded_events = turn_events[-(max_history_turns * 2 + 1) :]
 
-        messages: list[Message] = []
+        messages: list[Message] = [
+            Message(role="system", content=self._config.persona.system_prompt)
+        ]
         for event in bounded_events:
             if event.type == "user_input":
                 messages.append(Message(role="user", content=event.payload["text"]))
             elif event.type == "final_answer":
                 messages.append(Message(role="assistant", content=event.payload["text"]))
 
-        tool_specs = self._registry.specs()
-        # Short-circuits before touching `config.agent` when there are no
-        # tools registered, so callers with a minimal config (no `agent`
-        # section) can still drive the pure-chat path unchanged.
-        tools_available = bool(tool_specs) and self._config.agent.tool_mode != "off"
+        consult_offered = self._consult is not None and self._router.brain_available()
+        tools = [self._consult.spec] if consult_offered else None
 
-        selection = self._router.select(tools_available=tools_available)
+        selection = self._router.select()
         self._log.append(
             session_id,
             turn_id,
@@ -72,72 +132,46 @@ class Loop:
             },
         )
 
-        tools = tool_specs if tools_available else None
-        result = await selection.brain.complete(messages, tools=tools)
+        # Stashed so `_consult_dispatch` (whose shape is fixed to
+        # `dispatch(name, args) -> str` by `run_react_rounds`) can forward
+        # this turn's session_id/turn_id/emit to the injected `BrainConsult`.
+        self._current_session_id = session_id
+        self._current_turn_id = turn_id
+        self._current_emit = emit
 
-        if tools_available:
-            try:
-                result = await asyncio.wait_for(
-                    self._run_tool_rounds(
-                        session_id, turn_id, messages, selection, tools, result, emit
-                    ),
-                    timeout=self._config.agent.turn_timeout_s,
-                )
-            except asyncio.TimeoutError:
-                result.text = result.text or "That took too long — here's what I have so far."
+        def label_for(name: str) -> str:
+            spec = next((s for s in (tools or []) if s.name == name), None)
+            return spec.label if spec else name
 
-        answer = await restyle(result.text or "", ctx=None)
+        try:
+            result = await asyncio.wait_for(
+                run_react_rounds(
+                    brain=selection.brain,
+                    messages=messages,
+                    tools=tools,
+                    dispatch=self._consult_dispatch,
+                    round_cap=self._config.agent.max_consult_rounds,
+                    log=self._log,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    emit=emit,
+                    label_for=label_for,
+                ),
+                timeout=self._config.agent.turn_timeout_s,
+            )
+            answer_text = result.text or ""
+        except asyncio.TimeoutError:
+            answer_text = "That took too long — here's what I have so far."
+
+        answer = await restyle(answer_text, ctx=None)
 
         self._log.append(session_id, turn_id, "final_answer", "brain", {"text": answer})
         return answer
 
-    async def _run_tool_rounds(
-        self,
-        session_id: str,
-        turn_id: str,
-        messages: list[Message],
-        selection,
-        tools,
-        result: BrainResult,
-        emit: EventSink,
-    ) -> BrainResult:
-        round_count = 0
-        while result.tool_calls and round_count < self._config.agent.max_tool_rounds:
-            round_count += 1
-            messages.append(
-                Message(role="assistant", content=result.text, tool_calls=result.tool_calls)
-            )
-            for call in result.tool_calls:
-                spec = next((s for s in self._registry.specs() if s.name == call.name), None)
-                label = spec.label if spec else call.name
-
-                await emit(ToolActivity(turn_id, "start", label))
-                self._log.append(
-                    session_id,
-                    turn_id,
-                    "tool_call",
-                    "loop",
-                    {"name": call.name, "arguments": call.arguments},
-                )
-                try:
-                    observation = await self._registry.dispatch(call.name, call.arguments)
-                except Exception as exc:  # tool failure becomes an observation, not a crash
-                    observation = f"error: {exc}"
-                self._log.append(
-                    session_id,
-                    turn_id,
-                    "observation",
-                    "tool",
-                    {"name": call.name, "result": observation},
-                )
-                await emit(ToolActivity(turn_id, "end", label))
-
-                messages.append(
-                    Message(role="tool", content=observation, tool_call_id=call.id)
-                )
-
-            result = await selection.brain.complete(messages, tools=tools)
-
-        if result.tool_calls and not result.text:
-            result.text = "I wasn't able to finish that within the allowed tool rounds."
-        return result
+    async def _consult_dispatch(self, name: str, args: dict) -> str:
+        return await self._consult(
+            self._current_session_id,
+            self._current_turn_id,
+            args["query"],
+            self._current_emit,
+        )
