@@ -64,6 +64,10 @@ class VeneerConfig(BaseModel):
 class ToolConfig(BaseModel):
     wikipedia_enabled: bool = True
     wikipedia_language: str = "en"
+    wikipedia_endpoint: str = "/w/rest.php/v1/search/page"
+    wikipedia_result_count: int = 3
+    wikipedia_max_chars: int = 1000
+    wikipedia_timeout: float = 10.0
 
 
 class AgentConfig(BaseModel):

@@ -40,6 +40,10 @@ veneer:
 tool:
   wikipedia_enabled: true    # register the Wikipedia lookup tool
   wikipedia_language: "en"
+  wikipedia_endpoint: "/w/rest.php/v1/search/page"    # Wikipedia REST search path
+  wikipedia_result_count: 3     # top-N results included in the summary
+  wikipedia_max_chars: 1000     # truncate the combined summary to this length
+  wikipedia_timeout: 10.0       # request timeout, seconds
 
 agent:
   max_tool_rounds: 3     # cap on tool-call rounds before the model must answer directly
