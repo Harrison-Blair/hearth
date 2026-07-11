@@ -2,7 +2,7 @@
 id: FTHR-011
 title: Logging infra plus dual-model logging and per-session transcript
 plumage: PLM-002
-status: egg
+status: hatching
 priority: P1
 depends_on: [FTHR-009]
 authored: 2026-07-11T02:52:26Z
