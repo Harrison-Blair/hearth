@@ -10,11 +10,12 @@ def test_version_command(capsys):
     assert captured.out.strip() == __version__
 
 
-async def test_run_daemon_wires_wikipedia_tool(monkeypatch, tmp_path):
+async def test_run_daemon_wires_wikipedia_tool_brain_side(monkeypatch, tmp_path):
     """_run_daemon must build a ToolRegistry (from settings.tool + its own
-    httpx client) and hand it to Loop -- otherwise `hearth run` never
-    actually exposes the wikipedia tool, even though Loop implements the
-    full ReAct round (FTHR-006)."""
+    httpx client) and hand it to a `BrainConsult` injected into `Loop` --
+    otherwise `hearth run` never actually exposes the wikipedia tool, even
+    though it's now only reachable via the nested consult_brain loop
+    (FTHR-009; wikipedia moved off the top-level orchestrator)."""
     captured = {}
 
     class _FakeVeneer:
@@ -30,5 +31,5 @@ async def test_run_daemon_wires_wikipedia_tool(monkeypatch, tmp_path):
     exit_code = await _run_daemon()
 
     assert exit_code == 0
-    registry = captured["loop"]._registry
+    registry = captured["loop"]._consult._tool_registry
     assert registry.specs() != []  # config.yaml's wikipedia_enabled: true
