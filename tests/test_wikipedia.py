@@ -52,6 +52,36 @@ async def test_wikipedia_search_parses():
     await client.aclose()
 
 
+async def test_wikipedia_search_builds_absolute_url_without_base_url():
+    """Prod wires the tool client with no base_url (app.py), so the tool must
+    build the absolute https URL itself. Regression: an empty httpx base_url is
+    truthy, which used to send a schemeless relative path and raise
+    UnsupportedProtocol on every call."""
+    seen_request = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_request["url"] = str(request.url)
+        seen_request["ua"] = request.headers.get("User-Agent", "")
+        return httpx.Response(200, json=CANNED_BODY)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await wikipedia_search(
+        "python",
+        client=client,
+        endpoint="/w/rest.php/v1/search/page",
+        result_count=3,
+        max_chars=1000,
+        lang="en",
+    )
+
+    assert "Python (programming language)" in result
+    assert seen_request["url"].startswith("https://en.wikipedia.org/w/rest.php/v1/search/page")
+    # Wikimedia 403s requests without a descriptive User-Agent.
+    assert "hearth" in seen_request["ua"].lower()
+
+    await client.aclose()
+
+
 async def test_wikipedia_search_respects_result_count():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=CANNED_BODY)

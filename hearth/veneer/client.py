@@ -31,7 +31,7 @@ def _print_message(message: dict) -> None:
     if message["type"] == "tool_activity":
         print(f"…{message['label']}")
     elif message["type"] == "answer":
-        print(message["text"])
+        print(f"[\033[31mhearth\033[0m] {message['text']}")
     elif message["type"] == "error":
         print(f"error: {message['message']}")
 
@@ -39,7 +39,11 @@ def _print_message(message: dict) -> None:
 async def run_client(host: str, port: int) -> None:
     uri = f"ws://{host}:{port}"
     async with websockets.connect(uri) as websocket:
-        for line in sys.stdin:
+        while True:
+            print("> ", end="", flush=True)
+            line = sys.stdin.readline()
+            if not line:  # EOF
+                break
             line = line.strip()
             if not line:
                 continue

@@ -1,6 +1,27 @@
 """Tests for hearth.app CLI entry point."""
 from hearth import __version__
-from hearth.app import _run_daemon, main
+from hearth.app import _build_llm_clients, _run_daemon, main
+
+
+async def test_build_llm_clients_wires_configured_timeout(llm_config):
+    """Every LLM httpx client must carry settings.llm.timeout, not httpx's
+    5s default -- otherwise any generation over 5s trips a read timeout and
+    surfaces as "backend unreachable" (the "only one turn" bug)."""
+
+    class _Settings:
+        class llm:
+            timeout = 37.0
+            backends = llm_config.backends
+
+    clients = _build_llm_clients(_Settings)
+    try:
+        assert clients  # at least one backend
+        for client in clients.values():
+            assert client.timeout.read == 37.0
+            assert client.timeout.connect == 37.0
+    finally:
+        for client in clients.values():
+            await client.aclose()
 
 
 def test_version_command(capsys):

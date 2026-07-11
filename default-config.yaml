@@ -89,5 +89,6 @@ logging:
   file_name: "hearth.log"           # rotating log file name, under `dir`
   max_bytes: 1000000                # rotate after the file reaches this size
   backup_count: 5                   # rotated files kept alongside the active one
+  console: true                     # also stream logs live to stdout (`hearth run`); file logging is unaffected
   transcript_enabled: true          # write a per-session human-readable transcript
   transcript_dir: "logs/transcripts"    # transcript files land here, one per session_id

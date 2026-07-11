@@ -8,6 +8,19 @@ import sys
 from hearth import __version__
 
 
+def _build_llm_clients(settings):
+    """One httpx client per LLM backend, each carrying the configured
+    `llm.timeout`. Without an explicit timeout httpx defaults to 5s, so any
+    generation over 5s trips a read timeout and surfaces as "backend
+    unreachable" -- keep this wired to `settings.llm.timeout`."""
+    import httpx
+
+    return {
+        name: httpx.AsyncClient(base_url=backend.base_url, timeout=settings.llm.timeout)
+        for name, backend in settings.llm.backends.items()
+    }
+
+
 async def _run_daemon() -> int:
     import httpx
     from dotenv import load_dotenv
@@ -38,10 +51,7 @@ async def _run_daemon() -> int:
     # One client per LLM backend: each backend has its own base_url, so a
     # single shared client would send every request to whichever backend
     # built it, regardless of which tier the router selects.
-    clients = {
-        name: httpx.AsyncClient(base_url=backend.base_url)
-        for name, backend in settings.llm.backends.items()
-    }
+    clients = _build_llm_clients(settings)
     # Separate client for tool calls (e.g. Wikipedia): the LLM clients'
     # base_urls point at chat backends, not a tool's own endpoint.
     tool_client = httpx.AsyncClient()

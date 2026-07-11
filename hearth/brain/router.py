@@ -33,7 +33,13 @@ class Router:
         backend_config = self._config.backends[backend_name]
         brain_cls = _BACKEND_CLASS_FOR_TIER[tier]
         client = self._clients[backend_name]
-        brain = brain_cls(backend_config, client=client, name=backend_name, tier=tier)
+        brain = brain_cls(
+            backend_config,
+            client=client,
+            name=backend_name,
+            tier=tier,
+            max_retries=self._config.max_retries,
+        )
         return Selection(brain=brain, tier=tier, backend_name=backend_name, reason="")
 
     def select(self, tier_override: str | None = None) -> Selection:

@@ -67,5 +67,6 @@ logging:
   file_name: hearth.log
   max_bytes: 1000000
   backup_count: 5
+  console: true
   transcript_enabled: true
   transcript_dir: logs/transcripts

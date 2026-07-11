@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import httpx
 
+from hearth import __version__
 from hearth.brain.base import ToolSpec
+
+# Wikimedia's REST API rejects requests without a descriptive User-Agent (403),
+# per https://foundation.wikimedia.org/wiki/Policy:User-Agent_policy.
+_USER_AGENT = f"hearth-personal-assistant/{__version__} (offline voice assistant)"
 
 SPEC = ToolSpec(
     name="wikipedia_search",
@@ -34,8 +39,17 @@ async def wikipedia_search(
 ) -> str:
     """Search Wikipedia and return a summary of the top `result_count` pages,
     truncated to `max_chars`."""
-    url = endpoint if client.base_url else f"https://{lang}.wikipedia.org{endpoint}"
-    response = await client.get(url, params={"q": query, "limit": result_count}, timeout=timeout)
+    # An unset httpx base_url is `URL('')` -- truthy but empty, so guard on the
+    # string form. Prod wires this client with no base_url, so the tool builds
+    # the absolute URL; tests inject a MockTransport base_url and pass `endpoint`
+    # relative to it.
+    url = endpoint if str(client.base_url) else f"https://{lang}.wikipedia.org{endpoint}"
+    response = await client.get(
+        url,
+        params={"q": query, "limit": result_count},
+        headers={"User-Agent": _USER_AGENT},
+        timeout=timeout,
+    )
     response.raise_for_status()
     body = response.json()
 

@@ -55,6 +55,46 @@ def test_setup_logging_is_idempotent(tmp_path):
     assert len(rotating) == 1
 
 
+def test_console_handler_streams_to_stdout(tmp_path):
+    """With `console: true` a StreamHandler on stdout is attached alongside the
+    file handler so `hearth run` shows logs live."""
+    import sys
+
+    from hearth.logging_setup import setup_logging
+
+    config = LoggingConfig(dir=str(tmp_path), file_name="hearth.log", console=True)
+    setup_logging(config)
+
+    root = logging.getLogger()
+    stream = [
+        h
+        for h in root.handlers
+        if isinstance(h, logging.StreamHandler)
+        and not isinstance(h, logging.FileHandler)
+        and getattr(h, "stream", None) is sys.stdout
+    ]
+    assert len(stream) == 1
+
+
+def test_console_handler_absent_when_disabled(tmp_path):
+    import sys
+
+    from hearth.logging_setup import setup_logging
+
+    config = LoggingConfig(dir=str(tmp_path), file_name="hearth.log", console=False)
+    setup_logging(config)
+
+    root = logging.getLogger()
+    stream = [
+        h
+        for h in root.handlers
+        if isinstance(h, logging.StreamHandler)
+        and not isinstance(h, logging.FileHandler)
+        and getattr(h, "stream", None) is sys.stdout
+    ]
+    assert stream == []
+
+
 def test_websockets_logger_routed_to_file(tmp_path):
     from hearth.logging_setup import setup_logging
 
@@ -66,6 +106,24 @@ def test_websockets_logger_routed_to_file(tmp_path):
     log_path = tmp_path / "hearth.log"
     assert log_path.exists()
     assert "keepalive ping timed out" in log_path.read_text()
+
+
+def test_websockets_logger_not_duplicated(tmp_path):
+    """The websockets logger has its own file handler AND propagates to root
+    (which also has one) -- without disabling propagation every websockets
+    line lands in the file twice. Propagation must be off."""
+    from hearth.logging_setup import setup_logging
+
+    config = LoggingConfig(dir=str(tmp_path), file_name="hearth.log")
+    setup_logging(config)
+
+    ws_logger = logging.getLogger("websockets")
+    assert ws_logger.propagate is False
+
+    ws_logger.warning("server listening on 127.0.0.1:8765")
+
+    log_text = (tmp_path / "hearth.log").read_text()
+    assert log_text.count("server listening on 127.0.0.1:8765") == 1
 
 
 # --- dual-model logging + transcript: drive a full consult-triggering turn ---

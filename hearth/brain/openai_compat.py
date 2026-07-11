@@ -50,9 +50,11 @@ class _OpenAICompatBackend:
         client: httpx.AsyncClient,
         name: str,
         tier: str,
+        max_retries: int = 0,
     ) -> None:
         self._config = config
         self._client = client
+        self._max_retries = max_retries
         self.name = name
         self.tier = tier
         self.capabilities = Capabilities(
@@ -78,13 +80,26 @@ class _OpenAICompatBackend:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        try:
-            response = await self._client.post(
-                "/chat/completions", json=payload, headers=headers
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise BrainError("backend unreachable", detail=str(exc)) from exc
+        # Retry only transient connection/network blips (up to max_retries).
+        # A timeout means the model is already too slow -- retrying just
+        # re-hits it and burns the turn budget -- and an HTTP status error
+        # won't change on retry, so neither is retried.
+        attempt = 0
+        while True:
+            try:
+                response = await self._client.post(
+                    "/chat/completions", json=payload, headers=headers
+                )
+                response.raise_for_status()
+                break
+            except httpx.TimeoutException as exc:
+                raise BrainError("backend unreachable", detail=str(exc)) from exc
+            except httpx.TransportError as exc:
+                if attempt >= self._max_retries:
+                    raise BrainError("backend unreachable", detail=str(exc)) from exc
+                attempt += 1
+            except httpx.HTTPError as exc:
+                raise BrainError("backend unreachable", detail=str(exc)) from exc
 
         body = response.json()
         try:

@@ -16,5 +16,6 @@ class RemoteBackend(_OpenAICompatBackend):
         client: httpx.AsyncClient,
         name: str = "remote",
         tier: str = "tool",
+        max_retries: int = 0,
     ) -> None:
-        super().__init__(config, client, name=name, tier=tier)
+        super().__init__(config, client, name=name, tier=tier, max_retries=max_retries)

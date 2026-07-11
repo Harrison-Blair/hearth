@@ -98,6 +98,7 @@ class LoggingConfig(BaseModel):
     file_name: str = "hearth.log"
     max_bytes: int = 1_000_000
     backup_count: int = 5
+    console: bool = True
     transcript_enabled: bool = True
     transcript_dir: str = "logs/transcripts"
 
