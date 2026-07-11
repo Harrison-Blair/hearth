@@ -2,7 +2,7 @@
 id: FTHR-009
 title: Persona-driven local orchestrator and consult_brain nested loop
 plumage: PLM-002
-status: hatching
+status: fledged
 priority: P1
 depends_on: [FTHR-008]
 authored: 2026-07-11T02:48:40Z
