@@ -161,12 +161,12 @@ class Loop:
         )
         self._log_model("orchestrator", selection)
 
-        # Stashed so `_consult_dispatch` (whose shape is fixed to
-        # `dispatch(name, args) -> str` by `run_react_rounds`) can forward
-        # this turn's session_id/turn_id/emit to the injected `BrainConsult`.
-        self._current_session_id = session_id
-        self._current_turn_id = turn_id
-        self._current_emit = emit
+        # Closure over this turn's session_id/turn_id/emit: `run_react_rounds`
+        # fixes dispatch to `(name, args) -> str`, and binding per-turn context
+        # here (not on self) keeps concurrent turns on the shared Loop from
+        # leaking consult events into each other's session/sink.
+        async def consult_dispatch(name: str, args: dict) -> str:
+            return await self._consult(session_id, turn_id, args["query"], emit)
 
         def label_for(name: str) -> str:
             spec = next((s for s in (tools or []) if s.name == name), None)
@@ -178,7 +178,7 @@ class Loop:
                     brain=selection.brain,
                     messages=messages,
                     tools=tools,
-                    dispatch=self._consult_dispatch,
+                    dispatch=consult_dispatch,
                     round_cap=self._config.agent.max_consult_rounds,
                     log=self._log,
                     session_id=session_id,
@@ -197,11 +197,3 @@ class Loop:
         self._log.append(session_id, turn_id, "final_answer", "brain", {"text": answer})
         self._append_transcript(session_id, f"answer: {answer}")
         return answer
-
-    async def _consult_dispatch(self, name: str, args: dict) -> str:
-        return await self._consult(
-            self._current_session_id,
-            self._current_turn_id,
-            args["query"],
-            self._current_emit,
-        )

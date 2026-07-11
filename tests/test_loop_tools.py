@@ -5,6 +5,7 @@ own observation. `wikipedia_search` is never offered at the top level.
 Hermetic via a host-keyed MockTransport (local vs remote)."""
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -12,8 +13,10 @@ import httpx
 from conftest import HostRouter
 from hearth.brain.base import ToolSpec
 from hearth.brain.router import Router
+from hearth.events import ToolActivity, null_sink
 from hearth.loop import Loop
 from hearth.memory.log import EventLog
+from hearth.tools.consult import SPEC as CONSULT_SPEC
 from hearth.tools.consult import BrainConsult
 
 SEARCH_SPEC = ToolSpec(
@@ -253,6 +256,73 @@ async def test_nested_tool_round_cap(tmp_path, two_tier_llm_config):
     tool_call_events = [e for e in log.read_session("s1") if e.type == "tool_call"]
     nested_calls = [e for e in tool_call_events if e.payload["name"] == "wikipedia_search"]
     assert len(nested_calls) == 2
+
+    for client in clients.values():
+        await client.aclose()
+
+class _RecordingConsult:
+    """Same call shape as `BrainConsult`; records the per-turn context it was
+    handed and emits through the sink it received."""
+
+    spec = CONSULT_SPEC
+
+    def __init__(self):
+        self.calls = []
+
+    async def __call__(self, session_id, turn_id, query, emit=null_sink):
+        self.calls.append((session_id, turn_id, query))
+        await emit(ToolActivity(turn_id, "start", "nested"))
+        await emit(ToolActivity(turn_id, "end", "nested"))
+        return f"findings for {query}"
+
+
+async def test_concurrent_turns_keep_their_own_consult_context(tmp_path, two_tier_llm_config):
+    """Two turns on the shared Loop, interleaved so turn B starts before turn
+    A's consult dispatch runs: each consult must still receive its own
+    session_id/turn_id/emit (the instance-stash version leaked A's consult
+    into B's session and sink)."""
+    b_started = asyncio.Event()
+
+    async def local_handler(request, n):
+        body = json.loads(request.content)
+        messages = body["messages"]
+        user = next(m["content"] for m in messages if m["role"] == "user")
+        if any(m.get("role") == "tool" for m in messages):
+            return httpx.Response(200, json=_chat_completion(f"answer for {user}"))
+        if user == "beta":
+            b_started.set()
+        else:
+            await b_started.wait()  # hold A's first round until B has started
+        return httpx.Response(200, json=_tool_call_completion("consult_brain", {"query": user}))
+
+    def remote_handler(request, n):
+        raise AssertionError("remote should not be called: consult is faked")
+
+    router, clients, _ = _build(two_tier_llm_config, local_handler, remote_handler)
+    log = EventLog(str(tmp_path / "events.db"))
+    consult = _RecordingConsult()
+    loop = Loop(router, log, _Config(), consult=consult)
+
+    sink_a, sink_b = [], []
+
+    async def emit_a(event):
+        sink_a.append(event)
+
+    async def emit_b(event):
+        sink_b.append(event)
+
+    answer_a, answer_b = await asyncio.gather(
+        loop.run_turn("sA", "tA", "alpha", emit=emit_a),
+        loop.run_turn("sB", "tB", "beta", emit=emit_b),
+    )
+
+    assert answer_a == "answer for alpha"
+    assert answer_b == "answer for beta"
+    assert sorted(consult.calls) == [("sA", "tA", "alpha"), ("sB", "tB", "beta")]
+    assert sink_a and all(e.turn_id == "tA" for e in sink_a)
+    assert sink_b and all(e.turn_id == "tB" for e in sink_b)
+    assert all(e.turn_id == "tA" for e in log.read_session("sA"))
+    assert all(e.turn_id == "tB" for e in log.read_session("sB"))
 
     for client in clients.values():
         await client.aclose()
