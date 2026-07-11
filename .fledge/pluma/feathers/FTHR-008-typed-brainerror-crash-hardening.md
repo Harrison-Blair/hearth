@@ -41,8 +41,8 @@ Written test-first in `tests/test_brain_errors.py` (new), using the existing `ht
 Implementation order: write `test_brain_errors.py` first, run against unmodified `openai_compat.py`, capture the failures (import error / uncaught exceptions, not `BrainError`), then implement `errors.py` + the three wraps until green.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation (capturing the uncaught `httpx`/`KeyError`/`json.JSONDecodeError` as the failure reason) and pass after.
-- [ ] AC-2: An HTTP 500 (or transport failure) from `complete()` raises `BrainError`, not `httpx.HTTPStatusError`; `.reason` is a curated "backend unreachable"-style string; `.detail` contains the status code/exception text.
-- [ ] AC-3: A malformed response body (missing `choices`) raises `BrainError` with an "unreadable response" reason, not a raw `KeyError`/`IndexError`.
-- [ ] AC-4: A tool-call with non-JSON `arguments` raises `BrainError`, not a raw `json.JSONDecodeError`.
-- [ ] AC-5: Neither `.reason` nor `.detail` on any raised `BrainError` ever contains the API key or `Authorization` header value; `tests/test_local_backend.py` and `tests/test_remote_backend.py` still pass unmodified (success path unchanged).
+- [x] AC-1: The tests listed above were observed failing before implementation (capturing the uncaught `httpx`/`KeyError`/`json.JSONDecodeError` as the failure reason) and pass after.
+- [x] AC-2: An HTTP 500 (or transport failure) from `complete()` raises `BrainError`, not `httpx.HTTPStatusError`; `.reason` is a curated "backend unreachable"-style string; `.detail` contains the status code/exception text.
+- [x] AC-3: A malformed response body (missing `choices`) raises `BrainError` with an "unreadable response" reason, not a raw `KeyError`/`IndexError`.
+- [x] AC-4: A tool-call with non-JSON `arguments` raises `BrainError`, not a raw `json.JSONDecodeError`.
+- [x] AC-5: Neither `.reason` nor `.detail` on any raised `BrainError` ever contains the API key or `Authorization` header value; `tests/test_local_backend.py` and `tests/test_remote_backend.py` still pass unmodified (success path unchanged).
