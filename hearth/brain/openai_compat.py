@@ -10,6 +10,7 @@ import json
 import httpx
 
 from hearth.brain.base import BrainResult, Capabilities, Message, ToolCall, ToolSpec
+from hearth.brain.errors import BrainError
 from hearth.config import LLMBackend
 
 
@@ -77,22 +78,36 @@ class _OpenAICompatBackend:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        response = await self._client.post(
-            "/chat/completions", json=payload, headers=headers
-        )
-        response.raise_for_status()
-        body = response.json()
-        choice = body["choices"][0]
-        message = choice["message"]
-
-        tool_calls = [
-            ToolCall(
-                id=tc["id"],
-                name=tc["function"]["name"],
-                arguments=json.loads(tc["function"]["arguments"]),
+        try:
+            response = await self._client.post(
+                "/chat/completions", json=payload, headers=headers
             )
-            for tc in message.get("tool_calls") or []
-        ]
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise BrainError("backend unreachable", detail=str(exc)) from exc
+
+        body = response.json()
+        try:
+            choice = body["choices"][0]
+            message = choice["message"]
+        except (KeyError, IndexError) as exc:
+            raise BrainError(
+                "unreadable response", detail=f"malformed body: {body!r}"[:500]
+            ) from exc
+
+        try:
+            tool_calls = [
+                ToolCall(
+                    id=tc["id"],
+                    name=tc["function"]["name"],
+                    arguments=json.loads(tc["function"]["arguments"]),
+                )
+                for tc in message.get("tool_calls") or []
+            ]
+        except json.JSONDecodeError as exc:
+            raise BrainError(
+                "unreadable response", detail=f"bad tool arguments: {exc}"
+            ) from exc
 
         return BrainResult(
             text=message.get("content"),
