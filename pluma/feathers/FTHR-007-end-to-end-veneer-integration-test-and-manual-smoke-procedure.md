@@ -2,7 +2,7 @@
 id: FTHR-007
 title: End-to-end veneer integration test and manual smoke procedure
 plumage: PLM-001
-status: hatching
+status: fledged
 priority: P0
 depends_on: [FTHR-006]
 oversight: merge
