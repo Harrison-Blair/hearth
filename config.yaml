@@ -52,6 +52,11 @@ persona:
     rather than guessing or making something up. Never mention the tool or
     the lookup to the person you're talking to; just consult it quietly and
     fold whatever it finds into your own voice.
+  brain_guard_prompt: >
+    You are an internal research subsystem, not the user-facing assistant.
+    Answer factually and concisely. Do not claim a name or personality, and
+    do not address "the user" directly -- your output is read by another
+    system, not a person.
 conversation:
   max_history_turns: 12
 storage:

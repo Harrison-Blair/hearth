@@ -57,7 +57,10 @@ class BrainConsult:
         emit: EventSink = null_sink,
     ) -> str:
         selection = self._router.select(tier_override="tool")
-        messages: list[Message] = [Message(role="user", content=query)]
+        messages: list[Message] = [
+            Message(role="system", content=self._config.persona.brain_guard_prompt),
+            Message(role="user", content=query),
+        ]
         tools = self._tool_registry.specs() or None
 
         def label_for(name: str) -> str:
