@@ -58,18 +58,25 @@ async def run_react_rounds(
                 "loop",
                 {"name": call.name, "arguments": call.arguments},
             )
+            # The `end` emit lives in a finally so a timeout cancelling this
+            # round (asyncio.wait_for at either call site) can't strand the
+            # client on a dangling `start`. CancelledError is a BaseException,
+            # so the inner `except Exception` doesn't swallow it: the pair is
+            # balanced, then the cancellation keeps propagating.
             try:
-                observation = await dispatch(call.name, call.arguments)
-            except Exception as exc:  # tool failure becomes an observation, not a crash
-                observation = f"error: {exc}"
-            log.append(
-                session_id,
-                turn_id,
-                "observation",
-                "tool",
-                {"name": call.name, "result": observation},
-            )
-            await emit(ToolActivity(turn_id, "end", label))
+                try:
+                    observation = await dispatch(call.name, call.arguments)
+                except Exception as exc:  # tool failure becomes an observation, not a crash
+                    observation = f"error: {exc}"
+                log.append(
+                    session_id,
+                    turn_id,
+                    "observation",
+                    "tool",
+                    {"name": call.name, "result": observation},
+                )
+            finally:
+                await emit(ToolActivity(turn_id, "end", label))
 
             messages.append(
                 Message(role="tool", content=observation, tool_call_id=call.id)

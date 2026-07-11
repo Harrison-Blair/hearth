@@ -148,3 +148,41 @@ async def test_consult_timeout_becomes_observation(tmp_path, two_tier_llm_config
     assert result
 
     await client.aclose()
+
+async def test_consult_timeout_emits_balanced_tool_activity(tmp_path, two_tier_llm_config):
+    """A consult timeout cancelling a nested tool dispatch must still emit the
+    matching `end` for the nested tool's `start`."""
+
+    class _BlockingRegistry:
+        def specs(self):
+            return [WIKI_SPEC]
+
+        async def dispatch(self, name, args):
+            await asyncio.sleep(60)
+            return "never returned"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=_tool_call_completion("wikipedia_search", {"query": "x"})
+        )
+
+    router, client = _make_router(handler, two_tier_llm_config)
+    log = EventLog(str(tmp_path / "events.db"))
+    consult = BrainConsult(
+        router,
+        _BlockingRegistry(),
+        log,
+        _Config(agent=AgentConfig(max_tool_rounds=3, consult_timeout_s=0.05)),
+    )
+
+    emitted = []
+
+    async def emit(event):
+        emitted.append(event)
+
+    result = await consult("s1", "t1", "who was Ada Lovelace", emit=emit)
+
+    assert "too long" in result
+    assert [(e.phase, e.label) for e in emitted] == [("start", "search"), ("end", "search")]
+
+    await client.aclose()

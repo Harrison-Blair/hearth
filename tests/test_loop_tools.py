@@ -326,3 +326,40 @@ async def test_concurrent_turns_keep_their_own_consult_context(tmp_path, two_tie
 
     for client in clients.values():
         await client.aclose()
+
+class _BlockingConsult:
+    spec = CONSULT_SPEC
+
+    async def __call__(self, session_id, turn_id, query, emit=null_sink):
+        await asyncio.sleep(60)
+        return "never returned"
+
+
+async def test_turn_timeout_emits_balanced_tool_activity(tmp_path, two_tier_llm_config):
+    """A turn timeout cancelling a consult mid-dispatch must still emit the
+    matching `end` so the client never shows a dangling `start`."""
+
+    def local_handler(request, n):
+        return httpx.Response(200, json=_tool_call_completion("consult_brain", {"query": "x"}))
+
+    def remote_handler(request, n):
+        raise AssertionError("remote should not be called: consult is faked")
+
+    router, clients, _ = _build(two_tier_llm_config, local_handler, remote_handler)
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = Loop(
+        router, log, _Config(agent=_Agent(turn_timeout_s=0.05)), consult=_BlockingConsult()
+    )
+
+    emitted = []
+
+    async def emit(event):
+        emitted.append(event)
+
+    answer = await loop.run_turn("s1", "t1", "look it up", emit=emit)
+
+    assert "too long" in answer
+    assert [(e.phase, e.label) for e in emitted] == [("start", "consult"), ("end", "consult")]
+
+    for client in clients.values():
+        await client.aclose()
