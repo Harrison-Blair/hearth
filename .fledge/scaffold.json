@@ -1,0 +1,125 @@
+{
+  "fledgeVersion": "0.3.0",
+  "agents": [
+    "claude"
+  ],
+  "files": {
+    ".claude/agents/fledge-brooder.md": {
+      "policy": "default",
+      "sha256": "78df71a98443f981799e110b8151f4a1ce0421954f9a2cf765a1f98f645d4ef2"
+    },
+    ".claude/agents/fledge-context-scout.md": {
+      "policy": "default",
+      "sha256": "209d3f245422797b1bf89f1d7747223eca750f423028f45f9222ad97e2096b57"
+    },
+    ".claude/agents/fledge-forager.md": {
+      "policy": "default",
+      "sha256": "585662ae6bcc32207b9b62913a9ed6fae824cf830df773a09c924765b775b73d"
+    },
+    ".claude/agents/fledge-incubator.md": {
+      "policy": "default",
+      "sha256": "2275efcb46422ce0463aa1e412c465dbf9cf68c10710d00f50f42647ae3c6ecc"
+    },
+    ".claude/agents/fledge-skua.md": {
+      "policy": "default",
+      "sha256": "080a0f849be6addc517b9473c873cde825769e9fe10077d0b5dc03d59c684234"
+    },
+    ".claude/fledge-adapter.md": {
+      "policy": "primitive_map",
+      "sha256": "2e7eafc1dcd83578522c27ab35e6792d2e9a017c99522b7b402bd613de2d98d8"
+    },
+    ".claude/settings.json": {
+      "policy": "overwrite",
+      "sha256": "4198f5b412fb0f6810020099b1cacd939032bc4ee307ae699df8094311a9b35c"
+    },
+    ".claude/settings.local.json": {
+      "policy": "generate",
+      "sha256": "957b8dfb49a596cc308630a89a9803eec58a6d6ae6ade325ef9a483a4aa1aa12"
+    },
+    ".claude/skills/fledge-interrogate": {
+      "policy": "symlink",
+      "target": "../../.fledge/skills/fledge-interrogate"
+    },
+    ".claude/skills/fledge-orchestrate": {
+      "policy": "symlink",
+      "target": "../../.fledge/skills/fledge-orchestrate"
+    },
+    ".claude/team-loop.md": {
+      "policy": "overwrite",
+      "sha256": "25784671391f74e485242323df7085dc8ad50deb2910188123e03a6141991d75"
+    },
+    ".fledge/broods/.gitkeep": {
+      "policy": "default",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    ".fledge/nest/raw/.gitkeep": {
+      "policy": "default",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    ".fledge/skills/fledge-interrogate/SKILL.md": {
+      "policy": "core",
+      "sha256": "b09529a6b2119847d879ad1284247cf258862c030b2fb6193cfd50b7ca59c690"
+    },
+    ".fledge/skills/fledge-orchestrate/SKILL.md": {
+      "policy": "core",
+      "sha256": "a0c3727a0a29b88f3c719ee34fc21a1acbbdc101d33ec89e0aebbd6e554771ae"
+    },
+    ".fledge/skills/fledge-orchestrate/foraging.md": {
+      "policy": "core",
+      "sha256": "9ce14be4086b6902396cfa1dcaa4a9f25d09754924d6229c3c9be537a0d5ade7"
+    },
+    ".fledge/skills/fledge-orchestrate/implementation.md": {
+      "policy": "core",
+      "sha256": "5317266e360ec6202a6bf76dbb685fbc04b8f7924774818e98a11dc191ddeadc"
+    },
+    ".fledge/skills/fledge-orchestrate/planning.md": {
+      "policy": "core",
+      "sha256": "2448b1707522b8d2e7c64c85f108a1d87f95c41a4f3193621a1d80fd4c371338"
+    },
+    ".fledge/skills/fledge-orchestrate/templates/context-doc.md": {
+      "policy": "core",
+      "sha256": "a67459acd7fea3df03001b1e5e013b55775ae7ebad9c5a4d94c9d7f5a5e789ac"
+    },
+    ".fledge/skills/fledge-orchestrate/templates/feather.md": {
+      "policy": "core",
+      "sha256": "91d2a3ad83e0d0552c4701a27949e2445fe553b66395eabe0c127a328ddae2f4"
+    },
+    ".fledge/skills/fledge-orchestrate/templates/plumage.md": {
+      "policy": "core",
+      "sha256": "69c09fa1fa8d0cfcbbe7381a197b61a959e57a788d4b6ef227b17686c9c0ab38"
+    },
+    ".fledge/skills/fledge-orchestrate/templates/scout-report.md": {
+      "policy": "core",
+      "sha256": "2cded5914b5679dd6b380a088fe4659f84d9220ad8d0ef81ebf5ceb75f41e9f6"
+    },
+    ".fledge/skills/fledge-orchestrate/worker-protocols.md": {
+      "policy": "core",
+      "sha256": "4f300d80b8ca70bda8f68411af1c2523f610da911e9835c360a64f7745fc84c2"
+    },
+    ".fledgeignore": {
+      "policy": "default",
+      "sha256": "0307a7e722c441be9d1588d2f329fd2b6a2f864a570dda0c5fbf9c94f6c3614f"
+    },
+    ".gitignore": {
+      "policy": "append",
+      "lines": [
+        ".fledge/nest/raw/",
+        ".fledge/broods/"
+      ]
+    },
+    "CLAUDE.md": {
+      "policy": "append",
+      "lines": [
+        "\u003e fledge: load and follow .fledge/skills/fledge-orchestrate/SKILL.md — primitive map at .claude/fledge-adapter.md"
+      ]
+    },
+    "pluma/feathers/.gitkeep": {
+      "policy": "default",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "pluma/plumage/.gitkeep": {
+      "policy": "default",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}
