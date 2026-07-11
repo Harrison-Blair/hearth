@@ -10,8 +10,8 @@ llm:
       cost_tier: free
       enabled: true
     remote:
-      base_url: ''
-      model: openrouter/free
+      base_url: https://openrouter.ai/api/v1
+      model: tencent/hy3:free # nvidia/nemotron-3-super-120b-a12b:free
       api_key_env: HEARTH_LLM__OPENROUTER_API_KEY
       supports_tools: true
       supports_streaming: true

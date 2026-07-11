@@ -155,17 +155,19 @@ def _wiki_client() -> httpx.AsyncClient:
 async def _assemble(llm_config: LLMConfig, tmp_path, llm_handler):
     """Build the real Veneer/Loop/Router/ToolRegistry/EventLog stack, start
     `Veneer.serve` in the background, and return (veneer_task, port, log,
-    llm_client, wiki_client) for the test to drive and tear down."""
-    # Mirrors `hearth.app`'s daemon wiring: one client bound to the default
-    # tier's base_url, shared by `Router` across tiers.
-    default_backend = llm_config.resolve_tier("default")
-    llm_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(llm_handler), base_url=default_backend.base_url
-    )
+    llm_clients, wiki_client) for the test to drive and tear down."""
+    # Mirrors `hearth.app`'s daemon wiring: one client per backend, each
+    # bound to that backend's own base_url.
+    llm_clients = {
+        name: httpx.AsyncClient(
+            transport=httpx.MockTransport(llm_handler), base_url=backend.base_url
+        )
+        for name, backend in llm_config.backends.items()
+    }
     wiki_client = _wiki_client()
 
     log = EventLog(str(tmp_path / "events.db"))
-    router = Router(llm_config, client=llm_client)
+    router = Router(llm_config, clients=llm_clients)
     registry = ToolRegistry(tool_config=_tool_config(), client=wiki_client)
     config = _Config(llm_config, _tool_config())
     loop = Loop(router, log, config, registry=registry)
@@ -173,7 +175,7 @@ async def _assemble(llm_config: LLMConfig, tmp_path, llm_handler):
 
     server = await websockets.serve(veneer._handle_connection, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    return server, port, log, llm_client, wiki_client
+    return server, port, log, llm_clients, wiki_client
 
 
 def _event_types(log: EventLog, session_id: str) -> list[str]:
@@ -199,7 +201,7 @@ async def test_e2e_multiturn_chat_and_tool_use(tmp_path):
             200, json=_chat_completion("Ada Lovelace was a mathematician.")
         )
 
-    server, port, log, llm_client, wiki_client = await _assemble(
+    server, port, log, llm_clients, wiki_client = await _assemble(
         _local_only_llm_config(), tmp_path, llm_handler
     )
 
@@ -210,7 +212,8 @@ async def test_e2e_multiturn_chat_and_tool_use(tmp_path):
     finally:
         server.close()
         await server.wait_closed()
-        await llm_client.aclose()
+        for client in llm_clients.values():
+            await client.aclose()
         await wiki_client.aclose()
 
     # --- Turn 1: plain chat, no tool activity on the wire.
@@ -292,7 +295,7 @@ async def test_e2e_remote_tier_tool_turn_same_shape(tmp_path):
             )
         return httpx.Response(200, json=_chat_completion("Ada Lovelace was a mathematician."))
 
-    server, port, log, llm_client, wiki_client = await _assemble(
+    server, port, log, llm_clients, wiki_client = await _assemble(
         _local_and_remote_llm_config(remote_enabled=True), tmp_path, llm_handler
     )
 
@@ -302,7 +305,8 @@ async def test_e2e_remote_tier_tool_turn_same_shape(tmp_path):
     finally:
         server.close()
         await server.wait_closed()
-        await llm_client.aclose()
+        for client in llm_clients.values():
+            await client.aclose()
         await wiki_client.aclose()
 
     assert [m["type"] for m in messages] == ["tool_activity", "tool_activity", "answer", "done"]
@@ -340,7 +344,7 @@ async def test_e2e_remote_disabled_stays_local(tmp_path):
             )
         return httpx.Response(200, json=_chat_completion("Ada Lovelace was a mathematician."))
 
-    server, port, log, llm_client, wiki_client = await _assemble(
+    server, port, log, llm_clients, wiki_client = await _assemble(
         _local_and_remote_llm_config(remote_enabled=False), tmp_path, llm_handler
     )
 
@@ -350,7 +354,8 @@ async def test_e2e_remote_disabled_stays_local(tmp_path):
     finally:
         server.close()
         await server.wait_closed()
-        await llm_client.aclose()
+        for client in llm_clients.values():
+            await client.aclose()
         await wiki_client.aclose()
 
     assert [m["type"] for m in messages] == ["tool_activity", "tool_activity", "answer", "done"]

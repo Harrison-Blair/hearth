@@ -39,39 +39,46 @@ def make_config(remote_enabled: bool = True) -> LLMConfig:
 
 
 @pytest.fixture
-def client() -> httpx.AsyncClient:
+def clients() -> dict[str, httpx.AsyncClient]:
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("no HTTP request expected during routing")
 
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return {
+        "local": httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        "remote": httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    }
 
 
-async def test_tool_turn_routes_to_tool_tier(client):
-    router = Router(make_config(remote_enabled=True), client=client)
+async def test_tool_turn_routes_to_tool_tier(clients):
+    router = Router(make_config(remote_enabled=True), clients=clients)
     selection = router.select(tools_available=True)
     assert selection.tier == "tool"
     assert selection.backend_name == "remote"
     assert selection.reason == "tool-turn→tool tier"
+    assert selection.brain._client is clients["remote"]
 
 
-async def test_chat_turn_routes_to_default(client):
-    router = Router(make_config(remote_enabled=True), client=client)
+async def test_chat_turn_routes_to_default(clients):
+    router = Router(make_config(remote_enabled=True), clients=clients)
     selection = router.select(tools_available=False)
     assert selection.tier == "default"
     assert selection.backend_name == "local"
     assert selection.reason == "chat-turn→default tier"
+    assert selection.brain._client is clients["local"]
 
 
-async def test_remote_disabled_falls_back_to_local(client):
-    router = Router(make_config(remote_enabled=False), client=client)
+async def test_remote_disabled_falls_back_to_local(clients):
+    router = Router(make_config(remote_enabled=False), clients=clients)
     selection = router.select(tools_available=True)
     assert selection.backend_name == "local"
     assert selection.reason == "tool tier disabled; local fallback"
+    assert selection.brain._client is clients["local"]
 
 
-async def test_tier_override_forces_tier(client):
-    router = Router(make_config(remote_enabled=True), client=client)
+async def test_tier_override_forces_tier(clients):
+    router = Router(make_config(remote_enabled=True), clients=clients)
     selection = router.select(tools_available=False, tier_override="tool")
     assert selection.tier == "tool"
     assert selection.backend_name == "remote"
     assert selection.reason == "override:tool"
+    assert selection.brain._client is clients["remote"]

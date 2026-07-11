@@ -24,15 +24,16 @@ class Selection:
 
 
 class Router:
-    def __init__(self, config: LLMConfig, client: httpx.AsyncClient) -> None:
+    def __init__(self, config: LLMConfig, clients: dict[str, httpx.AsyncClient]) -> None:
         self._config = config
-        self._client = client
+        self._clients = clients
 
     def _build(self, tier: str) -> Selection:
         backend_name = getattr(self._config.tiers, tier)
         backend_config = self._config.backends[backend_name]
         brain_cls = _BACKEND_CLASS_FOR_TIER[tier]
-        brain = brain_cls(backend_config, client=self._client, name=backend_name, tier=tier)
+        client = self._clients[backend_name]
+        brain = brain_cls(backend_config, client=client, name=backend_name, tier=tier)
         return Selection(brain=brain, tier=tier, backend_name=backend_name, reason="")
 
     def select(

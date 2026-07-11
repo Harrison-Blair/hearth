@@ -10,6 +10,7 @@ from hearth import __version__
 
 async def _run_daemon() -> int:
     import httpx
+    from dotenv import load_dotenv
 
     from hearth.brain.router import Router
     from hearth.config import Settings
@@ -18,21 +19,33 @@ async def _run_daemon() -> int:
     from hearth.tools.registry import ToolRegistry
     from hearth.veneer.server import Veneer
 
+    # Load .env into os.environ so backends' resolve_api_key() (a plain
+    # os.environ lookup by api_key_env name) can see the secrets. Per FTHR-015,
+    # API keys live only in .env; pydantic-settings reads .env into the Settings
+    # model but does not export it to the process environment.
+    load_dotenv()
+
     settings = Settings()
-    default_backend = settings.llm.resolve_tier("default")
-    client = httpx.AsyncClient(base_url=default_backend.base_url)
-    # Separate client for tool calls (e.g. Wikipedia): the LLM client's
-    # base_url points at the chat backend, not a tool's own endpoint.
+    # One client per LLM backend: each backend has its own base_url, so a
+    # single shared client would send every request to whichever backend
+    # built it, regardless of which tier the router selects.
+    clients = {
+        name: httpx.AsyncClient(base_url=backend.base_url)
+        for name, backend in settings.llm.backends.items()
+    }
+    # Separate client for tool calls (e.g. Wikipedia): the LLM clients'
+    # base_urls point at chat backends, not a tool's own endpoint.
     tool_client = httpx.AsyncClient()
     try:
-        router = Router(settings.llm, client=client)
+        router = Router(settings.llm, clients=clients)
         log = EventLog(settings.storage.db_path)
         registry = ToolRegistry(tool_config=settings.tool, client=tool_client)
         loop = Loop(router, log, settings, registry=registry)
         veneer = Veneer(loop, log, settings)
         await veneer.serve(settings.veneer.host, settings.veneer.port)
     finally:
-        await client.aclose()
+        for client in clients.values():
+            await client.aclose()
         await tool_client.aclose()
     return 0
 

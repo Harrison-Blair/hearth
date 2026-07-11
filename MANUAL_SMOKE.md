@@ -17,9 +17,12 @@ source .venv/bin/activate
 
 1. Install and start Ollama, then pull the configured model:
    ```bash
-   ollama serve &
+   curl -s http://127.0.0.1:11434 >/dev/null || ollama serve &
    ollama pull qwen3:14b
    ```
+   (If Ollama is already running as a system/user service, the `curl` check
+   skips the manual `serve` — running a second instance fails with
+   `bind: address already in use`.)
 2. Edit `config.yaml` so the tool tier can't reach out anywhere: set
    `llm.tiers.tool: local` (or `llm.backends.remote.enabled: false` — either
    forces the tool-use turn to resolve to the local backend).

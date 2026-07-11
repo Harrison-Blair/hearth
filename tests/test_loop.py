@@ -25,7 +25,7 @@ def _make_router(handler, llm_config):
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(handler), base_url=backend_config.base_url
     )
-    return Router(llm_config, client=client), client
+    return Router(llm_config, clients={"local": client}), client
 
 
 async def test_loop_single_turn_logs_and_answers(tmp_path, llm_config, canned_completion):

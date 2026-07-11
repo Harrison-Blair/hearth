@@ -80,7 +80,7 @@ def _tool_call_completion(name: str, arguments: dict, call_id: str = "call_1") -
 def _make_router(handler, llm_config):
     backend_config = llm_config.backends["local"]
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url=backend_config.base_url)
-    return Router(llm_config, client=client), client
+    return Router(llm_config, clients={"local": client}), client
 
 
 async def test_loop_tool_round_incorporates_observation(tmp_path, llm_config, canned_completion):
