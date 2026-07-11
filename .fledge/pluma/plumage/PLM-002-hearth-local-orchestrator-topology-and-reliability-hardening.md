@@ -1,7 +1,7 @@
 ---
 id: PLM-002
 title: "hearth: local-orchestrator topology and reliability hardening"
-status: hatched
+status: fledged
 priority: P1
 authored: 2026-07-11T02:43:21Z
 agent: fledge-orchestrate/planning
@@ -39,14 +39,14 @@ Today `Router.select` routes the whole turn to the **remote** tier whenever tool
 10. FC-10: A client disconnect mid-turn (`websockets.ConnectionClosed`) is handled cleanly; the server continues serving other connections.
 
 ## Acceptance Criteria
-- [ ] AC-1: Asking "who are you" produces a Calcifer-voiced answer with no ChatGPT/OpenAI identity leak, and the routing decision shows the turn was served local-only (structural proof, not a prompt patch).
-- [ ] AC-2: Asking a question requiring external data (e.g. "search wikipedia for flowers") completes without crashing, invoking `consult_brain` then `wikipedia_search` inside the nested loop, and returns a persona-voiced answer incorporating the retrieved facts.
-- [ ] AC-3: A forced remote-backend failure during a consult degrades gracefully — the orchestrator still produces a persona answer acknowledging it couldn't reach external data — rather than crashing the turn.
-- [ ] AC-4: A killed/unreachable local backend surfaces the curated `BrainError` reason to the veneer client, not "the turn failed".
-- [ ] AC-5: With the remote brain disabled, every turn is served local-only, `consult_brain` is never offered, and no turn crashes (PLM-001 fallback preserved).
-- [ ] AC-6: `logs/hearth.log` (rotating) and, when enabled, `logs/transcripts/<session>.txt` both show records/lines for the orchestrator's local model and any consultation's remote model, per turn.
-- [ ] AC-7: A client Ctrl-C mid-turn produces a clean `ConnectionClosed` log entry; the server keeps serving other connections afterward.
-- [ ] AC-8: All 5 feathers (FTHR-008..012) are fledged with every AC box checked.
+- [x] AC-1: Asking "who are you" produces a Calcifer-voiced answer with no ChatGPT/OpenAI identity leak, and the routing decision shows the turn was served local-only (structural proof, not a prompt patch).
+- [x] AC-2: Asking a question requiring external data (e.g. "search wikipedia for flowers") completes without crashing, invoking `consult_brain` then `wikipedia_search` inside the nested loop, and returns a persona-voiced answer incorporating the retrieved facts.
+- [x] AC-3: A forced remote-backend failure during a consult degrades gracefully — the orchestrator still produces a persona answer acknowledging it couldn't reach external data — rather than crashing the turn.
+- [x] AC-4: A killed/unreachable local backend surfaces the curated `BrainError` reason to the veneer client, not "the turn failed".
+- [x] AC-5: With the remote brain disabled, every turn is served local-only, `consult_brain` is never offered, and no turn crashes (PLM-001 fallback preserved).
+- [x] AC-6: `logs/hearth.log` (rotating) and, when enabled, `logs/transcripts/<session>.txt` both show records/lines for the orchestrator's local model and any consultation's remote model, per turn.
+- [x] AC-7: A client Ctrl-C mid-turn produces a clean `ConnectionClosed` log entry; the server keeps serving other connections afterward.
+- [x] AC-8: All 5 feathers (FTHR-008..012) are fledged with every AC box checked.
 
 ## Out of Scope
 - `persona.restyle` remains a no-op — theming falls out for free from the local model's persona-conditioned answer; a dedicated restyle pass is not built.
