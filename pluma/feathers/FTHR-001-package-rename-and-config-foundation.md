@@ -39,7 +39,7 @@ Written test-first (write → observe FAIL for the expected reason → implement
 - `test_version_command` — `main(["--version"])` prints the version and exits 0; pins the entry point for CI. (AC-2)
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: The `hearth` package exists and `hearth --version` succeeds; `pyproject.toml`, `Makefile`, and `.github/workflows/release.yml` reference `hearth` not `assistant` (satisfies PLM-001 FC-1, AC-7).
-- [ ] AC-3: The config schema loads via `pydantic-settings` with YAML → `HEARTH_*` env → `.env` precedence, exposing the Phase 0 sections and the `local`/`remote` backends with their capability flags and tier roles (satisfies PLM-001 FC-2, FC-3, FC-4).
-- [ ] AC-4: No secret field appears in the YAML-facing schema; the OpenRouter key resolves only from `HEARTH_LLM__OPENROUTER_API_KEY` (satisfies PLM-001 FC-2).
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: The `hearth` package exists and `hearth --version` succeeds; `pyproject.toml`, `Makefile`, and `.github/workflows/release.yml` reference `hearth` not `assistant` (satisfies PLM-001 FC-1, AC-7).
+- [x] AC-3: The config schema loads via `pydantic-settings` with YAML → `HEARTH_*` env → `.env` precedence, exposing the Phase 0 sections and the `local`/`remote` backends with their capability flags and tier roles (satisfies PLM-001 FC-2, FC-3, FC-4).
+- [x] AC-4: No secret field appears in the YAML-facing schema; the OpenRouter key resolves only from `HEARTH_LLM__OPENROUTER_API_KEY` (satisfies PLM-001 FC-2).
