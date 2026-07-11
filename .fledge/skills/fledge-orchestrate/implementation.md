@@ -1,6 +1,6 @@
 # Implementation phase
 
-Executes ready feathers from `pluma/feathers/`. This phase runs in the main session — you are the **orchestrator**: you dispatch, gate, merge, and triage. How much you delegate depends on which primitives your adapter provides (see §primitives).
+Executes ready feathers from `.fledge/pluma/feathers/`. This phase runs in the main session — you are the **orchestrator**: you dispatch, gate, merge, and triage. How much you delegate depends on which primitives your adapter provides (see §primitives).
 
 Your fledge role name is `fledge-orchestrator` — fledge prefix, no species postfix. On a team harness, though, teammates address you by your **harness-assigned** name, which may differ (e.g. on Claude Code the lead is `team-lead`); your adapter's piping file gives it. Use that harness name whenever you tell a worker how to reach you, and use it consistently. (In solo tiers you address the user directly; there are no teammates.)
 

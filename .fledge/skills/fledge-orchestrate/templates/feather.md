@@ -2,7 +2,7 @@
 
 This file documents the feather (task) format. Files are created with `fledge new feather` (the canonical skeleton is embedded in the binary); never instantiate this template by hand — the CLI allocates the ID, links the plumage, computes the initial pipping/egg hint, and stamps the frontmatter.
 
-Feathers live at `pluma/feathers/FTHR-###-<kebab-name>.md`. IDs are zero-padded and next-sequential within the folder. Every feather links to exactly one plumage. `depends_on` forms blocking relationships: a feather is `pipping` only when every feather in `depends_on` is `fledged`.
+Feathers live at `.fledge/pluma/feathers/FTHR-###-<kebab-name>.md`. IDs are zero-padded and next-sequential within the folder. Every feather links to exactly one plumage. `depends_on` forms blocking relationships: a feather is `pipping` only when every feather in `depends_on` is `fledged`.
 
 ```markdown
 ---

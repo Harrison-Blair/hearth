@@ -86,7 +86,7 @@ Two hard prohibitions:
 
 ### Reviewing a feather
 
-A review request from a brooder gives: feather ID, the feather spec path (`pluma/feathers/FTHR-###-<kebab>.md`), worktree path, branch, the evidence-file path (`.fledge/molt/FTHR-###.md` in the worktree), change summary, test commands, and an AC-by-AC self-check pointing at the evidence sections. If any of these are missing, return the request without reviewing. The spec path is needed because the checks below read the spec's Tests, Approach, acceptance criteria, and Affected Modules sections.
+A review request from a brooder gives: feather ID, the feather spec path (`.fledge/pluma/feathers/FTHR-###-<kebab>.md`), worktree path, branch, the evidence-file path (`.fledge/molt/FTHR-###.md` in the worktree), change summary, test commands, and an AC-by-AC self-check pointing at the evidence sections. If any of these are missing, return the request without reviewing. The spec path is needed because the checks below read the spec's Tests, Approach, acceptance criteria, and Affected Modules sections.
 
 Run every check inside the brooder's worktree:
 

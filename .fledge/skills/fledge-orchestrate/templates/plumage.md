@@ -2,7 +2,7 @@
 
 This file documents the plumage (requirement) format. Files are created with `fledge new plumage` (the canonical skeleton is embedded in the binary); never instantiate this template by hand — the CLI allocates the ID, names the file, and stamps the frontmatter.
 
-Plumages live at `pluma/plumage/PLM-###-<kebab-name>.md`. IDs are zero-padded and next-sequential within the folder. Plumages capture the WHAT and WHY at feature level — never implementation details (no file paths, no function names, no technology choices unless they are themselves the plumage).
+Plumages live at `.fledge/pluma/plumage/PLM-###-<kebab-name>.md`. IDs are zero-padded and next-sequential within the folder. Plumages capture the WHAT and WHY at feature level — never implementation details (no file paths, no function names, no technology choices unless they are themselves the plumage).
 
 ```markdown
 ---

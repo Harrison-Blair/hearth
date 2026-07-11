@@ -1,5 +1,5 @@
 {
-  "fledgeVersion": "0.3.4",
+  "fledgeVersion": "0.4.0",
   "agents": [
     "claude"
   ],
@@ -56,13 +56,21 @@
       "policy": "default",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
+    ".fledge/pluma/feathers/.gitkeep": {
+      "policy": "default",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    ".fledge/pluma/plumage/.gitkeep": {
+      "policy": "default",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
     ".fledge/skills/fledge-interrogate/SKILL.md": {
       "policy": "core",
       "sha256": "b09529a6b2119847d879ad1284247cf258862c030b2fb6193cfd50b7ca59c690"
     },
     ".fledge/skills/fledge-orchestrate/SKILL.md": {
       "policy": "core",
-      "sha256": "a0c3727a0a29b88f3c719ee34fc21a1acbbdc101d33ec89e0aebbd6e554771ae"
+      "sha256": "971c224dbd4fe9f326e0b19d9a412699b0e3fad0a1301834f2d51ad2a5894a7e"
     },
     ".fledge/skills/fledge-orchestrate/foraging.md": {
       "policy": "core",
@@ -70,7 +78,7 @@
     },
     ".fledge/skills/fledge-orchestrate/implementation.md": {
       "policy": "core",
-      "sha256": "0840e36b6239bbeaa786a8241a8ae265b63bea2240b5b9381c8734dfdc993618"
+      "sha256": "162190f8c2e540050e6ddcbfb7aa84ea1973c8810add4978772106b096a74841"
     },
     ".fledge/skills/fledge-orchestrate/planning.md": {
       "policy": "core",
@@ -82,11 +90,11 @@
     },
     ".fledge/skills/fledge-orchestrate/templates/feather.md": {
       "policy": "core",
-      "sha256": "91d2a3ad83e0d0552c4701a27949e2445fe553b66395eabe0c127a328ddae2f4"
+      "sha256": "a4d830082fd984ec0c516d243440950fd96e5f922c02f6d44da4913d7db763c7"
     },
     ".fledge/skills/fledge-orchestrate/templates/plumage.md": {
       "policy": "core",
-      "sha256": "69c09fa1fa8d0cfcbbe7381a197b61a959e57a788d4b6ef227b17686c9c0ab38"
+      "sha256": "bb85ca9ebca7a3d7e75f0512a1a8c1d3a802de71650ff9587288d54648ad8d95"
     },
     ".fledge/skills/fledge-orchestrate/templates/scout-report.md": {
       "policy": "core",
@@ -94,7 +102,7 @@
     },
     ".fledge/skills/fledge-orchestrate/worker-protocols.md": {
       "policy": "core",
-      "sha256": "9989e96f8f9d45e9b38a7c63a3cdf00e5a8b800df86496d5aeba242a4ce19027"
+      "sha256": "205fccd83d7b7a517abfb3f2529270d16e2fcb21d785ece0437c9a1ff5a15c4f"
     },
     ".fledgeignore": {
       "policy": "default",
@@ -112,14 +120,6 @@
       "lines": [
         "\u003e fledge: load and follow .fledge/skills/fledge-orchestrate/SKILL.md — primitive map at .claude/fledge-adapter.md"
       ]
-    },
-    "pluma/feathers/.gitkeep": {
-      "policy": "default",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    },
-    "pluma/plumage/.gitkeep": {
-      "policy": "default",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     }
   }
 }
