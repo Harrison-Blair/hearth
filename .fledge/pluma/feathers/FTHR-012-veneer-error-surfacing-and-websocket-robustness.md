@@ -4,7 +4,7 @@ title: Veneer error-surfacing and WebSocket robustness
 plumage: PLM-002
 status: egg
 priority: P1
-depends_on: [FTHR-008]
+depends_on: [FTHR-008, FTHR-009]
 authored: 2026-07-11T02:54:10Z
 agent: fledge-orchestrate/planning
 fledge_version: 0.3.4
