@@ -38,9 +38,10 @@ aec = ["speexdsp"]
 # textual pinned to 8.2.x: collapse.py and the log widgets poke RichLog
 # internals verified against 8.2.7.
 tui = ["textual~=8.2", "httpx"]  # httpx for live Ollama model discovery
+veneer = ["websockets"]  # asyncio WebSocket server/client for the localhost contract
 dev = ["pytest", "pytest-asyncio", "ruff"]
 # Every runtime capability in one shot.
-all = ["hearth[tts,wake,stt,vad,llm,nlu,scheduling,search,gcal]"]
+all = ["hearth[tts,wake,stt,vad,llm,nlu,scheduling,search,gcal,veneer]"]
 
 [project.scripts]
 hearth = "hearth.app:main"
