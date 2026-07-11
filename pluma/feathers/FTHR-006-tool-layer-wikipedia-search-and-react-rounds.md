@@ -2,7 +2,7 @@
 id: FTHR-006
 title: Tool layer wikipedia search and ReAct rounds
 plumage: PLM-001
-status: hatching
+status: fledged
 priority: P0
 depends_on: [FTHR-003, FTHR-004]
 oversight: merge
