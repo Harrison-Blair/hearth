@@ -2,7 +2,7 @@
 id: FTHR-008
 title: Typed BrainError crash-hardening
 plumage: PLM-002
-status: pipping
+status: fledged
 priority: P1
 depends_on: []
 authored: 2026-07-11T02:45:14Z
