@@ -1,9 +1,9 @@
 """hearth configuration schema.
 
-Loaded via pydantic-settings with precedence YAML base -> HEARTH_* env ->
-.env (secrets only). Secrets never live on the YAML-facing model: fields
-that hold a secret (e.g. an LLM backend's API key) are resolved from the
-env var named in `api_key_env`, not stored as a config field.
+Loaded via pydantic-settings with precedence YAML base -> .env (secrets
+only) -> exported HEARTH_* env. Secrets never live on the YAML-facing model:
+fields that hold a secret (e.g. an LLM backend's API key) are resolved from
+the env var named in `api_key_env`, not stored as a config field.
 """
 from __future__ import annotations
 
@@ -129,12 +129,14 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Precedence, highest first: init kwargs, .env secrets, HEARTH_* env,
-        # config.yaml base, file secrets.
+        # Precedence, highest first: init kwargs, exported HEARTH_* env, .env
+        # secrets, config.yaml base, file secrets. An exported env var beats
+        # the same key in .env -- the conventional order, and it matches
+        # app.py's load_dotenv(), which never overrides existing process env.
         return (
             init_settings,
-            dotenv_settings,
             env_settings,
+            dotenv_settings,
             YamlConfigSettingsSource(settings_cls, yaml_file=CONFIG_YAML_PATH),
             file_secret_settings,
         )

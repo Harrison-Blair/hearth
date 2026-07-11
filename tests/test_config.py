@@ -86,3 +86,20 @@ def test_tier_roles_resolve(config_yaml, monkeypatch):
     settings = Settings(_env_file=None)
     assert settings.llm.resolve_tier("default").model == "qwen3:14b"
     assert settings.llm.resolve_tier("tool").model == "openrouter/free"
+
+
+def test_dotenv_loads_when_env_unset(config_yaml, tmp_path, monkeypatch):
+    _clear_hearth_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("HEARTH_STORAGE__DB_PATH=dotenv.db\n")
+    settings = Settings(_env_file=str(env_file))
+    assert settings.storage.db_path == "dotenv.db"
+
+
+def test_exported_env_beats_dotenv(config_yaml, tmp_path, monkeypatch):
+    _clear_hearth_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("HEARTH_STORAGE__DB_PATH=dotenv.db\n")
+    monkeypatch.setenv("HEARTH_STORAGE__DB_PATH", "exported.db")
+    settings = Settings(_env_file=str(env_file))
+    assert settings.storage.db_path == "exported.db"
