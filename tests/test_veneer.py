@@ -118,3 +118,35 @@ async def test_loop_error_maps_to_error_message(tmp_path):
 
     error_events = [row for row in _event_types(log) if row == "error"]
     assert error_events == ["error"]
+
+async def test_malformed_frame_rejected_connection_survives(tmp_path):
+    """A frame that isn't valid JSON (or lacks the request fields) gets a
+    curated error reply and a logged event; the same connection then serves
+    a normal turn."""
+    import json as _json
+
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = _FakeLoop(log, answer="still alive")
+    veneer = Veneer(loop, log, config=None)
+    server, port = await _serve(veneer)
+
+    try:
+        async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+            await ws.send("{not json")
+            reply = _json.loads(await ws.recv())
+            assert reply == {"type": "error", "turn_id": "", "message": "malformed request"}
+
+            await ws.send(_json.dumps({"turn_id": "t1"}))  # missing final_user_transcript
+            reply = _json.loads(await ws.recv())
+            assert reply["type"] == "error"
+            assert "not json" not in reply["message"]
+
+            messages = await send_turn(ws, "hello again")
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert [m["type"] for m in messages] == ["answer", "done"]
+    assert messages[0]["text"] == "still alive"
+
+    assert _event_types(log).count("error") == 2

@@ -48,7 +48,18 @@ class Veneer:
             # awaited to completion (including all its emitted messages)
             # before the next is read off the socket.
             async for raw in websocket:
-                request = parse_request(raw)
+                # A frame that isn't valid JSON or lacks the request fields is
+                # rejected on the wire (never echoing its content) and the
+                # connection stays alive for the next frame.
+                try:
+                    request = parse_request(raw)
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    logger.warning("rejecting malformed request frame for session %s", session_id)
+                    self._log.append(
+                        session_id, "", "error", "veneer", {"message": "malformed request"}
+                    )
+                    await websocket.send(json.dumps(error_message("", "malformed request")))
+                    continue
 
                 async def sink(event, _websocket=websocket) -> None:
                     await _websocket.send(json.dumps(serialize(event)))
