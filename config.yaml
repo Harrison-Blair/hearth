@@ -29,6 +29,10 @@ veneer:
 tool:
   wikipedia_enabled: true
   wikipedia_language: en
+  wikipedia_endpoint: /w/rest.php/v1/search/page
+  wikipedia_result_count: 3
+  wikipedia_max_chars: 1000
+  wikipedia_timeout: 10.0
 agent:
   max_tool_rounds: 3
   turn_timeout_s: 45
