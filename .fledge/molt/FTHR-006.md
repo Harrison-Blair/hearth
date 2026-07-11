@@ -185,3 +185,52 @@ and `default-config.yaml` (with an inline comment per field in the latter, per
 the two-file convention). This is in scope for this feather: the Approach
 section requires these config values to exist for `wikipedia_search`'s
 configuration, so the minimal schema extension is necessary, not scope creep.
+
+## Post-review addendum: wire the registry into `hearth run` (app.py)
+
+Skua review passed AC-1..5, but the orchestrator held the merge on one finding:
+`hearth/app.py`'s `_run_daemon()` built `Loop(router, log, settings)` with no
+`registry`, so `Loop`'s default empty `ToolRegistry()` meant `hearth run` never
+actually exposed the wikipedia tool end-to-end, despite the feather's own
+Description framing this as "the turn that proves tool-calling works
+end-to-end." The orchestrator asked for this to be treated as in-scope for
+this feather (not a new one) even though `app.py` wasn't in the original
+Affected Modules.
+
+Fix: `_run_daemon()` now builds a **second**, separate `httpx.AsyncClient()`
+(no `base_url`) for tool calls and constructs
+`ToolRegistry(tool_config=settings.tool, client=tool_client)`, passed to
+`Loop(..., registry=registry)`. Note this deliberately does *not* reuse the
+LLM backend's client as the orchestrator's message suggested: that client's
+`base_url` points at the chat backend (e.g. Ollama), and `wikipedia_search`'s
+URL logic falls back to `https://{lang}.wikipedia.org{endpoint}` only when the
+client has no `base_url` set — reusing the LLM client would have sent
+Wikipedia requests to the LLM host. Both clients are closed in `finally`.
+
+Added `tests/test_app.py::test_run_daemon_wires_wikipedia_tool`: patches
+`hearth.veneer.server.Veneer` with a fake that captures the `Loop` instance
+`_run_daemon` builds (so the real `websockets.serve` loop never runs), then
+asserts `loop._registry.specs()` is non-empty (config.yaml's
+`wikipedia_enabled: true`). Verified test-first: reverted the `app.py` fix
+and confirmed this test fails (`assert [] != []`) before restoring it:
+
+```
+$ .venv/bin/pytest -q tests/test_app.py -v   # app.py reverted to no-registry wiring
+tests/test_app.py::test_version_command PASSED
+tests/test_app.py::test_run_daemon_wires_wikipedia_tool FAILED
+E       assert [] != []
+E        +  where [] = specs()
+1 failed, 1 passed in 0.06s
+
+$ .venv/bin/pytest -q tests/test_app.py -v   # app.py fix restored
+tests/test_app.py::test_version_command PASSED
+tests/test_app.py::test_run_daemon_wires_wikipedia_tool PASSED
+2 passed in 0.06s
+
+$ .venv/bin/pytest -q       # full suite, no regressions
+..............................                                           [100%]
+30 passed in 0.11s
+
+$ .venv/bin/ruff check .
+All checks passed!
+```
