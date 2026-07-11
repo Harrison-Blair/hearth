@@ -38,8 +38,8 @@ Written test-first (write → observe FAIL → implement to green). `tests/test_
 - `test_loop_error_maps_to_error_message` — a `Loop.run_turn` that raises produces a wire `error{message}` (no internals) and appends an `error` event to the log. (AC-5)
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: The localhost WebSocket contract accepts `{turn_id, final_user_transcript}` and emits, tagged with that `turn_id`, zero+ `tool_activity` signals, one `answer`, and a terminal `done`/`error` (satisfies PLM-001 FC-10).
-- [ ] AC-3: `hearth run` starts a working daemon serving the contract; the trivial text client completes a turn against it (satisfies PLM-001 FC-1; contributes to AC-7).
-- [ ] AC-4: No tool query, arguments, or observation content ever crosses the veneer boundary; `ToolActivity` carries only `phase` + coarse `label` (satisfies PLM-001 FC-10, contributes to PLM AC-6).
-- [ ] AC-5: A turn-level failure yields a wire `error` message with no internals and an `error` event appended to the log (contributes to PLM-001 FC-12).
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: The localhost WebSocket contract accepts `{turn_id, final_user_transcript}` and emits, tagged with that `turn_id`, zero+ `tool_activity` signals, one `answer`, and a terminal `done`/`error` (satisfies PLM-001 FC-10).
+- [x] AC-3: `hearth run` starts a working daemon serving the contract; the trivial text client completes a turn against it (satisfies PLM-001 FC-1; contributes to AC-7).
+- [x] AC-4: No tool query, arguments, or observation content ever crosses the veneer boundary; `ToolActivity` carries only `phase` + coarse `label` (satisfies PLM-001 FC-10, contributes to PLM AC-6).
+- [x] AC-5: A turn-level failure yields a wire `error` message with no internals and an `error` event appended to the log (contributes to PLM-001 FC-12).
