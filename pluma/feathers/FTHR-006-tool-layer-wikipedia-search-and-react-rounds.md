@@ -37,8 +37,8 @@ Written test-first (write → observe FAIL → implement to green). Hermetic via
 - `test_toolactivity_label_only` — emitted `ToolActivity` carries only `phase` + `label` (`"search"`), never the query/args/observation. (AC-4)
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: The registry holds exactly one tool behind an interface that admits future tools unchanged, and `wikipedia_search` returns a summary hermetically (satisfies PLM-001 FC-8).
-- [ ] AC-3: The ReAct loop performs a real tool call routed to the tool tier and incorporates the returned observation into its final answer (satisfies PLM-001 FC-7, contributes to PLM AC-3).
-- [ ] AC-4: `tool_call` and `observation` events are logged per turn, and the `ToolActivity` signal emitted to the veneer carries only a coarse label (satisfies PLM-001 FC-12, FC-10, contributes to PLM AC-6).
-- [ ] AC-5: Tool rounds are capped at `config.agent.max_tool_rounds` (satisfies PLM-001 FC-7).
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: The registry holds exactly one tool behind an interface that admits future tools unchanged, and `wikipedia_search` returns a summary hermetically (satisfies PLM-001 FC-8).
+- [x] AC-3: The ReAct loop performs a real tool call routed to the tool tier and incorporates the returned observation into its final answer (satisfies PLM-001 FC-7, contributes to PLM AC-3).
+- [x] AC-4: `tool_call` and `observation` events are logged per turn, and the `ToolActivity` signal emitted to the veneer carries only a coarse label (satisfies PLM-001 FC-12, FC-10, contributes to PLM AC-6).
+- [x] AC-5: Tool rounds are capped at `config.agent.max_tool_rounds` (satisfies PLM-001 FC-7).
