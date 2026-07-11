@@ -1,5 +1,5 @@
 [project]
-name = "personal-assistant"
+name = "hearth"
 version = "0.1.0"
 description = "Offline-first voice personal assistant"
 requires-python = ">=3.11"
@@ -39,17 +39,17 @@ aec = ["speexdsp"]
 tui = ["textual~=8.2", "httpx"]  # httpx for live Ollama model discovery
 dev = ["pytest", "pytest-asyncio", "ruff"]
 # Every runtime capability in one shot.
-all = ["personal-assistant[tts,wake,stt,vad,llm,nlu,scheduling,search,gcal]"]
+all = ["hearth[tts,wake,stt,vad,llm,nlu,scheduling,search,gcal]"]
 
 [project.scripts]
-assistant = "assistant.app:main"
+hearth = "hearth.app:main"
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["assistant*", "tui*"]
+include = ["hearth*", "tui*"]
 
 [tool.ruff]
 line-length = 100
