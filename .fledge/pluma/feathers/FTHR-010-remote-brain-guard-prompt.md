@@ -2,7 +2,7 @@
 id: FTHR-010
 title: Remote brain guard prompt
 plumage: PLM-002
-status: egg
+status: hatching
 priority: P1
 depends_on: [FTHR-009]
 authored: 2026-07-11T02:50:32Z
