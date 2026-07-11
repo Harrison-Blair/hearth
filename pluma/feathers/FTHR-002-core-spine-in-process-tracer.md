@@ -2,7 +2,7 @@
 id: FTHR-002
 title: Core spine in-process tracer
 plumage: PLM-001
-status: egg
+status: hatching
 priority: P0
 depends_on: [FTHR-001]
 oversight: merge
