@@ -44,8 +44,8 @@ Written test-first in `tests/test_logging.py` (new), using `tmp_path` for both t
 Implementation order: write the above against the unchanged code (no `logging_setup.py`/`transcript.py` exist yet — import errors are the expected first failure), then implement until green.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation (import errors on the not-yet-existing modules, or missing log/transcript output) and pass after.
-- [ ] AC-2: A `RotatingFileHandler` is configured from `LoggingConfig` (`file_name`/`max_bytes`/`backup_count`/`dir`) at daemon start; setup is idempotent and configured only in `app.py`/tests (no import-time/`basicConfig` side effect). Satisfies PLM-002 FC-7.
-- [ ] AC-3: A consult turn logs records naming **both** the orchestrator model (`qwen3:14b`/local) **and** the consultation's remote model/backend. Satisfies PLM-002 FC-7.
-- [ ] AC-4: With `transcript_enabled`, a per-session file under `transcript_dir` contains the user text, final answer, and each consult query/findings, in order. Satisfies PLM-002 FC-8.
-- [ ] AC-5: Logging/transcript failures never crash a turn — a forced write failure still produces a normal returned answer.
+- [x] AC-1: The tests listed above were observed failing before implementation (import errors on the not-yet-existing modules, or missing log/transcript output) and pass after.
+- [x] AC-2: A `RotatingFileHandler` is configured from `LoggingConfig` (`file_name`/`max_bytes`/`backup_count`/`dir`) at daemon start; setup is idempotent and configured only in `app.py`/tests (no import-time/`basicConfig` side effect). Satisfies PLM-002 FC-7.
+- [x] AC-3: A consult turn logs records naming **both** the orchestrator model (`qwen3:14b`/local) **and** the consultation's remote model/backend. Satisfies PLM-002 FC-7.
+- [x] AC-4: With `transcript_enabled`, a per-session file under `transcript_dir` contains the user text, final answer, and each consult query/findings, in order. Satisfies PLM-002 FC-8.
+- [x] AC-5: Logging/transcript failures never crash a turn — a forced write failure still produces a normal returned answer.
