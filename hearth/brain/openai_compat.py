@@ -83,7 +83,10 @@ class _OpenAICompatBackend:
         # Retry only transient connection/network blips (up to max_retries).
         # A timeout means the model is already too slow -- retrying just
         # re-hits it and burns the turn budget -- and an HTTP status error
-        # won't change on retry, so neither is retried.
+        # won't change on retry, so neither is retried. A status error was
+        # served by a reachable backend, so it gets its own reason ("backend
+        # error", e.g. a bad key or rate limit) instead of "backend
+        # unreachable".
         attempt = 0
         while True:
             try:
@@ -98,6 +101,9 @@ class _OpenAICompatBackend:
                 if attempt >= self._max_retries:
                     raise BrainError("backend unreachable", detail=str(exc)) from exc
                 attempt += 1
+            except httpx.HTTPStatusError as exc:
+                detail = f"HTTP {exc.response.status_code}: {exc.response.text[:200]}"
+                raise BrainError("backend error", detail=detail) from exc
             except httpx.HTTPError as exc:
                 raise BrainError("backend unreachable", detail=str(exc)) from exc
 
@@ -119,9 +125,10 @@ class _OpenAICompatBackend:
                 )
                 for tc in message.get("tool_calls") or []
             ]
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            # Bad arguments JSON, or a tool call missing id/function/name.
             raise BrainError(
-                "unreadable response", detail=f"bad tool arguments: {exc}"
+                "unreadable response", detail=f"bad tool call: {exc!r}"
             ) from exc
 
         return BrainResult(

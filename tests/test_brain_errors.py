@@ -23,7 +23,8 @@ async def test_http_error_raises_brain_error(llm_config):
     with pytest.raises(BrainError) as excinfo:
         await backend.complete([Message(role="user", content="hi")], tools=None)
 
-    assert excinfo.value.reason == "backend unreachable"
+    # A status error came from a reachable backend: distinct, still curated reason.
+    assert excinfo.value.reason == "backend error"
     assert "500" in excinfo.value.detail
 
     await client.aclose()
@@ -108,5 +109,31 @@ async def test_brain_error_never_leaks_api_key(monkeypatch):
     assert "sk-super-secret-123" not in excinfo.value.reason
     assert "sk-super-secret-123" not in excinfo.value.detail
     assert "sk-super-secret-123" not in str(excinfo.value)
+
+    await client.aclose()
+
+
+async def test_malformed_tool_call_structure_raises_brain_error(llm_config, canned_completion):
+    """A tool call missing "function" (or "id") is curated to "unreadable
+    response", not a raw KeyError out of complete()."""
+    backend_config = llm_config.backends["local"]
+    body = canned_completion(
+        text=None,
+        tool_calls=[{"id": "call_1", "type": "function"}],  # no "function" key
+        finish_reason="tool_calls",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=backend_config.base_url
+    )
+    backend = LocalBackend(backend_config, client=client, name="local", tier="default")
+
+    with pytest.raises(BrainError) as excinfo:
+        await backend.complete([Message(role="user", content="hi")], tools=None)
+
+    assert excinfo.value.reason == "unreadable response"
 
     await client.aclose()
