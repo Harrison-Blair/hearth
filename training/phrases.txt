@@ -11,12 +11,6 @@
 # hey penguin
 # athena
 #
-calcifer
-hey calcifer
-hello calcifer
-
-fire demon
-
-penguin
-hey penguin
-hello penguin
+Vesta
+Prometheus
+Ignis
