@@ -14,6 +14,7 @@ and offers only `consult_brain`; a `consult_brain` call nests a real
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -433,3 +434,46 @@ async def test_e2e_remote_disabled_stays_local_chat_only(tmp_path):
     routing = next(e for e in log.read_session(session_id) if e.type == "routing_decision")
     assert routing.payload["backend_name"] == "local"
     assert requests_seen[0]["model"] == "qwen3:14b"
+
+
+class _SlowFakeLoop:
+    """A minimal `Loop` double (same shape as test_veneer.py's `_FakeLoop`)
+    that delays before returning, giving a client time to disconnect mid-turn
+    so the server's reply `send()` hits a closed socket."""
+
+    def __init__(self, log):
+        self._log = log
+
+    async def run_turn(self, session_id, turn_id, transcript, emit=None):
+        self._log.append(session_id, turn_id, "user_input", "user", {"text": transcript})
+        await asyncio.sleep(0.1)
+        self._log.append(session_id, turn_id, "final_answer", "brain", {"text": "answer"})
+        return "answer"
+
+
+async def test_serve_continues_after_one_connection_disconnects(tmp_path):
+    """AC-5: a client that disconnects mid-turn is handled cleanly rather
+    than taking the server down -- a later connection still completes a
+    normal turn against the same running server."""
+    log = EventLog(str(tmp_path / "events.db"))
+    veneer = Veneer(_SlowFakeLoop(log), log, config=None)
+
+    server = await websockets.serve(veneer._handle_connection, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+
+    try:
+        ws1 = await websockets.connect(f"ws://127.0.0.1:{port}")
+        await ws1.send(json.dumps({"turn_id": "t1", "final_user_transcript": "disconnecting"}))
+        await ws1.close()  # client gone before the server's reply send()
+
+        # Give the server a moment to hit the send-after-close and recover.
+        await asyncio.sleep(0.3)
+
+        async with websockets.connect(f"ws://127.0.0.1:{port}") as ws2:
+            messages = await send_turn(ws2, "second, should complete normally")
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert [m["type"] for m in messages] == ["answer", "done"]
+    assert messages[0]["text"] == "answer"

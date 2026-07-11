@@ -7,11 +7,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 
 import websockets
 
-from hearth.veneer.protocol import answer_message, done_message, error_message, parse_request, serialize
+from hearth.brain.errors import BrainError
+from hearth.veneer.protocol import (
+    answer_message,
+    curate_error,
+    done_message,
+    error_message,
+    parse_request,
+    serialize,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class Veneer:
@@ -28,27 +39,38 @@ class Veneer:
 
     async def _handle_connection(self, websocket) -> None:
         session_id = uuid.uuid4().hex
-        # One turn at a time per connection: each inbound message is awaited
-        # to completion (including all its emitted messages) before the next
-        # is read off the socket.
-        async for raw in websocket:
-            request = parse_request(raw)
+        # A client disconnecting mid-turn (awaiting run_turn or sending a
+        # reply) raises ConnectionClosed; treat that as a clean end of this
+        # connection rather than an unhandled exception out of the handler,
+        # so websockets.serve keeps accepting other connections.
+        try:
+            # One turn at a time per connection: each inbound message is
+            # awaited to completion (including all its emitted messages)
+            # before the next is read off the socket.
+            async for raw in websocket:
+                request = parse_request(raw)
 
-            async def sink(event, _websocket=websocket) -> None:
-                await _websocket.send(json.dumps(serialize(event)))
+                async def sink(event, _websocket=websocket) -> None:
+                    await _websocket.send(json.dumps(serialize(event)))
 
-            try:
-                answer_text = await self._loop.run_turn(
-                    session_id, request.turn_id, request.final_user_transcript, emit=sink
-                )
-            except Exception as exc:
-                self._log.append(
-                    session_id, request.turn_id, "error", "loop", {"message": str(exc)}
-                )
-                await websocket.send(
-                    json.dumps(error_message(request.turn_id, "the turn failed"))
-                )
-                continue
+                try:
+                    answer_text = await self._loop.run_turn(
+                        session_id, request.turn_id, request.final_user_transcript, emit=sink
+                    )
+                except websockets.ConnectionClosed:
+                    raise
+                except Exception as exc:
+                    detail = exc.detail if isinstance(exc, BrainError) else str(exc)
+                    self._log.append(
+                        session_id, request.turn_id, "error", "loop", {"message": detail}
+                    )
+                    await websocket.send(
+                        json.dumps(error_message(request.turn_id, curate_error(exc)))
+                    )
+                    continue
 
-            await websocket.send(json.dumps(answer_message(request.turn_id, answer_text)))
-            await websocket.send(json.dumps(done_message(request.turn_id)))
+                await websocket.send(json.dumps(answer_message(request.turn_id, answer_text)))
+                await websocket.send(json.dumps(done_message(request.turn_id)))
+        except websockets.ConnectionClosed:
+            logger.info("client disconnected mid-turn for session %s", session_id)
+            return

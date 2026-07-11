@@ -39,8 +39,8 @@ Written test-first in `tests/test_veneer_errors.py` (new), using an in-memory fa
 Implementation order: write the above against the unchanged code (curate_error doesn't exist, `_handle_connection` always sends the generic message and doesn't catch `ConnectionClosed`), capture the failures, then implement until green.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: A `BrainError` out of `run_turn` reaches the client's `error.message` as the curated `reason`, not `"the turn failed"`. Satisfies PLM-002 FC-9.
-- [ ] AC-3: A non-`BrainError` exception still reaches the client as the generic `"the turn failed"`; the real detail is still written to the `EventLog`. Satisfies PLM-002 FC-9.
-- [ ] AC-4: `serialize()` is unchanged; no tool content crosses the wire boundary (existing `forbidden_keys`/content-free assertions from `test_e2e_veneer.py` still hold).
-- [ ] AC-5: A client disconnect mid-turn (`websockets.ConnectionClosed`) is handled cleanly — logged, not raised — and the server keeps serving other connections afterward. Satisfies PLM-002 FC-10.
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: A `BrainError` out of `run_turn` reaches the client's `error.message` as the curated `reason`, not `"the turn failed"`. Satisfies PLM-002 FC-9.
+- [x] AC-3: A non-`BrainError` exception still reaches the client as the generic `"the turn failed"`; the real detail is still written to the `EventLog`. Satisfies PLM-002 FC-9.
+- [x] AC-4: `serialize()` is unchanged; no tool content crosses the wire boundary (existing `forbidden_keys`/content-free assertions from `test_e2e_veneer.py` still hold).
+- [x] AC-5: A client disconnect mid-turn (`websockets.ConnectionClosed`) is handled cleanly — logged, not raised — and the server keeps serving other connections afterward. Satisfies PLM-002 FC-10.

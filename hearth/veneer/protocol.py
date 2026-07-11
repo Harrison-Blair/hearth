@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from hearth.brain.errors import BrainError
 from hearth.events import ToolActivity
+
+GENERIC_ERROR_MESSAGE = "the turn failed"
 
 
 @dataclass
@@ -46,3 +49,12 @@ def done_message(turn_id: str) -> dict:
 
 def error_message(turn_id: str, message: str) -> dict:
     return {"type": "error", "turn_id": turn_id, "message": message}
+
+
+def curate_error(exc: Exception) -> str:
+    """What's safe to tell the client about a turn failure. Whitelist-only:
+    a `BrainError`'s client-safe `.reason`, or the fixed generic message --
+    never `str(exc)`, never `BrainError.detail`."""
+    if isinstance(exc, BrainError):
+        return exc.reason
+    return GENERIC_ERROR_MESSAGE
