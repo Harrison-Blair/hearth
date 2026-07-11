@@ -36,26 +36,20 @@ class Router:
         brain = brain_cls(backend_config, client=client, name=backend_name, tier=tier)
         return Selection(brain=brain, tier=tier, backend_name=backend_name, reason="")
 
-    def select(
-        self, tools_available: bool = False, tier_override: str | None = None
-    ) -> Selection:
+    def select(self, tier_override: str | None = None) -> Selection:
         if tier_override:
             selection = self._build(tier_override)
             selection.reason = f"override:{tier_override}"
             return selection
 
-        if tools_available:
-            tool_backend_name = self._config.tiers.tool
-            tool_config = self._config.backends[tool_backend_name]
-            if tool_config.enabled and tool_config.supports_tools:
-                selection = self._build("tool")
-                selection.reason = "tool-turn→tool tier"
-                return selection
-
-            selection = self._build("default")
-            selection.reason = "tool tier disabled; local fallback"
-            return selection
-
         selection = self._build("default")
         selection.reason = "chat-turn→default tier"
         return selection
+
+    def brain_available(self) -> bool:
+        """Whether the `tool` tier backend can serve a `consult_brain` call
+        right now -- lets `Loop` decide once per turn whether to offer the
+        tool at all, preserving PLM-001's local-only fallback."""
+        tool_backend_name = self._config.tiers.tool
+        tool_config = self._config.backends[tool_backend_name]
+        return tool_config.enabled and tool_config.supports_tools
