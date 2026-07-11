@@ -1,6 +1,6 @@
 # Claude Code — fledge adapter
 
-fledge's agent-neutral workflow lives at `.fledge/skills/fledge-orchestrate/` (Claude Code discovers it via the `skills` pointer in `.claude/settings.json`). This file maps fledge's 7 orchestration primitives to Claude Code mechanisms.
+fledge's agent-neutral workflow lives at `.fledge/skills/fledge-orchestrate/` (Claude Code discovers it via the `skills` pointer in `.claude/settings.json`). This file maps fledge's 6 orchestration primitives to Claude Code mechanisms.
 
 ## Derived tier
 

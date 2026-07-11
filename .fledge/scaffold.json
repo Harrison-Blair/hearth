@@ -1,5 +1,5 @@
 {
-  "fledgeVersion": "0.3.0",
+  "fledgeVersion": "0.3.4",
   "agents": [
     "claude"
   ],
@@ -26,7 +26,7 @@
     },
     ".claude/fledge-adapter.md": {
       "policy": "primitive_map",
-      "sha256": "2e7eafc1dcd83578522c27ab35e6792d2e9a017c99522b7b402bd613de2d98d8"
+      "sha256": "818674a8b1088d0dc4dbad5b6f80e73fd004784b446946c4d1c3d2d367d5d477"
     },
     ".claude/settings.json": {
       "policy": "overwrite",
@@ -46,7 +46,7 @@
     },
     ".claude/team-loop.md": {
       "policy": "overwrite",
-      "sha256": "25784671391f74e485242323df7085dc8ad50deb2910188123e03a6141991d75"
+      "sha256": "dd07fb9d6e63ccb1586138faa1a76e8646ff0cb735d397f6c7b2236686371bdc"
     },
     ".fledge/broods/.gitkeep": {
       "policy": "default",
@@ -70,7 +70,7 @@
     },
     ".fledge/skills/fledge-orchestrate/implementation.md": {
       "policy": "core",
-      "sha256": "5317266e360ec6202a6bf76dbb685fbc04b8f7924774818e98a11dc191ddeadc"
+      "sha256": "0840e36b6239bbeaa786a8241a8ae265b63bea2240b5b9381c8734dfdc993618"
     },
     ".fledge/skills/fledge-orchestrate/planning.md": {
       "policy": "core",
@@ -94,7 +94,7 @@
     },
     ".fledge/skills/fledge-orchestrate/worker-protocols.md": {
       "policy": "core",
-      "sha256": "4f300d80b8ca70bda8f68411af1c2523f610da911e9835c360a64f7745fc84c2"
+      "sha256": "9989e96f8f9d45e9b38a7c63a3cdf00e5a8b800df86496d5aeba242a4ce19027"
     },
     ".fledgeignore": {
       "policy": "default",

@@ -69,7 +69,7 @@ If the spec is ambiguous, a dependency's interface isn't what the spec promised,
 
 ### Lifecycle
 
-A brooder never marks its own feather done and never merges. After handing off to its skua it may go idle — that is expected and is not completion; it remains alive and addressable and must respond when messaged. The orchestrator will request its shutdown after its feather is merged and verified; comply promptly when asked.
+A brooder never marks its own feather done and never merges. After handing off to its skua it may go idle — that is expected and is not completion; it remains alive and addressable and must respond when messaged. The orchestrator will request its shutdown after its feather is merged and verified; comply promptly when asked — and expect the orchestrator to force-terminate you if you do not exit promptly, since acknowledging a shutdown request is not the same as ending your session.
 
 ## Skua
 
@@ -106,4 +106,4 @@ If a brooder pushes back on a finding with a fact verified to be correct, withdr
 
 ### Lifecycle
 
-A skua lives until its feather is merged and verified. After sending a pass it stays alive and addressable — the orchestrator may still route a rebase or post-merge-fix re-check to it. The orchestrator requests its shutdown (by name) once its feather's merge is green; comply promptly when asked.
+A skua lives until its feather is merged and verified. After sending a pass it stays alive and addressable — the orchestrator may still route a rebase or post-merge-fix re-check to it. The orchestrator requests its shutdown (by name) once its feather's merge is green; comply promptly when asked — and expect the orchestrator to force-terminate you if you do not exit promptly, since acknowledging a shutdown request is not the same as ending your session.
