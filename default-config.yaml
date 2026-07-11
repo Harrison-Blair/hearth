@@ -1,7 +1,11 @@
 # hearth configuration reference. Every field here has a comment explaining
 # the knob. Values may also be overridden by HEARTH_* env vars (nested with a
 # double underscore, e.g. HEARTH_STORAGE__DB_PATH) or, for secrets only, a
-# .env file (see .env.example).
+# .env file (see .env.example). Exported env vars beat .env values.
+#
+# The daemon looks for the active config.yaml at: $HEARTH_CONFIG (if set),
+# then next to the package (a source checkout / the frozen bundle), then
+# ./config.yaml in the working directory -- and refuses to start without one.
 
 llm:
   # backends: named LLM endpoints. "local" and "remote" are the Phase 0 pair;

@@ -103,3 +103,36 @@ def test_exported_env_beats_dotenv(config_yaml, tmp_path, monkeypatch):
     monkeypatch.setenv("HEARTH_STORAGE__DB_PATH", "exported.db")
     settings = Settings(_env_file=str(env_file))
     assert settings.storage.db_path == "exported.db"
+
+
+def test_hearth_config_env_var_wins(config_yaml, tmp_path, monkeypatch):
+    _clear_hearth_env(monkeypatch)
+    override = tmp_path / "elsewhere.yaml"
+    override.write_text(YAML_CONTENT.replace("db_path: hearth.db", "db_path: elsewhere.db"))
+    monkeypatch.setenv("HEARTH_CONFIG", str(override))
+    settings = Settings(_env_file=None)
+    assert settings.storage.db_path == "elsewhere.db"
+
+
+def test_hearth_config_pointing_at_missing_file_raises(config_yaml, tmp_path, monkeypatch):
+    _clear_hearth_env(monkeypatch)
+    monkeypatch.setenv("HEARTH_CONFIG", str(tmp_path / "nope.yaml"))
+    with pytest.raises(FileNotFoundError, match="HEARTH_CONFIG"):
+        Settings(_env_file=None)
+
+
+def test_cwd_config_used_when_packaged_default_missing(tmp_path, monkeypatch):
+    _clear_hearth_env(monkeypatch)
+    monkeypatch.setattr("hearth.config.CONFIG_YAML_PATH", tmp_path / "absent.yaml")
+    (tmp_path / "config.yaml").write_text(YAML_CONTENT)
+    monkeypatch.chdir(tmp_path)
+    settings = Settings(_env_file=None)
+    assert settings.storage.db_path == "hearth.db"
+
+
+def test_no_config_anywhere_fails_loud(tmp_path, monkeypatch):
+    _clear_hearth_env(monkeypatch)
+    monkeypatch.setattr("hearth.config.CONFIG_YAML_PATH", tmp_path / "absent.yaml")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(FileNotFoundError, match="default-config.yaml"):
+        Settings(_env_file=None)

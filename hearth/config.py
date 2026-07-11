@@ -22,6 +22,32 @@ from pydantic_settings import (
 CONFIG_YAML_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
 
+def resolve_config_path() -> Path:
+    """Locate the active config.yaml, failing loud when none exists.
+
+    Order: `HEARTH_CONFIG` env var (must point at an existing file), the
+    package-adjacent default (a source checkout; also the PyInstaller bundle
+    root), then ./config.yaml in the working directory (wheel installs run
+    from a config-carrying directory). A missing config used to load silently
+    as empty and surface later as a bare KeyError in the router -- raise a
+    clear error at construction instead."""
+    env_path = os.environ.get("HEARTH_CONFIG")
+    if env_path:
+        path = Path(env_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"HEARTH_CONFIG points to a missing file: {path}")
+        return path
+    if CONFIG_YAML_PATH.is_file():
+        return CONFIG_YAML_PATH
+    cwd_path = Path.cwd() / "config.yaml"
+    if cwd_path.is_file():
+        return cwd_path
+    raise FileNotFoundError(
+        "no config.yaml found: copy default-config.yaml to config.yaml "
+        f"(looked in {CONFIG_YAML_PATH} and {cwd_path}) or set HEARTH_CONFIG"
+    )
+
+
 class LLMBackend(BaseModel):
     base_url: str = ""
     model: str
@@ -137,6 +163,6 @@ class Settings(BaseSettings):
             init_settings,
             env_settings,
             dotenv_settings,
-            YamlConfigSettingsSource(settings_cls, yaml_file=CONFIG_YAML_PATH),
+            YamlConfigSettingsSource(settings_cls, yaml_file=resolve_config_path()),
             file_secret_settings,
         )
