@@ -34,7 +34,7 @@ Written test-first (write → observe FAIL → implement to green). `tests/test_
 - `test_write_path_unaffected_without_consumer` — appends succeed and are readable with no consumer attached and none ever run; `append` exposes no consumer/reader coupling. (AC-4)
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: A read-side, cursor-based, ordered pull interface over the event log exists and is typed (satisfies PLM-001 FC-13).
-- [ ] AC-3: A no-op consumer stub implements the Layer-2 consumer protocol and can pull appended events by cursor (satisfies PLM-001 FC-13, contributes to PLM AC-5).
-- [ ] AC-4: The synchronous write path is uncoupled from and unaffected by any consumer's presence, absence, or speed (satisfies PLM-001 FC-13).
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: A read-side, cursor-based, ordered pull interface over the event log exists and is typed (satisfies PLM-001 FC-13).
+- [x] AC-3: A no-op consumer stub implements the Layer-2 consumer protocol and can pull appended events by cursor (satisfies PLM-001 FC-13, contributes to PLM AC-5).
+- [x] AC-4: The synchronous write path is uncoupled from and unaffected by any consumer's presence, absence, or speed (satisfies PLM-001 FC-13).
