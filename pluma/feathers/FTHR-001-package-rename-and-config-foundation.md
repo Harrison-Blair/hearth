@@ -2,7 +2,7 @@
 id: FTHR-001
 title: Package rename and config foundation
 plumage: PLM-001
-status: hatching
+status: fledged
 priority: P0
 depends_on: []
 oversight: merge
