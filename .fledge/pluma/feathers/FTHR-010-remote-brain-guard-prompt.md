@@ -34,7 +34,7 @@ Written test-first in `tests/test_brain_guard.py` (new), reusing FTHR-009's `two
 Implementation order: write `test_brain_guard.py` first against FTHR-009's already-landed `consult.py` (unchanged in this feather until implementation), confirm it fails because `messages[0]` is the user query / `PersonaConfig` has no `brain_guard_prompt` field, then implement the config field + prepend until green.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: Every nested brain request (driven through `BrainConsult`) carries `persona.brain_guard_prompt` as `messages[0]`. Satisfies PLM-002 FC-4.
-- [ ] AC-3: The guard text instructs the brain not to assert an identity or address the user — verified by asserting the configured/default string is non-empty and is the literal content of `messages[0]` (content-intent is an authoring choice, not machine-verified semantics).
-- [ ] AC-4: `persona.brain_guard_prompt` is config-driven (overridable via YAML or the `HEARTH_PERSONA__BRAIN_GUARD_PROMPT` env var), not hardcoded in `consult.py`.
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: Every nested brain request (driven through `BrainConsult`) carries `persona.brain_guard_prompt` as `messages[0]`. Satisfies PLM-002 FC-4.
+- [x] AC-3: The guard text instructs the brain not to assert an identity or address the user — verified by asserting the configured/default string is non-empty and is the literal content of `messages[0]` (content-intent is an authoring choice, not machine-verified semantics).
+- [x] AC-4: `persona.brain_guard_prompt` is config-driven (overridable via YAML or the `HEARTH_PERSONA__BRAIN_GUARD_PROMPT` env var), not hardcoded in `consult.py`.
