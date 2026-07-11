@@ -10,7 +10,7 @@ import httpx
 
 from hearth.brain.base import ToolSpec
 from hearth.brain.router import Router
-from hearth.config import AgentConfig
+from hearth.config import AgentConfig, PersonaConfig
 from hearth.memory.log import EventLog
 from hearth.tools.consult import BrainConsult
 
@@ -38,6 +38,7 @@ class _FakeRegistry:
 class _Config:
     def __init__(self, agent: AgentConfig | None = None):
         self.agent = agent or AgentConfig(max_tool_rounds=3, consult_timeout_s=30.0)
+        self.persona = PersonaConfig(brain_guard_prompt="Internal research subsystem; no persona.")
 
 
 def _tool_call_completion(name: str, arguments: dict, call_id: str = "call_1") -> dict:

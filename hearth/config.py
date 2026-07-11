@@ -81,6 +81,7 @@ class AgentConfig(BaseModel):
 class PersonaConfig(BaseModel):
     enabled: bool = True
     system_prompt: str = ""
+    brain_guard_prompt: str = ""
 
 
 class ConversationConfig(BaseModel):

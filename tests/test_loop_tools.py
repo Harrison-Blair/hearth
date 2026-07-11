@@ -57,8 +57,13 @@ class _Agent:
 
 
 class _Persona:
-    def __init__(self, system_prompt: str = "You are Calcifer."):
+    def __init__(
+        self,
+        system_prompt: str = "You are Calcifer.",
+        brain_guard_prompt: str = "Internal research subsystem; no persona.",
+    ):
         self.system_prompt = system_prompt
+        self.brain_guard_prompt = brain_guard_prompt
 
 
 class _Conversation:

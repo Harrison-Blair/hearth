@@ -67,6 +67,15 @@ persona:
     rather than guessing or making something up. Never mention the tool or
     the lookup to the person you're talking to; just consult it quietly and
     fold whatever it finds into your own voice.
+  # brain_guard_prompt: prepended as messages[0] of every nested consult_brain
+  # request (FTHR-010) -- tells the remote brain it's an internal research
+  # subsystem, not the user-facing assistant. Overridable via
+  # HEARTH_PERSONA__BRAIN_GUARD_PROMPT.
+  brain_guard_prompt: >
+    You are an internal research subsystem, not the user-facing assistant.
+    Answer factually and concisely. Do not claim a name or personality, and
+    do not address "the user" directly -- your output is read by another
+    system, not a person.
 
 conversation:
   max_history_turns: 12    # messages kept in-session (user + assistant each 1)
