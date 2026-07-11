@@ -2,7 +2,7 @@
 id: FTHR-012
 title: Veneer error-surfacing and WebSocket robustness
 plumage: PLM-002
-status: hatching
+status: fledged
 priority: P1
 depends_on: [FTHR-008, FTHR-009]
 authored: 2026-07-11T02:54:10Z
