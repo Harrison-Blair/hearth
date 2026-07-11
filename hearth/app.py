@@ -14,10 +14,12 @@ async def _run_daemon() -> int:
 
     from hearth.brain.router import Router
     from hearth.config import Settings
+    from hearth.logging_setup import setup_logging
     from hearth.loop import Loop
     from hearth.memory.log import EventLog
     from hearth.tools.consult import BrainConsult
     from hearth.tools.registry import ToolRegistry
+    from hearth.transcript import Transcript
     from hearth.veneer.server import Veneer
 
     # Load .env into os.environ so backends' resolve_api_key() (a plain
@@ -27,6 +29,12 @@ async def _run_daemon() -> int:
     load_dotenv()
 
     settings = Settings()
+    setup_logging(settings.logging)
+    transcript = (
+        Transcript(settings.logging.transcript_dir)
+        if settings.logging.transcript_enabled
+        else None
+    )
     # One client per LLM backend: each backend has its own base_url, so a
     # single shared client would send every request to whichever backend
     # built it, regardless of which tier the router selects.
@@ -44,8 +52,8 @@ async def _run_daemon() -> int:
         # never holds this registry directly, it reaches it exclusively
         # through consult_brain's nested ReAct loop.
         wiki_registry = ToolRegistry(tool_config=settings.tool, client=tool_client)
-        consult = BrainConsult(router, wiki_registry, log, settings)
-        loop = Loop(router, log, settings, consult=consult)
+        consult = BrainConsult(router, wiki_registry, log, settings, transcript=transcript)
+        loop = Loop(router, log, settings, consult=consult, transcript=transcript)
         veneer = Veneer(loop, log, settings)
         await veneer.serve(settings.veneer.host, settings.veneer.port)
     finally:

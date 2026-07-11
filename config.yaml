@@ -64,3 +64,8 @@ storage:
 logging:
   level: INFO
   dir: logs
+  file_name: hearth.log
+  max_bytes: 1000000
+  backup_count: 5
+  transcript_enabled: true
+  transcript_dir: logs/transcripts

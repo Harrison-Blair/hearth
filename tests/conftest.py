@@ -1,12 +1,42 @@
 """Shared fixtures for FTHR-002 spine tests."""
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 import httpx
 import pytest
 
 from hearth.config import LLMBackend, LLMConfig, LLMTiers
+
+
+@pytest.fixture(autouse=True)
+def _reset_logging_state():
+    """`hearth.logging_setup.setup_logging` (FTHR-011) mutates the process-
+    global root/`websockets` loggers; any test exercising it (directly, or
+    via `_run_daemon`) would otherwise leak a handler bound to one test's
+    tmp_path into every later test in the session. Isolate each test."""
+    root = logging.getLogger()
+    ws_logger = logging.getLogger("websockets")
+    orig_root_handlers = root.handlers[:]
+    orig_root_level = root.level
+    orig_ws_handlers = ws_logger.handlers[:]
+    orig_marker = root.__dict__.get("_hearth_logging_configured")
+
+    yield
+
+    for handler in root.handlers[:]:
+        if handler not in orig_root_handlers:
+            root.removeHandler(handler)
+            handler.close()
+    root.setLevel(orig_root_level)
+    if orig_marker is None:
+        root.__dict__.pop("_hearth_logging_configured", None)
+    else:
+        root._hearth_logging_configured = orig_marker
+    for handler in ws_logger.handlers[:]:
+        if handler not in orig_ws_handlers:
+            ws_logger.removeHandler(handler)
 
 
 def make_local_backend_config(**overrides) -> LLMBackend:

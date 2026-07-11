@@ -95,6 +95,11 @@ class StorageConfig(BaseModel):
 class LoggingConfig(BaseModel):
     level: str = "INFO"
     dir: str = "logs"
+    file_name: str = "hearth.log"
+    max_bytes: int = 1_000_000
+    backup_count: int = 5
+    transcript_enabled: bool = True
+    transcript_dir: str = "logs/transcripts"
 
 
 class Settings(BaseSettings):
