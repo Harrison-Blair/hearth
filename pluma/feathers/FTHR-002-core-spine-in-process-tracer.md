@@ -53,9 +53,9 @@ Written test-first (write → observe FAIL for the expected reason → implement
 - `test_persona_restyle_noop` — `restyle` returns input unchanged; loop output equals backend text. (AC-6)
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: `LocalBackend` implements the `Brain` protocol and returns a parsed `BrainResult` from an OpenAI-compatible response (satisfies PLM-001 FC-3 partial, FC-7).
-- [ ] AC-3: `EventLog` is append-only (no update/delete), stores the full event schema, and `read_session` returns session events in order (satisfies PLM-001 FC-12 partial).
-- [ ] AC-4: `Loop.run_turn` produces an answer and appends `user_input`, `routing_decision`, `final_answer` for the turn, via a `Router.select` returning a `Selection`, with an `emit` sink seam wired for later `ToolActivity` (satisfies PLM-001 FC-12 partial).
-- [ ] AC-5: Multi-turn history is reconstructed from the event log scoped to the session and bounded by `max_history_turns`, with no separate history store (satisfies PLM-001 FC-14).
-- [ ] AC-6: The persona restyle stage runs at the loop tail as a no-op applied to final answers only (satisfies PLM-001 FC-11).
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: `LocalBackend` implements the `Brain` protocol and returns a parsed `BrainResult` from an OpenAI-compatible response (satisfies PLM-001 FC-3 partial, FC-7).
+- [x] AC-3: `EventLog` is append-only (no update/delete), stores the full event schema, and `read_session` returns session events in order (satisfies PLM-001 FC-12 partial).
+- [x] AC-4: `Loop.run_turn` produces an answer and appends `user_input`, `routing_decision`, `final_answer` for the turn, via a `Router.select` returning a `Selection`, with an `emit` sink seam wired for later `ToolActivity` (satisfies PLM-001 FC-12 partial).
+- [x] AC-5: Multi-turn history is reconstructed from the event log scoped to the session and bounded by `max_history_turns`, with no separate history store (satisfies PLM-001 FC-14).
+- [x] AC-6: The persona restyle stage runs at the loop tail as a no-op applied to final answers only (satisfies PLM-001 FC-11).
