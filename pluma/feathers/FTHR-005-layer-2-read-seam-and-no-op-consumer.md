@@ -2,7 +2,7 @@
 id: FTHR-005
 title: Layer-2 read seam and no-op consumer
 plumage: PLM-001
-status: hatching
+status: fledged
 priority: P0
 depends_on: [FTHR-002]
 oversight: merge
