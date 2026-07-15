@@ -1,7 +1,7 @@
 # Wake-word training (livekit-wakeword)
 
 Trains the `.onnx` classifier the runtime wakes on
-(`assistant/wake/livekit_detector.py`, `config.yaml` → `wake`). Default phrase:
+(`hearth/wake/livekit_detector.py`, `config.yaml` → `wake`). Default phrase:
 **Calcifer**. The pipeline is [livekit-wakeword](https://github.com/livekit/livekit-wakeword):
 one YAML (`calcifer.yaml`), one command, a conv-attention classifier head.
 
@@ -11,7 +11,7 @@ clips (Piper VITS), augments them with room reverb (MIT RIRs) and background noi
 negatives. Output: `training/output/<name>/<name>.onnx`.
 
 Training runs in an **isolated venv** (`training/.venv-train`) so its torch/ROCm
-stack never touches the assistant runtime. The runtime consumes only the exported
+stack never touches the hearth runtime. The runtime consumes only the exported
 `.onnx`, so the two environments never share anything.
 
 ## 1. Bootstrap (one-time)

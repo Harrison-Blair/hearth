@@ -1,54 +1,63 @@
 ---
-generated: 2026-07-10T22:45:49Z
-commit: ce70f988da5255908dc6a9bb3dc26206b5e57b36
+generated: 2026-07-15T22:30:28Z
+commit: a8489b1afa55662a54ba66548a2e176584a3f387
 agent: fledge-forager
-fledge_version: 0.3.0
+fledge_version: 0.5.4
 ---
 
 # Domain
 
-Glossary of business/domain concepts spanning the voice-assistant product and the fledge development process used to build it.
+Glossary of business/domain concepts embodied in the codebase, spanning the runtime, the wake-word training pipeline, and the fledge development process.
 
-## Product domain (hearth / Calcifer)
+## Product concepts
 
-- **Hearth** — project name; Python distribution `personal-assistant`.
-- **Calcifer** — the wake word and assistant persona (named after the fire demon in *Howl's Moving Castle*); "the assistant" speaks and is addressed as Calcifer.
-- **Voice pipeline / cascade** — the staged architecture: audio capture → wake (ONNX detector) → recorder (VAD endpointing) → STT → LLM → agent (tool-calling) → verify (pre/post answer-checking) → persona (revoice) → TTS. See `architecture.md`.
-- **Wake word** — the phrase the assistant listens for continuously; default "Calcifer".
-- **Confidence threshold** (`wake.confident_threshold`, default 0.85) — scores at/above trigger "confident" ack phrases; below, "unsure" ack phrases.
-- **VAD** (voice activity detection) — WebRTC-based; aggressiveness 0 (lax) to 3 (strict); ends an utterance via a silence timeout ("endpointing").
-- **Barge-in** — speaking the wake word over the assistant's own reply cuts playback and reopens the mic. Off by default.
-- **AEC** (acoustic echo cancellation) — Speex DSP-based, supports barge-in; off by default; native/build-sensitive dependency, app degrades to passthrough if unavailable.
-- **Follow-up window** (`conversation.followup_window_ms`, 6000ms) — silence duration after which a conversation is considered closed; utterances within the window route as follow-ups without re-triggering wake.
-- **Pre/post verification loop** (`verify` section) — `verify.pre` reviews a tool pick + arguments before it runs; `verify.post` reviews the drafted answer before speech; `max_verify_rounds` caps how many times either stage can reject and retry.
-- **Persona / revoice** — post-processing step that rewrites the LLM's raw answer in Calcifer's voice/tone (`persona.strength`, e.g. "terse").
-- **Ollama** — local fallback LLM server, started via `serve_cmd: ["ollama", "serve"]`.
-- **OpenRouter** — primary remote LLM provider; `openrouter/free` model routes to a capable no-cost model (API key still required, no anonymous tier).
+- **Calcifer** — the wake word, and the local persona's in-character name (root.md, hearth.md).
+- **Persona** — the local LLM's in-character voice/identity layer; the top-level orchestrator always answers as Calcifer. Currently `hearth/persona.py:restyle()` is a no-op stub (revoicing not yet implemented, tracked toward FTHR-011) (hearth.md).
+- **Brain** — the remote LLM subsystem, reached only via the `consult_brain` tool from the persona layer; implements the `Brain` protocol (async `complete()`) shared with the local backend (root.md, hearth.md).
+- **Veneer** — the WebSocket control-surface boundary between a client and the daemon; also enforces a strict serialization whitelist so internal tool activity never leaks query/argument/result content to the client (root.md, hearth.md).
+- **Tier** — a routing role for LLM backend selection: `default` (ordinary turns, always local) vs. `tool` (tool-calling/consult rounds, always remote) (root.md, hearth.md, tests.md).
+- **Consult** — a nested call from the persona to the brain via the `consult_brain` tool, itself running its own ReAct loop over real data tools (root.md, hearth.md).
+- **ReAct** (Reason + Act) — the Thought → Action → Observation loop implemented once in `hearth.loop.run_react_rounds()` and shared by both the top-level orchestrator and nested consult (hearth.md, tests.md).
+- **Tool round** — one step of a ReAct loop: `brain.complete()` returns tool calls → dispatch → observation → `brain.complete()` again; capped at a configurable `round_cap` (hearth.md).
+- **Tool activity** — the `ToolActivity(turn_id, phase, label)` start/end event pair emitted while a tool runs, the only thing that crosses the veneer wire about tool execution (hearth.md).
+- **Session** — a conversation context scoped to one WebSocket connection, identified by `session_id` (`uuid4().hex`); can span multiple turns (hearth.md).
+- **Turn** — one user query → assistant response cycle, identified by `turn_id`; every internal step (routing decision, tool calls, observations, final answer) is logged against it (hearth.md).
+- **Event log** — the append-only SQLite record of everything that happens during a turn, keyed by `session_id`/`turn_id` (hearth.md, root.md).
+- **Transcript** — a per-session, human-readable line-by-line log of user input and Calcifer's answers, distinct from the structured event log (hearth.md, root.md).
+- **Spine** — informal term (root.md) for the currently-implemented text/voice orchestration core (daemon + veneer), as distinct from the not-yet-built audio front end.
 
-## Wake-word training domain (`training/`)
+## Wake-word training domain
 
-- **FPPH** (false positives per hour) — rate of false wake triggers; lower is better; `target_fp_per_hour` (default 0.1) is the acceptance bar.
-- **Recall** — true-positive detection rate; higher is better.
-- **Gate / `gate_passed`** — a trained model's quality gate: passes iff `optimal_fpph <= target_fp_per_hour`.
-- **Threshold** — the confidence cutoff used to classify a frame as a wake trigger; the eval step's `optimal_threshold` becomes `config.yaml`'s `wake.threshold`.
-- **Synthetic (data)** — all training clips are TTS-generated (Piper VITS), not real recordings.
-- **Adversarial negatives** — phonetically similar phrases (1–2 phoneme edits) crafted as hard false-trigger tests; Calcifer's are hand-specified (`custom_negative_phrases`), other phrases get auto-generated ones.
-- **Slug** — a model's identifier, derived from its phrase: lowercased, non-alphanumerics collapsed to underscores.
-- **Manifest** — the model registry (`models/wake/models.json`), managed by `training/manifest.py`.
-- **ROCm** — AMD's GPU compute platform; training targets RDNA4/gfx1201 via the rocm6.4 package index.
-- **VITS** — the vocoder architecture Piper's TTS uses to synthesize training clips.
-- **SLERP** (spherical linear interpolation) — technique for blending speaker embeddings during TTS augmentation.
-- **RIR** (room impulse response) — reverb augmentation data (MIT RIRs dataset).
-- **MUSAN** — background noise/music/speech dataset used for augmentation.
-- **ACAV100M** — ~2000h negative-speaker dataset used as hard negatives during training.
+- **Wake word / hotword** — the phrase the assistant listens for (e.g. "Calcifer"); the runtime must detect it in live audio to trigger listening (training.md).
+- **Positive samples** — synthetic TTS renderings of the target wake phrase, used as training data (training.md).
+- **Negative samples** — audio that must NOT trigger: background speech (ACAV100M), general noise (MUSAN), and hand-authored **adversarial negative phrases** (phonetically 1–2 edits from the wake word, e.g. "calcify", "classifier", "lucifer" for "calcifer") — trained in specifically to suppress confusable false triggers (training.md).
+- **FPPH (False Positives Per Hour)** — the false-alarm-rate metric; `target_fp_per_hour` is the acceptance gate for a trained model (e.g. 0.1 = one false trigger per 10 hours) (training.md, models.md).
+- **Recall** — true-positive rate at the model's chosen operating threshold (training.md, models.md).
+- **Threshold** — the decision boundary chosen post-training to hit the FPPH target while maximizing recall (training.md, models.md).
+- **Gate / `gate_passed`** — whether a trained model met its FPPH acceptance target; recorded per-model in `models/wake/models.json` (training.md, models.md).
+- **Conv-attention** — the neural network architecture livekit-wakeword trains (configurable small/medium/large) (training.md, models.md).
+- **Livekit-wakeword** — the open-source training framework driving the whole synthetic pipeline (no real recordings) (training.md, models.md).
+- **SLERP** — spherical linear interpolation, used to blend TTS speaker embeddings (`slerp_weights`) for voice variation without multiple voice models (training.md).
+- **Augmentation** — MIT RIR convolution (simulated rooms) + MUSAN background mixing + clip-duration variation, applied to synthetic samples for acoustic robustness (training.md).
+- **Model slug** — the normalized phrase name used as the manifest key, filename stem, and config reference (`training/manifest.py:slug`) (training.md).
+- **Smoke run** — a fast plumbing test of the training pipeline (200 samples, 500 steps), distinct from pytest's automated tests; appends `_smoke` to the model name (training.md).
+- **Fresh / fresh-clips** — flags that discard checkpoints (`--fresh`) or the entire model working directory (`--fresh-clips`) to restart training from scratch (training.md).
+
+## Build/release domain
+
+- **Bundle root** (`sys._MEIPASS`) — the PyInstaller frozen-app extraction directory; `config.yaml` is placed here so `hearth.config` resolves it correctly inside the single-file binary (packaging.md).
+- **Native runners** — CI builds each architecture's binary on architecture-native GitHub Actions hardware rather than cross-compiling, because PyInstaller cannot cross-compile (packaging.md, `CLAUDE.md`).
+- **Smoke test** (CI sense, distinct from training's smoke run) — minimal binary invocation (`--version`, then a DEBUG-level startup truncated to 40 lines) proving all native imports resolved and no missing runtime precondition crashes immediately (packaging.md).
 
 ## Fledge development-process domain
 
-- **Fledge** — the tool/process this repo is built through (bird/nest metaphor); orchestrates spec-driven development via skills under `.fledge/skills/`.
-- **Plumage (PLM-xxx)** — a parent epic; lives under `pluma/plumage/` once authored.
-- **Feather (FTHR-xxx)** — a child unit of implementable work with numbered acceptance criteria (AC-1, AC-2, …); lives under `pluma/feathers/` once authored.
-- **Fledged** — a feather is complete and all its ACs have been independently verified.
+- **Fledge** — the bird/nest-themed spec-driven development process this repo is built through (`CLAUDE.md`, root.md).
+- **Plumage (PLM-xxx)** — a parent epic.
+- **Feather (FTHR-xxx)** — a child, implementable unit of work with numbered acceptance criteria (AC-1, AC-2, …).
+- **Fledged** — a feather is complete and all its ACs verified (commit convention: `FTHR-xxx: fledged`).
 - **Molt evidence** — the artifact recording AC verification for a feather.
-- **Test-first** — tests are written and shown failing before implementation, matching this repo's test-verification rule (commit convention: `FTHR-xxx: test-first — … tests`).
-- **Forager / scout** — fledge's own context-gathering roles (this document set was produced by a forager orchestrating scouts); not part of the product domain.
-- **Nest** (`.fledge/nest/`) — the regenerable context-document set (this directory) that downstream planning agents cite; not source, not committed as project artifact history.
+- **Test-first** — tests written and shown failing before implementation, matching the repo's test-verification rule (commit convention: `FTHR-xxx: test-first — … tests`).
+
+## Open Questions
+
+- None additional beyond those already logged in architecture.md / entry-points.md regarding unimplemented voice-pipeline stages.

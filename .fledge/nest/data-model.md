@@ -1,78 +1,83 @@
 ---
-generated: 2026-07-10T22:45:49Z
-commit: ce70f988da5255908dc6a9bb3dc26206b5e57b36
+generated: 2026-07-15T22:30:28Z
+commit: a8489b1afa55662a54ba66548a2e176584a3f387
 agent: fledge-forager
-fledge_version: 0.3.0
+fledge_version: 0.5.4
 ---
 
 # Data Model
 
-The shapes of data this repo defines: the runtime configuration schema (values only — the Pydantic classes that will parse it live in the absent `assistant/`), the training pipeline's config/registry files, and the secrets schema.
+Core types, schemas, and persisted structures across the runtime, its config, its tests, and the wake-word training pipeline.
 
-## Runtime configuration schema (`config.yaml` / `default-config.yaml`)
+## Runtime configuration (`hearth/config.py`)
 
-A single nested config object with 18 top-level sections, loaded via `pydantic-settings`. `config.yaml` is the active file; `default-config.yaml` mirrors the same schema with an inline comment per field (read it to understand what a knob does). No Pydantic model classes exist on disk yet (they'd live in the absent `assistant/`) — this is the schema *shape*, inferred from the YAML values themselves:
+- `Settings` — root pydantic-settings model; loads `config.yaml` + `.env` + `HEARTH_*` env with the precedence described in conventions.md.
+- `LLMConfig(backends, tiers, timeout, max_retries)`, `LLMBackend(base_url, model, api_key_env, supports_tools, supports_streaming, context_window, cost_tier, enabled)`.
+- `LLMTiers(default, tool)` — maps a routing role to a backend name.
+- `VeneerConfig(host, port)`, `ToolConfig(wikipedia_*)`.
+- `AgentConfig(max_tool_rounds, turn_timeout_s, tool_mode, max_consult_rounds, consult_timeout_s)`.
+- `PersonaConfig(enabled, system_prompt, brain_guard_prompt)`, `ConversationConfig(max_history_turns)`, `StorageConfig(db_path)`.
+- `LoggingConfig(level, dir, file_name, max_bytes, backup_count, console, transcript_enabled, transcript_dir)`.
 
-- **audio** — I/O device, sample rate, normalization.
-- **recorder** — VAD aggressiveness (0–3), silence/max/start timeouts, preroll.
-- **wake** — `model_paths` (array of strings, written by `training/manifest.py select`), `threshold` (float, default 0.66), `score_interval`, `trigger_frames`, `confident_threshold` (0.85 default — scores at/above trigger "confident" ack phrases, below trigger "unsure" ack phrases).
-- **stt** — `model` (e.g. `medium`, or `distil-whisper` on Pi), `compute` (e.g. `int8`), `device` (`cpu`).
-- **llm** — `provider` (`ollama` | `opencode_zen` | `openrouter`), `model`, `host`, `timeout`, `health_timeout`, `num_ctx`, `think` (bool), `serve_cmd` (array, e.g. `["ollama", "serve"]`), `base_url`, `fallback`, `fallback_model`, `max_retries`. Active values: primary `openrouter`/`openrouter/free`, fallback `ollama`/`qwen3:14b`.
-- **persona** — `enabled`, `strength` (e.g. `terse`), `revoice`.
-- **agent** — `tool_mode` (`auto`), `max_tool_rounds` (3), `turn_timeout_s` (45).
-- **verify** — pre/post gates, `max_verify_rounds` (2) — caps rejected tool-picks/answers per stage.
-- **tts** — `voice` (`en_US-lessac-medium`), `model_path` (references `models/piper/en_US-lessac-medium.onnx`, **not present in this repo** — only the wake model is tracked), `ack_phrases`.
-- **storage** — `db_path` (`assistant.db`, sqlite).
-- **scheduling** — apscheduler-backed reminders.
-- **web_search** — `providers` (`ddgs`, `wikipedia`; optionally Tavily/Exa via secrets).
-- **weather** — coordinates (Atlanta), `timezone` (`auto`); Open-Meteo endpoints.
-- **calendar** — `enabled`, `credentials_path` (`~/.config/calcifer/google-service-account.json`), `personal_calendar_id` (`harrison.blair.dev@gmail.com`), `calcifer_calendar_id` (a distinct calendar ID), `timeout`, `watcher_enabled`, `watcher_poll_seconds`, `watcher_lead_minutes`, `blocked_titles`, `hidden_tag`.
-- **conversation** — `enabled`, `followup_window_ms` (6000 — silence duration that closes a conversation turn), `max_history` (12), `decision_enabled`, `end_phrases`.
-- **aec** — `enabled` (false by default; native/build-sensitive).
-- **barge_in** — `enabled` (false by default; interrupt playback on wake word).
-- **logging** — `level` (`INFO`), file rotation under `logs/`.
+(all: hearth.md)
 
-## Secrets schema (`.env.example`)
+## Brain protocol (`hearth/brain/base.py`)
 
-Naming convention `ASSISTANT_<SECTION>__<PROVIDER>_API_KEY`, secrets only (see `conventions.md`):
-- `ASSISTANT_LLM__OPENROUTER_API_KEY`
-- `ASSISTANT_LLM__OPENCODE_ZEN_API_KEY`
-- `ASSISTANT_WEB_SEARCH__TAVILY_API_KEY`
-- `ASSISTANT_WEB_SEARCH__EXA_API_KEY`
+- `Capabilities(supports_tools, supports_streaming, context_window, cost_tier)`.
+- `Message(role, content, tool_calls, tool_call_id)` — `role ∈ {"system", "user", "assistant", "tool"}`.
+- `ToolCall(id, name, arguments)`.
+- `ToolSpec(name, description, parameters, label)` — `parameters` is a JSON-schema dict describing the tool's arguments to the LLM.
+- `BrainResult(text, tool_calls, finish_reason, backend, tier)`.
+- `Brain` (Protocol) — `async complete(messages, tools) -> BrainResult`.
+- `Selection(brain, tier, backend_name, reason)` (`hearth/brain/router.py`) — what `Router.select()` returns.
 
-## Training config schema (`training/calcifer.yaml`)
+(hearth.md)
 
-Loaded via `yaml.safe_load()` in `training/train.py`:
-- `model_name` (str), `target_phrases` ([str]), `n_samples` / `n_samples_val` / `n_background_samples` / `n_background_samples_val` / `tts_batch_size` (int)
-- `noise_scales` / `noise_scale_ws` / `length_scales` / `slerp_weights` ([float]) — TTS augmentation
-- `data_dir` / `output_dir` (str)
-- `augmentation`: `{clip_duration, batch_size, rounds, background_paths, rir_paths}`
-- `model`: `{model_type: "conv_attention", model_size: "small"|"medium"|"large"}`
-- `steps`, `learning_rate`, `weight_decay`, `label_smoothing`, `max_negative_weight`, `target_fp_per_hour` (float)
-- `batch_n_per_class`: `{positive, adversarial_negative, ACAV100M_sample, background_noise}`
-- `custom_negative_phrases` ([str]) — phrase-specific, dropped by `train_batch.py` for auto-generated phrases
+## Events & memory (`hearth/events.py`, `hearth/memory/`)
 
-## Model registry schema (`models/wake/models.json`)
+- `ToolActivity(turn_id, phase, label)` — `phase ∈ {"start", "end"}`; the only object serialized across the veneer WebSocket boundary.
+- `EventSink = Callable[[object], Awaitable[None]]`; `null_sink` is a no-op implementation.
+- `Event(id, session_id, turn_id, ts_utc, type, provenance, payload)` — one row of the append-only SQLite `EventLog`. `EVENT_TYPES = {user_input, routing_decision, tool_call, observation, final_answer, error}`.
+- `EventLog(db_path)` — `.append(session_id, turn_id, type, provenance, payload) -> Event`, `.read_session(session_id, limit) -> list[Event]`. Append-only: no update/delete API (verified by `tests/test_event_log.py`).
+- `EventReader(log)` — cursor-based pull: `.read_since(cursor, limit) -> list[Event]`, `.latest_cursor() -> int`.
+- `Layer2Consumer` (Protocol, `hearth/memory/consumer.py`) + `pull_once()` — a seam for a not-yet-implemented downstream indexer (Graphiti/FalkorDB per Open Questions).
 
-Managed by `training/manifest.py`, keyed by model slug (e.g. `"calcifer"`):
+(hearth.md)
 
-```json
-{
-  "calcifer": {
-    "phrase": "<str>",
-    "model_path": "<str, relative path>",
-    "fpph": "<float, false positives/hour>",
-    "recall": "<float>",
-    "threshold": "<float>",
-    "gate_passed": "<bool>",
-    "trained_at": "<ISO8601 str>"
-  }
-}
-```
+## Veneer wire protocol (`hearth/veneer/protocol.py`)
 
-Sourced from livekit's `eval.json` (`{optimal_fpph, optimal_recall, optimal_threshold}`) at training time via `manifest.py cmd_upsert`.
+- `Request(turn_id, final_user_transcript)` — what `parse_request(raw)` produces from an incoming frame.
+- Outbound wire messages (dict-shaped, not dataclasses per scout report): `answer_message(turn_id, text)`, `done_message(turn_id)`, `error_message(turn_id, message)`.
+- `serialize(event)` — whitelist-only conversion of a `ToolActivity` to a dict; nothing else is serializable across this boundary today.
+
+(hearth.md)
+
+## Persisted storage
+
+- **`hearth.db`** (SQLite, path from `StorageConfig.db_path`) — the `EventLog` table described above; auto-created on daemon start (root.md, hearth.md).
+- **Rotating file logs** under `logging.dir`, rotated at `max_bytes` keeping `backup_count` files (root.md).
+- **Per-session transcripts** under `logging.transcript_dir`, one human-readable file per `session_id` (root.md, hearth.md).
+
+## Wake-word training data (`training/`, `models/`)
+
+- **`training/calcifer.yaml`** training config (YAML): `model_name`, `target_phrases: list[str]`, `n_samples`/`n_samples_val`, `n_background_samples`/`n_background_samples_val`, `tts_batch_size`, `custom_negative_phrases: list[str]`, `noise_scales`/`noise_scale_ws`/`length_scales`/`slerp_weights: list[float]`, `data_dir`/`output_dir`, `augmentation` (dict: clip_duration, batch_size, rounds, background_paths, rir_paths), `model` (dict: model_type, model_size), `steps`/`learning_rate`/`weight_decay`/`label_smoothing`/`max_negative_weight`/`target_fp_per_hour`, `batch_n_per_class` (dict of positive/adversarial_negative/ACAV100M_sample/background_noise counts).
+- **`models/wake/models.json`** manifest (per model, keyed by slug): `slug: str`, `phrase: str`, `model_path: str`, `fpph: float` (false positives per hour), `recall: float`, `threshold: float`, `gate_passed: bool`, `trained_at: str` (ISO 8601). Regenerated entries from orphaned `.onnx` files may lack eval metrics.
+- **Livekit `eval.json`** (intermediate, read by `manifest.py upsert`): `optimal_fpph`, `optimal_recall`, `optimal_threshold`.
+- **`models/wake/calcifer.onnx`** — the trained classifier artifact itself (binary, 962 KB); not a structured data type, consumed as an opaque model file.
+
+(training.md, models.md)
+
+## Test-local fixture types (`tests/`)
+
+Not part of the production data model, but shape how the runtime types above are exercised:
+- `_Config`, `_Agent`, `_Persona`, `_Conversation` — minimal stand-ins for the corresponding `hearth/config.py` models.
+- OpenAI-like mocked response body: `{"choices": [{"message": {"role", "content", "tool_calls"}, "finish_reason"}]}`.
+- Mocked tool-call structure: `{"id", "type": "function", "function": {"name", "arguments": json_string}}`.
+- EventLog rows read back as `Event` namedtuples/dataclasses: `{"id", "session_id", "turn_id", "type", "role", "payload_json"}`.
+
+(tests.md)
 
 ## Open Questions
 
-- No Pydantic model source is on disk to confirm field types/validators/defaults precisely — the schema above is inferred from YAML values and inline comments, not from class definitions.
-- Unclear whether `models/piper/*.onnx` (TTS voice) is meant to be pre-populated or downloaded on first run — it's referenced but not tracked.
+- No data types were observed in `packaging/` or root-level files beyond configuration — `dependencies.md`/`entry-points.md` cover their behavior instead.
+- Is `hearth.db`'s schema versioned/migrated anywhere, or is it created fresh (`CREATE TABLE IF NOT EXISTS`) with no migration path? Not visible in the assigned `hearth/` files (hearth.md).

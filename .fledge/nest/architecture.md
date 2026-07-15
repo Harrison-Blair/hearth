@@ -1,45 +1,84 @@
 ---
-generated: 2026-07-10T22:45:49Z
-commit: ce70f988da5255908dc6a9bb3dc26206b5e57b36
+generated: 2026-07-15T22:30:28Z
+commit: a8489b1afa55662a54ba66548a2e176584a3f387
 agent: fledge-forager
-fledge_version: 0.3.0
+fledge_version: 0.5.4
 ---
 
 # Architecture
 
-How hearth's pieces fit together, and — critically — which of those pieces currently exist on disk versus exist only as references in tracked files.
+How hearth's pieces fit together: the runtime package (`hearth/`), the separate wake-word training pipeline (`training/` → `models/`), and the packaging/release path (`packaging/`, `.github/workflows/release.yml`). Config-driven throughout so the Pi 5 port stays config-only.
 
-## Repo state: mid-restart
+## Runtime shape (implemented today)
 
-This repo is mid-restart (`git log`: `ce70f98 restarting (again)`). Only these survived: `config.yaml` / `default-config.yaml`, `models/wake/calcifer.onnx` (+ `models/wake/models.json`), `training/`, `pyproject.toml`, `Makefile`, `.github/workflows/release.yml`, `.env.example`, `pluma/` (empty fledge scaffolding). **The runtime source tree is absent**: `assistant/` (the actual daemon — wake/recorder/stt/llm/agent/verify/persona/tts pipeline), `tui/` (Textual monitor), and `packaging/build.sh` (invoked by `make release`) do not exist on disk (raw/root.md Open Questions; raw/models.md Open Questions). `pyproject.toml`'s entry point `assistant = assistant.app:main` (`pyproject.toml:45`), CLAUDE.md's architecture description, and the config files all reference this absent tree as if it were live — treat them as **the intended design**, not a working contract, until `assistant/` is recreated. `.github/workflows/release.yml`'s "Build binary" step calls `packaging/build.sh`, which would fail today since that script doesn't exist.
+hearth is a **daemon** (`hearth.app:main` → `hearth = hearth.app:main` entry point) that, once running, exposes a single async orchestration loop reached over a localhost WebSocket ("veneer"). The parts that exist today implement the **text/LLM spine**; the voice pipeline described in CLAUDE.md (audio capture → wake → VAD → STT → … → TTS) is largely roadmap — only the wake-word **training** side (`training/`, `models/`) exists, not the runtime consumer (hearth/app.py, hearth/config.py, hearth/loop.py, training/README.md).
 
-## Intended runtime pipeline (from config, not yet code)
+```
+WebSocket client (hearth/veneer/client.py)
+        │  Request(turn_id, final_user_transcript)
+        ▼
+hearth/veneer/server.py  Veneer.serve()  ── per-connection session_id
+        │  parse_request → run_turn → answer_message/done_message
+        ▼
+hearth/loop.py  Loop.run_turn()
+        │  reconstruct history from EventLog, inject persona system prompt
+        ▼
+hearth/loop.py  run_react_rounds()  (shared ReAct engine: Thought→Action→Observation)
+        │  offers one tool: consult_brain
+        ├─► hearth/brain/router.py  Router.select(tier="default") → LocalBackend
+        │       (default tier: local Ollama-style backend, no data tools)
+        └─► hearth/tools/consult.py  BrainConsult (invoked as the consult_brain tool)
+                │  nested run_react_rounds() on tier="tool"
+                ▼
+            hearth/brain/router.py  Router.select(tier="tool") → RemoteBackend
+                │
+                ▼
+            hearth/tools/registry.py  ToolRegistry → hearth/tools/wikipedia.py
+```
 
-A staged voice cascade, each stage one config section in `config.yaml` / `default-config.yaml`:
+Both the top-level orchestrator and the nested brain-consult reuse the same `run_react_rounds()` in `hearth/loop.py` — there is one ReAct implementation, parameterized by which tier/tools it's given (hearth/loop.py:run_react_rounds).
 
-`audio` (capture, device/sample-rate) → `wake` (livekit-wakeword ONNX detector against `models/wake/calcifer.onnx`) → `recorder` (WebRTC VAD endpointing) → `stt` (faster-whisper) → `llm` (pluggable provider) → `agent` (tool-calling rounds) → `verify` (pre/post answer-checking loop) → `persona` (revoice in Calcifer's voice) → `tts` (piper).
+## Two-tier LLM architecture
 
-Cross-cutting sections: `conversation` (follow-up window, history), `scheduling` (apscheduler), `web_search` (ddgs + Wikipedia, optionally Tavily/Exa), `weather` (Open-Meteo), `calendar` (Google service-account, async httpx), `storage` (sqlite `assistant.db`), `aec`/`barge_in` (echo cancellation + wake-word interrupt, both off by default), `logging` (rotating file logs under `logs/`).
+- **`default` tier** ("Calcifer"/persona) — always `LocalBackend` (hearth/brain/local.py), answers every turn in character, has exactly one tool available: `consult_brain`.
+- **`tool` tier** ("brain") — always `RemoteBackend` (hearth/brain/remote.py), used only inside a nested `BrainConsult` round, has access to real data tools (currently `wikipedia_search`).
+- Both backends speak an OpenAI-compatible `/chat/completions` protocol via `hearth/brain/openai_compat.py`; `Router._build(tier)` deterministically maps tier → backend class (hearth/brain/router.py).
+- Rationale (root.md): local model handles ordinary conversation cheaply/fast; remote model is reserved for tool-calling/research rounds where a stronger model earns its cost.
 
-LLM provider is pluggable: `ollama` (local fallback, `qwen3:14b`), `openrouter` (primary, `openrouter/free`), `opencode_zen`, with an explicit `fallback`/`fallback_model` pair (`config.yaml` llm section).
+## Cross-cutting subsystems
 
-## Training pipeline is architecturally separate
+- **Config** (`hearth/config.py`) — pydantic-settings `Settings`, precedence init > `HEARTH_*` env > `.env` (secrets only) > `config.yaml` > `default-config.yaml`. Resolves `config.yaml` path from `HEARTH_CONFIG` env, then package-adjacent, then cwd; fails loudly if absent (root.md, hearth.md).
+- **Event log** (`hearth/memory/log.py`) — append-only SQLite (`hearth.db`), one row per event (`user_input`, `routing_decision`, `tool_call`, `observation`, `final_answer`, `error`), keyed by `session_id`/`turn_id`. `hearth/memory/reader.py` provides a cursor-based `EventReader` for consumers; `hearth/memory/consumer.py` defines a `Layer2Consumer` protocol + `pull_once()` — a seam for a future Graphiti/FalkorDB indexer, not yet implemented.
+- **Transcript** (`hearth/transcript.py`) — best-effort, per-session human-readable log; swallows `OSError` so a disk issue never crashes a turn.
+- **Logging** (`hearth/logging_setup.py`) — idempotent root logger setup (guarded by a marker attribute) with `RotatingFileHandler` + optional console handler; websockets' own logger is wired in explicitly.
+- **Veneer protocol** (`hearth/veneer/protocol.py`) — a strict serialization whitelist: only `ToolActivity.phase`/`.label` cross the WebSocket boundary. Tool query/arguments/observation content never reaches the client — this is a deliberate opacity boundary, verified by `tests/test_veneer.py`.
 
-`training/` (see `testing.md`/`entry-points.md` for commands, `domain.md` for vocabulary) is a fully self-contained wake-word training system with its own venv (`training/.venv-train`, ROCm torch + livekit-wakeword) that **must never share the runtime venv** (CLAUDE.md; `training/bootstrap.sh`). The only artifact that crosses the boundary into the runtime's world is the exported `.onnx` file under `models/wake/`, plus its `models.json` metadata sidecar. `training/manifest.py select` is the handoff point: it writes `config.yaml`'s `wake.model_paths` and round-trips through the (currently absent) runtime's `Config().wake.model_refs()` to verify (`training/manifest.py:120-121` — this verification call cannot currently execute since `assistant/` isn't on disk).
+## Wake-word training pipeline (separate from the runtime)
 
-## Build & release architecture
+`training/` and `models/` form a self-contained subsystem that does **not** share a virtualenv or any package with the runtime (training/README.md, root.md):
 
-`make release` → `packaging/build.sh` (absent) → single-file PyInstaller-style binary `dist/assistant-$(uname -m)`, one native build per target arch (x86_64, aarch64), no cross-compile (`Makefile`, CLAUDE.md). `.github/workflows/release.yml` automates this on `v*` tags (or manual `workflow_dispatch`): a matrix job (`ubuntu-24.04`, `ubuntu-24.04-arm`, `fail-fast: false`) builds, smoke-tests (`--version` + DEBUG-level import check), and uploads artifacts, then a release job (`if: startsWith(github.ref, 'refs/tags/')`) consolidates them into a GitHub Release.
+```
+training/calcifer.yaml (config)
+        ▼
+training/train.py  run_training()  ──uses──►  livekit-wakeword (training/.venv-train, ROCm torch)
+        │   synthesizes positives (Piper VITS) + adversarial negatives,
+        │   augments with MUSAN noise / MIT RIRs, trains conv-attention classifier
+        ▼
+models/wake/calcifer.onnx  (963 KB, exported model artifact)
+        +
+training/manifest.py  ──writes──►  models/wake/models.json  (fpph, recall, threshold, gate_passed, trained_at)
+        │
+        └─ manifest.py select <slug>  ──writes──►  config.yaml `wake.model_paths` (regex block edit, preserves comments)
+```
 
-## Configuration architecture
+`training/train_batch.py` drives `train.py`'s `run_training()` across multiple phrases (`training/phrases.txt`), reusing the one-time ~16 GB data download (ACAV100M, MUSAN, RIRs, Piper voices) across phrases via `--skip-setup` after the first. The only artifact exchanged with the runtime is the `.onnx` file plus the `wake.model_paths`/`wake.threshold` config values — the runtime-side consumer (`hearth/wake/livekit_detector.py` per CLAUDE.md) does not exist yet in `hearth/` (training.md, models.md; open question below).
 
-Two-file model loaded via `pydantic-settings`: `config.yaml` (active) and `default-config.yaml` (documented reference/defaults, same schema). Override mechanisms: YAML base → `ASSISTANT_*` env vars (double-underscore nesting, e.g. `ASSISTANT_LLM__MODEL`) → `.env` (secrets only). See `data-model.md` for the section-by-section schema shape and `conventions.md` for the secrets-separation rule.
+## Packaging & release
 
-## Fledge development-process architecture
-
-The repo itself is developed through fledge (bird/nest taxonomy — see `domain.md`): `pluma/plumage/` and `pluma/feathers/` are the (currently empty) planning directories where epics (PLM-xxx) and work units (FTHR-xxx) will live. `.fledge/` holds the tool's own skills/templates/working state and is gitignored except for its skill definitions.
+`packaging/build.sh` (invoked by `make release`) builds a PyInstaller single-file binary per architecture (`dist/hearth-$(uname -m)`), bundling `config.yaml` at the bundle root and forcing `--collect-submodules hearth` to catch dynamic imports. `.github/workflows/release.yml` runs this natively on `ubuntu-24.04` (x86_64) and `ubuntu-24.04-arm` (aarch64) matrix runners on `v*` tag pushes (or manual dispatch), smoke-tests the binary (`--version`, DEBUG startup), and attaches both binaries to the GitHub Release via `softprops/action-gh-release` (packaging.md). No cross-compilation — each arch must be built on native hardware.
 
 ## Open Questions
 
-- When/how will `assistant/`, `tui/`, and `packaging/build.sh` be restored — same repo or elsewhere?
-- Does the (absent) runtime's wake detector reload `wake.threshold` automatically after `manifest.py select`, or is that a manual step? `training/README.md` says "set wake.threshold in config.yaml and restart daemon" but `select` only writes `model_paths`.
+- How/when do the audio-facing stages (wake detection, VAD, STT, TTS) integrate with `hearth/loop.py`? Nothing under `hearth/` currently consumes `models/wake/calcifer.onnx` (hearth.md, models.md).
+- Where do `aec`/`barge_in`, `scheduling` (apscheduler), `web_search`, `weather`, `calendar` cross-cutting features (named in CLAUDE.md/pyproject extras) actually live? Not present in the current `hearth/` file list (hearth.md).
+- `hearth/persona.py:restyle()` is a no-op stub — is persona revoicing (FTHR-011) actively planned next, or blocked on TTS integration (hearth.md)?

@@ -21,11 +21,6 @@ The wake model (`models/wake/calcifer.onnx`) and the training pipeline under
 `training/` already exist — they're the wake-word groundwork — but nothing in the
 current runtime consumes them yet.
 
-> **Note:** `CLAUDE.md` and the `.fledge/` docs describe an intended `assistant/`
-> *voice* pipeline and use `ASSISTANT_*` env vars. Those are stale from a
-> mid-restart and run ahead of what's on disk. The runtime package is **`hearth/`**
-> and the env prefix is **`HEARTH_`** — this README documents what actually runs.
-
 ## Description
 
 hearth is built around a **two-tier LLM design**:
@@ -100,13 +95,14 @@ the fuller against-real-services smoke procedure.
 ### Dependencies
 
 Dependencies are split into per-capability extras in `pyproject.toml`. The `all`
-extra is `tts, wake, stt, vad, llm, nlu, scheduling, search, gcal, veneer`.
+extra is `tts, wake, stt, vad, llm, nlu, scheduling, search, gcal`.
 **`aec`, `tui`, and `dev` are deliberately excluded from `all`** — they're
 native/build-sensitive and the app degrades gracefully when their imports fail.
+The control surface itself needs no extra: `websockets` and `httpx` are base
+dependencies, always installed.
 
 | Extra | Installs | Used by the text spine today? |
 | --- | --- | --- |
-| `veneer` | `websockets` | ✅ the control surface |
 | `llm` | `httpx` | ✅ Ollama / OpenRouter client |
 | `search` | `httpx`, `ddgs` | ✅ Wikipedia (ddgs is roadmap) |
 | `wake` | `livekit-wakeword` | ⏳ roadmap (voice) |
@@ -174,9 +170,6 @@ check against real Ollama/OpenRouter/Wikipedia.
 **Build / release** — `make release` runs `packaging/build.sh` to produce a
 single-file binary per architecture (no cross-compile; run once per target arch).
 
-> ⚠️ `packaging/build.sh` is **not on disk yet**. Until it's restored,
-> `make release` and the `v*`-tag CI (`.github/workflows/release.yml`) will fail.
-
 This project is developed through **fledge** (a bird/nest-themed spec-driven
 process — epics are `PLM-xxx`, work units `FTHR-xxx` with numbered acceptance
 criteria). The wake-word training pipeline is entirely separate — see
@@ -192,10 +185,6 @@ lookups. To run fully local (no key), set `llm.tiers.tool: local` in `config.yam
 **Is this a voice assistant?**
 Not yet. Today it's a text spine you type at. Wake word (**Calcifer**), STT, and TTS
 are roadmap; `training/` and `models/wake/` are the wake-word groundwork.
-
-**The docs mention `assistant/` and `ASSISTANT_*` env vars — where are they?**
-Stale from a mid-restart. The runtime package is `hearth/` and the env prefix is
-`HEARTH_`.
 
 **How do I talk to it?**
 Start the daemon with `hearth run`, then run `python -m hearth.veneer.client`

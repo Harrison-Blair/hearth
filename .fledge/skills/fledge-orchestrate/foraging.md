@@ -16,6 +16,8 @@ You produce the `.fledge/nest/` document set that downstream planning agents rel
    - Split large modules (roughly > 100 files or > 300 KB) into multiple scouts by subdirectory, named `<module>-<subdir>`.
 3. **Full regeneration.** Run `fledge nest scaffold` from the repo root. This clears `.fledge/nest/` (including `raw/`) and recreates the directories. Every run rebuilds from scratch; never merge with stale docs. **Important:** immediately after `fledge nest scaffold`, `.fledge/nest/` contains only empty template stubs — placeholder concern docs, unfilled `raw/*.md`, and `index.md` frontmatter stamped to HEAD. This empty state is the expected intermediate after scaffolding; scouts and synthesis fill it in steps 4–6 below. It is not a failure and must not be flagged as one.
 4. **Fan out scouts.** Spawn one `fledge-context-scout` worker per assignment, all in parallel. Each spawn prompt must contain: the module name, the exact file list, and the instruction to run `fledge nest scout --module <module>` to create the report file, then fill every section body. Scouts return one-line confirmations; verify each expected raw report file exists afterward, and re-spawn any scout whose report is missing (once).
+
+   Fanning out scouts in parallel yields your turn until they return, and their completion is **not** your own completion — you still owe steps 5 and 6. On every wake, re-anchor to your position in this pipeline from what is on disk before doing anything else: if the raw reports exist but the eight concern docs are still empty template stubs, you are between step 4 and step 5 — proceed straight into synthesis. Do not go idle, and do not send a final message, until step 6 is written. The scouts finishing is your cue to synthesize, never a reason to stop.
 5. **Synthesize concern documents.** Read the raw reports and write these eight documents to `.fledge/nest/`, following the conventions in `templates/context-doc.md`:
 
    | Document | Synthesized from (report sections) |
@@ -42,7 +44,7 @@ Report: modules scanned, scouts spawned (and any re-spawns), documents written, 
 
 ### Lifecycle
 
-A forager is one-shot: after sending its final message it has no further work. In harnesses where workers persist after their final message, the worker that commissioned it (the incubator or the orchestrator) will request its shutdown by name once the nest output is verified — comply promptly. Scouts are unnamed (no species): they self-terminate on their one-line final message and are never addressed by name.
+A forager is one-shot, but "one-shot" ends at step 6, not at the scout fan-out. You are done only once all six pipeline steps are written **and** you have sent your final message. Going idle before that final message is a stall, not completion: if you find yourself idle with the raw reports present and the concern docs still stubs, you have stopped mid-pipeline — resume synthesis immediately rather than waiting to be prompted. After the final message you have no further work. In harnesses where workers persist after their final message, the worker that commissioned it (the incubator or the orchestrator) will request its shutdown by name once the nest output is verified — comply promptly. Scouts are unnamed (no species): they self-terminate on their one-line final message and are never addressed by name.
 
 ## Scout
 

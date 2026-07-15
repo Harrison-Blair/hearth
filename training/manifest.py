@@ -11,7 +11,10 @@ Subcommands (run from the repo root):
 
 `select` also accepts a bare slug whose .onnx exists on disk but isn't in the
 manifest yet. The env-var equivalent (no file edit) is:
-  ASSISTANT_WAKE__MODEL_PATHS='["models/wake/a.onnx","models/wake/b.onnx"]'
+  HEARTH_WAKE__MODEL_PATHS='["models/wake/a.onnx","models/wake/b.onnx"]'
+
+This module is deliberately standalone: stdlib only, no import of the hearth
+runtime package, so training has no effect on the rest of the tree.
 """
 
 from __future__ import annotations
@@ -19,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -28,9 +30,15 @@ CONFIG = Path("config.yaml")
 
 
 def slug(phrase: str) -> str:
-    """Phrase -> model name: lowercase, non-alphanumerics collapsed to underscores.
-    Kept dependency-free so this module runs under the assistant runtime venv."""
+    """Phrase -> model name: lowercase, non-alphanumerics collapsed to underscores."""
     return re.sub(r"[^a-z0-9]+", "_", phrase.lower()).strip("_") or "wakeword"
+
+
+def prettify(stem: str) -> str:
+    """Model slug -> display phrase: underscores to spaces, title-cased. The display
+    inverse of slug(); lossy (original casing/punctuation is not recovered), which is
+    fine because the phrase is only metadata in models.json."""
+    return re.sub(r"_+", " ", stem).strip().title() or stem
 
 
 def load() -> dict:
@@ -81,9 +89,6 @@ def cmd_regen(_a: argparse.Namespace) -> None:
     """Backfill a manifest entry for every models/wake/*.onnx that isn't recorded
     yet, deriving its phrase from the filename. Existing entries (with eval metrics)
     are left untouched, so the manifest is reproducible if models.json is lost."""
-    sys.path.insert(0, ".")
-    from assistant.wake.registry import prettify
-
     m = load()
     added = []
     for path in sorted(Path("models/wake").glob("*.onnx")):
@@ -113,11 +118,9 @@ def cmd_select(a: argparse.Namespace) -> None:
     m = load()
     paths = [_resolve(ref, m) for ref in a.refs]
     _write_model_paths(paths)
-    # Verify the runtime will read exactly these.
-    sys.path.insert(0, ".")
-    from assistant.core.config import Config
-
-    got = Config().wake.model_refs()
+    # Verify the write round-trips (catches _write_model_paths bugs). Read it back
+    # ourselves rather than importing the runtime, so training stays standalone.
+    got = _read_model_paths()
     assert got == paths, f"config.yaml write mismatch: {got} != {paths}"
     print("config.yaml wake.model_paths set to:")
     for p in paths:
@@ -149,6 +152,27 @@ def _write_model_paths(paths: list[str]) -> None:
         cleaned.append(ln)
     new_block = ["  model_paths:"] + [f"    - {p}" for p in paths] + cleaned
     CONFIG.write_text("\n".join(lines[: start + 1] + new_block + lines[end:]) + "\n")
+
+
+def _read_model_paths() -> list[str]:
+    """Read wake.model_paths back out of config.yaml (stdlib only, symmetric with
+    _write_model_paths) so select can verify its own write without importing the runtime."""
+    lines = CONFIG.read_text().splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.rstrip() == "wake:")
+    paths, in_list = [], False
+    for ln in lines[start + 1:]:
+        if ln.strip() and not ln[0].isspace() and not ln.startswith("#"):
+            break  # next top-level section ends the wake block
+        if ln.lstrip().startswith("model_paths:"):
+            in_list = True
+            continue
+        if in_list:
+            s = ln.strip()
+            if s.startswith("- "):
+                paths.append(s[2:].strip())
+            elif s and not s.startswith("#"):
+                break  # a sibling key ends the list
+    return paths
 
 
 if __name__ == "__main__":

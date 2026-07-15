@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build training/.venv-train for livekit-wakeword training on the AMD RX 9070 XT
-# (RDNA4/gfx1201 -> ROCm PyTorch). The assistant runtime venv never gets torch;
+# (RDNA4/gfx1201 -> ROCm PyTorch). The hearth runtime venv never gets torch;
 # the training deps live here only. Idempotent-ish: re-run to rebuild the venv.
 set -euo pipefail
 cd "$(dirname "$0")/.."

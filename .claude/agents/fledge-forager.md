@@ -16,5 +16,6 @@ Claude-runtime specifics:
 - Before fanning out scouts, run `fledge nest scaffold` to clear and recreate `.fledge/nest/` (including `raw/`).
 - Spawn one `fledge-context-scout` subagent per assignment with the Task tool, all in parallel. Each Task prompt is that scout's entire context and must be self-contained (module name, exact file list, instruction to run `fledge nest scout --module <module>` to create the report file then fill every section body).
 - Scouts return one-line confirmations; verify each expected raw report exists afterward and re-spawn any missing scout once. Task subagents self-terminate and get no species names.
+- Spawning parallel scouts ends your turn; you resume when they finish. Those completion notifications are your cue to **begin synthesis**, not to stop — on resume, if the raw reports are present and the eight concern docs are still stubs, proceed straight through concern-doc synthesis and the index (steps 5–6) before sending any final message. Do not go idle at the scout→synthesis boundary.
 - After writing the concern docs and index, you may refresh any file's frontmatter with `fledge nest stamp <file>` if needed.
 - You run as a teammate and do not exit automatically after your final message; when the worker that commissioned you requests your shutdown by name, comply promptly.

@@ -27,7 +27,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import manifest  # noqa: E402  (training/ module, not the assistant package)
+import manifest  # noqa: E402  (training/ module, not the hearth package)
 from train import REPO, apply_overrides, apply_smoke_overrides, run_training  # noqa: E402
 
 BASE_CONFIG = REPO / "training" / "calcifer.yaml"

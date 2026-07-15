@@ -5,26 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 **hearth** — an offline-first voice personal assistant, packaged as the Python
-distribution `personal-assistant` (entry point `assistant = assistant.app:main`).
-Wake word: **Calcifer**. Primary target: Raspberry Pi 5, which is why every device
-id, model path, and threshold is config-driven — the Pi port is meant to be
-config-only.
+distribution `hearth` (entry point `hearth = hearth.app:main`). Wake word:
+**Calcifer**. Primary target: Raspberry Pi 5, which is why every device id, model
+path, and threshold is config-driven — the Pi port is meant to be config-only.
 
-### Current repo state (important)
-
-The runtime source is **not on disk right now**. The repo is mid-restart (see
-`git log`: `ce70f98 restarting (again)`). Only these are tracked:
-
-- `config.yaml` / `default-config.yaml` — active + reference configuration
-- `models/wake/calcifer.onnx` — trained wake model + `models.json`
-- `training/` — wake-word training pipeline (self-contained, has its own README)
-- `pyproject.toml`, `Makefile`, `.github/workflows/release.yml`, `.env.example`
-
-`pyproject.toml`, the training README, and configs reference packages that a live
-tree is expected to contain but which are **absent here**: `assistant/` (runtime),
-`tui/` (Textual monitor), and `packaging/build.sh` (invoked by `make release`).
-When asked to work on runtime code, confirm whether it should be (re)created rather
-than assuming files exist.
+**Read this first — code vs. goal.** "Voice assistant" is the *goal*; the current
+build is a **text-driven spine**. What ships today: the `hearth run` daemon, a
+localhost WebSocket "veneer" control surface, a two-tier LLM orchestrator, a
+Wikipedia tool, and a sqlite event log. The audio pipeline (wake word, STT, TTS,
+VAD, AEC) and the scheduling/calendar/weather/search capabilities are **roadmap,
+not wired into the runtime** — they exist only as `pyproject` extras and, for the
+wake word, as the `training/` pipeline and `models/wake/calcifer.onnx` that nothing
+in the runtime consumes yet. `README.md` has the working-vs-roadmap table.
 
 ## Commands
 
@@ -39,7 +31,7 @@ pytest path/to/test_x.py::test_name
 ruff check .                 # line-length 100
 
 make release                 # -> packaging/build.sh: single-file binary for the host arch
-                             #    output dist/assistant-$(uname -m). No cross-compile;
+                             #    output dist/hearth-$(uname -m). No cross-compile;
                              #    run once per target arch (x86_64 + aarch64).
 make clean
 ```
@@ -68,28 +60,60 @@ Two files, both documented inline:
 
 Loaded via `pydantic-settings`. Two override mechanisms:
 
-1. **Env vars** `ASSISTANT_*`, nested with a **double underscore**:
-   `ASSISTANT_LLM__MODEL`, `ASSISTANT_LOGGING__LEVEL`.
+1. **Env vars** `HEARTH_*`, nested with a **double underscore**:
+   `HEARTH_LLM__MODEL`, `HEARTH_LOGGING__LEVEL`.
 2. **`.env`** — **secrets only**. This is a hard rule established by FTHR-015: API
-   keys live in `.env` (see `.env.example`, `ASSISTANT_<SECTION>__<PROVIDER>_API_KEY`),
+   keys live in `.env` (see `.env.example`, `HEARTH_<SECTION>__<PROVIDER>_API_KEY`),
    never in the YAML. Non-secret tunables (models, hosts, thresholds) stay in
    `config.yaml`. Do not add secret fields to the YAML files.
 
-## Runtime architecture (from config)
+## Runtime architecture (what the code actually does)
 
-A staged voice pipeline, each stage a config section:
+`hearth run` (`hearth/app.py`) starts a single asyncio daemon and wires the object
+graph in `_run_daemon()`. The request path is text in → text out:
 
-`audio` capture → `wake` (livekit onnx detector) → `recorder` (WebRTC VAD
-endpointing) → `stt` (faster-whisper) → `llm` → `agent` (tool-calling rounds) →
-`verify` (pre/post answer-checking loop) → `persona` (revoice) → `tts` (piper).
+`Veneer` (WebSocket server, `veneer/`) → `Loop.run_turn` (`loop.py`) → `Router`
+(`brain/`) → LLM backends → `EventLog` (`memory/`).
 
-Cross-cutting: `conversation` (follow-up window, history), `scheduling`
-(apscheduler), `web_search`, `weather`, `calendar` (Google service-account, async
-httpx), `storage` (sqlite `assistant.db`), `aec`/`barge_in` (echo cancellation,
-off by default), `logging` (rotating file logs under `logs/`).
+The defining idea is the **two-tier "brain"**, all config-driven via `llm.tiers`:
 
-LLM provider is pluggable: `ollama` (local), `openrouter`, `opencode_zen`, with a
-`fallback` provider/model. OpenRouter's free router is the current primary.
+- **Local persona orchestrator** — every turn is served by the `default` tier
+  (local Ollama by default) carrying the **Calcifer** persona prompt. It exposes
+  exactly one tool: `consult_brain(query)`, gated per-turn on
+  `Router.brain_available()` (preserves a local-only fallback).
+- **Remote "brain"** — `consult_brain` runs a *nested* ReAct loop
+  (`tools/consult.py`) on the `tool` tier (OpenRouter by default), kept in its lane
+  by `persona.brain_guard_prompt`. It reaches real data tools — currently
+  **Wikipedia** (`tools/`) — and returns findings as an observation the
+  orchestrator folds back into Calcifer's voice.
+- Both call sites share one ReAct engine, `run_react_rounds` in `loop.py` — do not
+  duplicate the Thought→Action→Observation logic.
+
+Key seams:
+
+- **`brain/`** — `base.py` holds the frozen `Brain` protocol + boundary types
+  (`Message`, `ToolCall`, `ToolSpec`); `router.py` maps a tier role to a backend
+  class (`local.py` Ollama-style, `remote.py` OpenAI-compatible via
+  `openai_compat.py`); `errors.py` normalizes backend failures.
+- **`veneer/`** — the localhost control surface. `protocol.py::serialize` is a
+  strict **whitelist**: only `phase`/`label` cross the wire, so tool
+  query/arguments/observation content can never leak to the client. Unknown event
+  types raise — fail loud.
+- **`memory/`** — `log.py` `EventLog` is an append-only sqlite store (no
+  update/delete); `reader.py` `EventReader` is a read-only, cursor-based pull
+  interface — the Layer-2 seam a future background indexer attaches to. Don't couple
+  writers to it.
+- **`transcript.py`** — optional per-session human-readable transcripts under
+  `logs/transcripts/`, separate from the event log.
+
+Config sections that actually exist (see `hearth/config.py` `Settings`): `llm`,
+`veneer`, `tool`, `agent`, `persona`, `conversation`, `storage`, `logging`. The
+`audio`/`wake`/`stt`/`tts`/`verify`/`scheduling`/`calendar` sections implied by the
+extras are **not** in the schema yet.
+
+LLM backends are pluggable per tier via `llm.backends` (each an OpenAI-compatible
+`base_url` + `model`): local Ollama and OpenRouter (free router) are the wired
+defaults.
 
 ## Wake-word training
 
