@@ -36,12 +36,18 @@ def _print_message(message: dict) -> None:
         print(f"error: {message['message']}")
 
 
+async def _read_line() -> str:
+    """Read one line of stdin without blocking the event loop, so keepalive
+    pongs keep flowing while the user is idle at the prompt."""
+    return await asyncio.to_thread(sys.stdin.readline)
+
+
 async def run_client(host: str, port: int) -> None:
     uri = f"ws://{host}:{port}"
     async with websockets.connect(uri) as websocket:
         while True:
             print("> ", end="", flush=True)
-            line = sys.stdin.readline()
+            line = await _read_line()
             if not line:  # EOF
                 break
             line = line.strip()

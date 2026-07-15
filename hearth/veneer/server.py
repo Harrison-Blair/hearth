@@ -34,7 +34,14 @@ class Veneer:
     async def serve(self, host: str | None = None, port: int | None = None) -> None:
         host = host if host is not None else self._config.veneer.host
         port = port if port is not None else self._config.veneer.port
-        async with websockets.serve(self._handle_connection, host, port):
+        # No proactive keepalive: the veneer is a long-lived localhost control
+        # channel that legitimately idles between turns, and the default 20s
+        # ping timeout false-closes those idle connections. A genuinely dead
+        # peer still surfaces when the next per-turn send() raises
+        # ConnectionClosed (handled in _handle_connection).
+        async with websockets.serve(
+            self._handle_connection, host, port, ping_interval=None
+        ):
             await asyncio.Future()  # run until cancelled
 
     async def _handle_connection(self, websocket) -> None:
