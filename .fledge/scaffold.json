@@ -1,5 +1,5 @@
 {
-  "fledgeVersion": "0.5.4",
+  "fledgeVersion": "0.5.5",
   "agents": [
     "claude"
   ],
@@ -46,7 +46,7 @@
     },
     ".claude/team-loop.md": {
       "policy": "overwrite",
-      "sha256": "7df66f7f5b43cc7ab93a0ee69beb3e418c22c328ab0b241ca82be531c12e19fa"
+      "sha256": "5d4d4de20241c6b3857719f20f34a69f2f582de50887389e69d238329a359ae2"
     },
     ".fledge/broods/.gitkeep": {
       "policy": "default",
@@ -70,11 +70,11 @@
     },
     ".fledge/skills/fledge-orchestrate/SKILL.md": {
       "policy": "core",
-      "sha256": "025363c8d98ba4df5a32a2a7b910d80d76abfa58b5b2113550d20279bac4277f"
+      "sha256": "284949a6016c92aca7ba060a0484fa630d376354ecbbb63e2e8e1fa1ee201da4"
     },
     ".fledge/skills/fledge-orchestrate/foraging.md": {
       "policy": "core",
-      "sha256": "c0e9a8bd53b82d5bdd41f21f40b923c74c168a6093d8631fcd5edec7105e899a"
+      "sha256": "e6d4398ce9d73131b99622151d245f77f0ddd016f7a6b1ed99cbfe60d4f6038e"
     },
     ".fledge/skills/fledge-orchestrate/implementation.md": {
       "policy": "core",
@@ -82,7 +82,7 @@
     },
     ".fledge/skills/fledge-orchestrate/planning.md": {
       "policy": "core",
-      "sha256": "74cbd3694f00348e98a5debd3700453086d23d6756bbad1d1b408173c6f40cc4"
+      "sha256": "f0f4187a8bf4aec38077a1ece8892d25d26813b44f2c746140ebd09841424c35"
     },
     ".fledge/skills/fledge-orchestrate/templates/context-doc.md": {
       "policy": "core",
@@ -102,7 +102,7 @@
     },
     ".fledge/skills/fledge-orchestrate/worker-protocols.md": {
       "policy": "core",
-      "sha256": "e0e79ffb93956eb049b72ca80ef6e33bf3fe58a0a3d685b47d30c1491a97a0ac"
+      "sha256": "ff882bdfbd7e706c26d7d8cc656da9cf91b8f3b1b9e9442f55afe4e33e0686ca"
     },
     ".fledgeignore": {
       "policy": "default",

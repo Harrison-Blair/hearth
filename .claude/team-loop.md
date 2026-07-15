@@ -15,7 +15,7 @@ The agent-neutral skill calls you `fledge-orchestrator`; on Claude Code that rol
 ## Spawning and addressing teammates
 
 - Spawn a teammate of a given agent type (e.g. `fledge-brooder`) named per the penguin-species scheme in `implementation.md` §3.1. The teammate's agent definition (`.claude/agents/fledge-<role>.md`) is its system prompt; the spawn prompt you pass is its task context. Both are the teammate's entire context — it inherits no conversation history.
-- Address a teammate by name via `SendMessage`. A teammate may go idle; idle is not completion. It stays alive and addressable until you shut it down (see "Shutting down teammates" below).
+- Address a teammate by name via `SendMessage`. A teammate may go idle; idle is not completion. It stays alive and addressable until you shut it down (see "Shutting down teammates" below). A worker's completion signal is the `SendMessage` it addresses to you (e.g. a forager's coverage summary); a "Teammate … finished/idle" system notification is a lifecycle event, **not** that message — do not treat it as the worker reporting done. When you need to know whether an idle forager still owes work, run `fledge nest status` once (per `foraging.md` §Commissioner) rather than polling or inspecting the nest by hand.
 - Teammates inherit your permission mode at spawn. Brooders must edit files and run tests unattended in their panes — `implementation.md` §1 surfaces the current mode via a `confirm-gate` and asks whether to proceed or stop while the user switches to a mode without per-action prompts (e.g. `acceptEdits`). Without this, brooder panes stall awaiting approvals.
 
 ## Shutting down teammates
