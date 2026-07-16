@@ -1,14 +1,15 @@
 #!/usr/bin/env python
-"""Train the "Calcifer" wake-word model via the livekit-wakeword CLI.
+"""Train a wake-word model via the livekit-wakeword CLI.
 
 Runs in .venv-train (torch + livekit-wakeword[train,eval,export]; see bootstrap.sh).
-Loads training/calcifer.yaml, optionally shrinks it for a fast --smoke plumbing run,
-runs livekit's setup + full pipeline (generate -> augment -> train -> export -> eval),
-installs the exported .onnx into models/wake/, and records it in the manifest.
+Loads the given --config (e.g. training/vesta.yaml or training/prometheus.yaml),
+optionally shrinks it for a fast --smoke plumbing run, runs livekit's setup + full
+pipeline (generate -> augment -> train -> export -> eval), installs the exported
+.onnx into models/wake/, and records it in the manifest.
 
-  python training/train.py                 # full production run
-  python training/train.py --smoke         # tiny end-to-end run, proves the plumbing
-  python training/train.py --skip-setup    # reuse already-downloaded data/features
+  python training/train.py --config training/vesta.yaml           # full production run
+  python training/train.py --config training/vesta.yaml --smoke   # tiny end-to-end run, proves the plumbing
+  python training/train.py --config training/vesta.yaml --skip-setup   # reuse already-downloaded data/features
 
 ``run_training`` is the reusable per-model flow; train_batch.py imports it.
 """
@@ -134,7 +135,7 @@ def run_training(cfg: dict, *, skip_setup: bool = False) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", default=str(REPO / "training" / "calcifer.yaml"))
+    ap.add_argument("--config", required=True)
     ap.add_argument("--smoke", action="store_true", help="fast tiny end-to-end run")
     ap.add_argument("--skip-setup", action="store_true", help="skip the multi-GB data download")
     ap.add_argument("--n-samples", type=int, default=None, help="override n_samples (sweeps)")
