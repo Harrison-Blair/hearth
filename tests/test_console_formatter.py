@@ -162,6 +162,12 @@ def test_server_category_gets_registered_coloring(monkeypatch):
     assert server_codes != plain_codes
     assert reserved_error_code not in server_codes
 
+    connection_out = formatter.format(
+        _make_record(logging.INFO, "msg", category="connection")
+    )
+    connection_codes = set(ANSI_RE.findall(connection_out)) - {"\x1b[0m"}
+    assert server_codes != connection_codes, "server must not reuse connection's color"
+
 
 def test_no_color_when_not_a_tty(monkeypatch):
     from hearth.logging_setup import ColorFormatter

@@ -51,9 +51,9 @@ _CATEGORY_COLORS: dict[str, Callable[[str], str]] = {}
 # `hearth/veneer/server.py`) -- cyan, distinct from the reserved error color.
 _CATEGORY_COLORS["connection"] = lambda message: f"\x1b[36m{message}\x1b[0m"
 
-# FTHR-019: daemon lifecycle lines (app.py::_run_daemon) -- cyan, distinct
-# from the reserved ERROR/CRITICAL bold red.
-_CATEGORY_COLORS["server"] = lambda message: f"\x1b[36m{message}{_RESET}"
+# FTHR-019: daemon lifecycle lines (app.py::_run_daemon) -- magenta, distinct
+# from connection's cyan and the reserved ERROR/CRITICAL bold red.
+_CATEGORY_COLORS["server"] = lambda message: f"\x1b[35m{message}{_RESET}"
 
 
 class ColorFormatter(logging.Formatter):

@@ -102,6 +102,18 @@ passing unmodified (same object wiring / return value assertions).
 a coloring function distinct from the reserved ERROR/CRITICAL bold-red code.
 Verified by `test_server_category_gets_registered_coloring`.
 
+**Post-rebase fix:** after rebasing onto main (which had merged FTHR-018),
+the skua found `server` and FTHR-018's `connection` both resolved to the
+identical cyan code `\x1b[36m` -- distinct from plain/ERROR but not from
+each other, violating this AC's "distinctly from metrics/connection/plain"
+wording. Changed `server`'s color to magenta (`\x1b[35m`) in
+`hearth/logging_setup.py`, and added an assertion to
+`test_server_category_gets_registered_coloring` pinning
+`server_codes != connection_codes`. Confirmed test-first: reverted to cyan
+temporarily and reran the test -- it failed with
+`assert {'\x1b[36m'} != {'\x1b[36m'}` (both sets equal); restored magenta,
+same test passes. Full suite: 95 passed. `ruff check` clean.
+
 ## AC-4
 
 `test_version_command` and `test_run_daemon_wires_wikipedia_tool_brain_side`
