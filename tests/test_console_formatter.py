@@ -106,6 +106,34 @@ def test_unknown_category_falls_back_to_level_only():
     assert formatter.format(unknown) == formatter.format(absent)
 
 
+def test_connection_category_gets_registered_coloring(monkeypatch):
+    """FTHR-018: the "connection" category (registered by
+    `hearth/veneer/server.py`'s connect/disconnect/malformed-frame log
+    calls) renders distinctly from an uncategorized line and never reuses
+    the reserved ERROR/CRITICAL color."""
+    from hearth.logging_setup import _CATEGORY_COLORS, ColorFormatter
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    assert "connection" in _CATEGORY_COLORS
+
+    formatter = ColorFormatter()
+    tagged = formatter.format(
+        _make_record(logging.INFO, "client connected session=abc", category="connection")
+    )
+    plain = formatter.format(_make_record(logging.INFO, "client connected session=abc"))
+    assert tagged != plain
+
+    reset = "\x1b[0m"
+    tagged_codes = set(ANSI_RE.findall(tagged)) - {reset}
+    assert tagged_codes, "expected the connection category to add an ANSI color"
+
+    error_line = formatter.format(_make_record(logging.ERROR, "boom"))
+    error_codes = set(ANSI_RE.findall(error_line)) - {reset}
+    assert not (tagged_codes & error_codes), "connection category leaked the reserved error color"
+
+
 def test_no_color_when_not_a_tty(monkeypatch):
     from hearth.logging_setup import ColorFormatter
 

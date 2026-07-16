@@ -145,3 +145,70 @@ async def test_connection_closed_mid_turn_handled_cleanly(caplog):
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
     assert any("ConnectionClosed" in record.message or "disconnect" in record.message.lower()
                for record in caplog.records)
+
+
+async def test_connection_accepted_is_logged(caplog):
+    """A new INFO log line, tagged category="connection", is emitted as soon
+    as a connection is accepted -- before the first turn is processed."""
+    import json
+
+    class _EventLogStub:
+        def append(self, *args, **kwargs):
+            pass
+
+    class _OrderCheckingLoop:
+        async def run_turn(self, session_id, turn_id, transcript, emit=None):
+            logging.getLogger("test.turn").info("turn started")
+            return "ok"
+
+    veneer = Veneer(_OrderCheckingLoop(), _EventLogStub(), config=None)
+
+    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
+    ws = _FakeWebSocket([raw])
+
+    with caplog.at_level(logging.INFO):
+        await veneer._handle_connection(ws)
+
+    messages = [record.getMessage() for record in caplog.records]
+    connect_idx = next((i for i, m in enumerate(messages) if "connected" in m.lower()), None)
+    turn_idx = next((i for i, m in enumerate(messages) if m == "turn started"), None)
+    assert connect_idx is not None, f"no 'connected' log record found in {messages!r}"
+    assert turn_idx is not None, f"no 'turn started' log record found in {messages!r}"
+    assert connect_idx < turn_idx
+
+    connect_record = caplog.records[connect_idx]
+    assert connect_record.levelno == logging.INFO
+    assert connect_record.category == "connection"
+
+
+async def test_disconnect_and_malformed_frame_carry_category_tag(caplog):
+    """The existing disconnect-mid-turn and malformed-frame log lines both
+    carry category="connection" on their LogRecord."""
+    import json
+
+    class _EventLogStub:
+        def append(self, *args, **kwargs):
+            pass
+
+    loop = _FakeLoop(_EventLogStub())
+    veneer = Veneer(loop, _EventLogStub(), config=None)
+
+    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
+    ws = _FakeWebSocket([raw], close_on_send=True)
+
+    with caplog.at_level(logging.INFO):
+        await veneer._handle_connection(ws)
+
+    disconnect_records = [r for r in caplog.records if "disconnect" in r.getMessage().lower()]
+    assert disconnect_records
+    assert all(getattr(r, "category", None) == "connection" for r in disconnect_records)
+
+    caplog.clear()
+    ws2 = _FakeWebSocket(["{not json"])
+
+    with caplog.at_level(logging.WARNING):
+        await veneer._handle_connection(ws2)
+
+    malformed_records = [r for r in caplog.records if "malformed" in r.getMessage().lower()]
+    assert malformed_records
+    assert all(getattr(r, "category", None) == "connection" for r in malformed_records)
