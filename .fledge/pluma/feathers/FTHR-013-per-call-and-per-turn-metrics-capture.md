@@ -2,7 +2,7 @@
 id: FTHR-013
 title: Per-call and per-turn metrics capture
 plumage: PLM-003
-status: pipping
+status: fledged
 priority: P1
 depends_on: []
 authored: 2026-07-15T23:47:50Z
