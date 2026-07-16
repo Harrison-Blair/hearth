@@ -79,5 +79,5 @@ until passing. Lands in `tests/test_app.py` (existing file, reuses its
 ## Acceptance Criteria
 - [x] AC-1: The tests listed above were observed failing before implementation and pass after.
 - [x] AC-2: `_run_daemon()` emits an INFO "daemon starting" line and an INFO "veneer serving host=.../port=..." line, both tagged `extra={"category": "server"}`, with no change to `_run_daemon`'s control flow or return value. Satisfies PLM-004 FC-6.
-- [ ] AC-3: The console formatter's `server` category renders these lines distinctly from `metrics`/`connection`/plain and never reuses the reserved ERROR/CRITICAL color, completing PLM-004 AC-3's server-category coverage.
+- [x] AC-3: The console formatter's `server` category renders these lines distinctly from `metrics`/`connection`/plain and never reuses the reserved ERROR/CRITICAL color, completing PLM-004 AC-3's server-category coverage.
 - [x] AC-4: Existing `test_app.py` tests (`test_version_command`, `test_run_daemon_wires_wikipedia_tool_brain_side`) pass unmodified.
