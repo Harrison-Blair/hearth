@@ -15,11 +15,11 @@ progress, not wired into the runtime yet.
 | `hearth` daemon + WebSocket "veneer" control surface | Audio capture → wake word → STT → TTS voice pipeline |
 | Two-tier LLM: local persona (Vesta) + remote "brain" | Raspberry Pi 5 target (config-driven device/model/threshold) |
 | Wikipedia tool via a nested ReAct loop | Scheduling, calendar, weather, web search extras |
-| sqlite event log + per-session transcripts | Wake-word detector consuming `models/wake/calcifer.onnx` |
+| sqlite event log + per-session transcripts | Wake-word detector consuming `models/wake/vesta.onnx` / `models/wake/prometheus.onnx` |
 
-The wake model (`models/wake/calcifer.onnx`) and the training pipeline under
-`training/` already exist — they're the wake-word groundwork — but nothing in the
-current runtime consumes them yet.
+The wake models (`models/wake/vesta.onnx`, `models/wake/prometheus.onnx`) and the
+training pipeline under `training/` already exist — they're the wake-word
+groundwork — but nothing in the current runtime consumes them yet.
 
 ## Description
 
@@ -183,8 +183,8 @@ Two tiers: Ollama runs Vesta locally; OpenRouter serves the `consult_brain`
 lookups. To run fully local (no key), set `llm.tiers.tool: local` in `config.yaml`.
 
 **Is this a voice assistant?**
-Not yet. Today it's a text spine you type at. Wake word (**Calcifer**), STT, and TTS
-are roadmap; `training/` and `models/wake/` are the wake-word groundwork.
+Not yet. Today it's a text spine you type at. Wake word (**Vesta** / **Prometheus**),
+STT, and TTS are roadmap; `training/` and `models/wake/` are the wake-word groundwork.
 
 **How do I talk to it?**
 Start the daemon with `hearth run`, then run `python -m hearth.veneer.client`

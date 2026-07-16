@@ -6,8 +6,6 @@
 #   training/.venv-train/bin/python training/train_batch.py            # full runs
 #   training/.venv-train/bin/python training/train_batch.py --smoke    # quick plumbing
 #
-# calcifer
-# hey calcifer
 # hey penguin
 # athena
 #
