@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import os
+import re
 import sys
 from typing import Callable
 
@@ -54,6 +55,27 @@ _CATEGORY_COLORS["connection"] = lambda message: f"\x1b[36m{message}\x1b[0m"
 # FTHR-019: daemon lifecycle lines (app.py::_run_daemon) -- magenta, distinct
 # from connection's cyan and the reserved ERROR/CRITICAL bold red.
 _CATEGORY_COLORS["server"] = lambda message: f"\x1b[35m{message}{_RESET}"
+
+# FTHR-017: PLM-003's per-call/per-turn metrics lines and FAILED/timeout
+# markers (`hearth/loop.py`) -- per-segment coloring distinct from
+# connection's cyan, server's magenta, and the reserved ERROR/CRITICAL bold
+# red: green for token-count segments (in=/out=/thinking=), blue for
+# timing segments (duration_s=/tok/s=/after=).
+_METRICS_TOKEN_COLOR = "\x1b[32m"  # green
+_METRICS_TIMING_COLOR = "\x1b[34m"  # blue
+_METRICS_SEGMENT_RE = re.compile(r"\b(in|out|thinking|duration_s|tok/s|after)=(\S+)")
+
+
+def _colorize_metrics(message: str) -> str:
+    def _sub(match: "re.Match[str]") -> str:
+        key, value = match.group(1), match.group(2)
+        color = _METRICS_TOKEN_COLOR if key in ("in", "out", "thinking") else _METRICS_TIMING_COLOR
+        return f"{color}{key}={value}{_RESET}"
+
+    return _METRICS_SEGMENT_RE.sub(_sub, message)
+
+
+_CATEGORY_COLORS["metrics"] = _colorize_metrics
 
 
 class ColorFormatter(logging.Formatter):
