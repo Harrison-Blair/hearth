@@ -100,8 +100,8 @@ passes.
   the success path).
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: A `BrainError` raised from `brain.complete()` inside `run_react_rounds` produces a one-line FAILED marker logged at `WARNING` level (tier, round, `BrainError.reason`, elapsed time) before propagating unchanged, and never logs `BrainError.detail`. Satisfies PLM-003 FC-5; PLM-003 AC-4.
-- [ ] AC-3: A turn-level timeout (`Loop.run_turn`) and a consult-level timeout (`BrainConsult.__call__`) each log a `WARNING`-level timeout marker from their existing `except asyncio.TimeoutError` handlers, without changing either handler's existing fallback behavior (answer text / degraded findings string). Satisfies PLM-003 FC-5; PLM-003 AC-4.
-- [ ] AC-4: The per-turn summary line counts a failed/timed-out call toward the turn's call count and total wall time, shows a `(K failed)` suffix when `K > 0`, and excludes the failed call from the turn's token/tokens-per-second totals. Satisfies PLM-003 FC-5; PLM-003 AC-4.
-- [ ] AC-5: FTHR-013's happy-path per-call and per-turn tests still pass unmodified (no failure-marker logic triggers on successful calls).
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: A `BrainError` raised from `brain.complete()` inside `run_react_rounds` produces a one-line FAILED marker logged at `WARNING` level (tier, round, `BrainError.reason`, elapsed time) before propagating unchanged, and never logs `BrainError.detail`. Satisfies PLM-003 FC-5; PLM-003 AC-4.
+- [x] AC-3: A turn-level timeout (`Loop.run_turn`) and a consult-level timeout (`BrainConsult.__call__`) each log a `WARNING`-level timeout marker from their existing `except asyncio.TimeoutError` handlers, without changing either handler's existing fallback behavior (answer text / degraded findings string). Satisfies PLM-003 FC-5; PLM-003 AC-4.
+- [x] AC-4: The per-turn summary line counts a failed/timed-out call toward the turn's call count and total wall time, shows a `(K failed)` suffix when `K > 0`, and excludes the failed call from the turn's token/tokens-per-second totals. Satisfies PLM-003 FC-5; PLM-003 AC-4.
+- [x] AC-5: FTHR-013's happy-path per-call and per-turn tests still pass unmodified (no failure-marker logic triggers on successful calls).
