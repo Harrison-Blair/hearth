@@ -1,9 +1,11 @@
 # Wake-word training (livekit-wakeword)
 
 Trains the `.onnx` classifier the runtime wakes on
-(`hearth/wake/livekit_detector.py`, `config.yaml` → `wake`). Default phrase:
-**Calcifer**. The pipeline is [livekit-wakeword](https://github.com/livekit/livekit-wakeword):
-one YAML (`calcifer.yaml`), one command, a conv-attention classifier head.
+(`hearth/wake/livekit_detector.py`, `config.yaml` → `wake`). Two dedicated phrases:
+**Vesta** and **Prometheus**, each with its own hand-curated config
+(`vesta.yaml`, `prometheus.yaml`). The pipeline is
+[livekit-wakeword](https://github.com/livekit/livekit-wakeword): one YAML per
+phrase, one command each, a conv-attention classifier head.
 
 Fully synthetic, no recordings: livekit synthesizes positive + adversarial-negative
 clips (Piper VITS), augments them with room reverb (MIT RIRs) and background noise
@@ -31,38 +33,42 @@ torch sees the GPU. System deps (Arch): `espeak-ng libsndfile ffmpeg sox`.
 ## 2. Smoke run (prove the plumbing)
 
 ```bash
-training/.venv-train/bin/python training/train.py --smoke
+training/.venv-train/bin/python training/train.py --smoke --config training/vesta.yaml
+training/.venv-train/bin/python training/train.py --smoke --config training/prometheus.yaml
 ```
 
-Shrinks `calcifer.yaml` to a tiny fast run (~200 samples, 500 steps), writes
-`models/wake/calcifer_smoke.onnx`, and records it in the manifest. The first run
-triggers livekit `setup`, a **multi-GB download** (~16 GB ACAV100M features + MUSAN
-backgrounds + RIRs + Piper voice) into `training/data`; pass `--skip-setup` on
-re-runs. Livekit resumes a model's previous run from whatever is on disk; to start
-over instead, pass `--fresh` (clears features/checkpoints/eval but keeps the
-synthesized clips — the slow part) or `--fresh-clips` (wipes the model's whole
-output dir for full regeneration). Don't use either while a run is live.
+Shrinks the given config to a tiny fast run (~200 samples, 500 steps), writes
+`models/wake/vesta_smoke.onnx` / `models/wake/prometheus_smoke.onnx`, and records
+each in the manifest. The first run triggers livekit `setup`, a **multi-GB
+download** (~16 GB ACAV100M features + MUSAN backgrounds + RIRs + Piper voice)
+into `training/data`; pass `--skip-setup` on re-runs (data is shared across both
+phrases' configs). Livekit resumes a model's previous run from whatever is on
+disk; to start over instead, pass `--fresh` (clears features/checkpoints/eval but
+keeps the synthesized clips — the slow part) or `--fresh-clips` (wipes the model's
+whole output dir for full regeneration). Don't use either while a run is live.
 Inspect the result:
 
 ```bash
-python training/manifest.py list                    # recall / fpph / thr per model
-# training/output/calcifer_smoke/calcifer_smoke_det.png   # DET curve
-python training/manifest.py select calcifer_smoke   # point config.yaml at it
+python training/manifest.py list                        # recall / fpph / thr per model
+# training/output/vesta_smoke/vesta_smoke_det.png            # DET curve
+python training/manifest.py select vesta_smoke prometheus_smoke   # point config.yaml at both
 ```
 
 ## 3. Production run
 
 ```bash
-training/.venv-train/bin/python training/train.py     # -> models/wake/calcifer.onnx
+training/.venv-train/bin/python training/train.py --config training/vesta.yaml       # -> models/wake/vesta.onnx
+training/.venv-train/bin/python training/train.py --config training/prometheus.yaml  # -> models/wake/prometheus.onnx
 ```
 
-The full `calcifer.yaml` (25k samples, conv_attention/medium, 100k steps,
-`target_fp_per_hour: 0.1`) — long-running on the GPU. When it finishes, set the
-runtime threshold from the manifest's optimal threshold and select the model:
+Each config (25k samples, conv_attention/medium, 100k steps,
+`target_fp_per_hour: 0.1`) is long-running on the GPU — run one, then the other.
+When both finish, set the runtime threshold from the manifest's optimal threshold
+and select the models:
 
 ```bash
-python training/manifest.py list                # note calcifer's `thr`
-python training/manifest.py select calcifer     # writes config.yaml wake.model_paths
+python training/manifest.py list                       # note each model's `thr`
+python training/manifest.py select vesta prometheus    # writes config.yaml wake.model_paths
 ```
 
 Then set `wake.threshold` in `config.yaml` to that value and restart the daemon.
@@ -81,7 +87,7 @@ training/.venv-train/bin/python training/train_batch.py --smoke    # quick plumb
 training/.venv-train/bin/python training/train_batch.py --n-samples 5000 --steps 20000  # cheap sweep
 ```
 
-Each phrase derives its config from `calcifer.yaml` (dropping the Calcifer-specific
+Each phrase derives its config from `vesta.yaml` (dropping its Vesta-specific
 `custom_negative_phrases`, so livekit auto-generates each phrase's adversarial
 negatives), trains into `models/wake/<slug>.onnx`, and records it in the manifest.
 A failing phrase is reported and the batch continues; the run ends with the manifest
@@ -91,9 +97,9 @@ the rest reuse it.
 
 ## Tuning
 
-`calcifer.yaml` knobs that matter most: `target_fp_per_hour` (the FPPH gate the
-optimal threshold targets), `custom_negative_phrases` (add real-world false
-triggers you observe — 1–2 phoneme edits from the wake word), `n_samples`
-(more positives = more robust, slower), and `model.model_size`
+`vesta.yaml`/`prometheus.yaml` knobs that matter most: `target_fp_per_hour` (the
+FPPH gate the optimal threshold targets), `custom_negative_phrases` (add
+real-world false triggers you observe — 1–2 phoneme edits from the wake word),
+`n_samples` (more positives = more robust, slower), and `model.model_size`
 (`small`/`medium`/`large`). `training/data`, `training/output`, `training/work`,
-and `.venv-train` are git-ignored; only `calcifer.yaml` and the scripts are tracked.
+and `.venv-train` are git-ignored; only the phrase configs and scripts are tracked.

@@ -2,14 +2,14 @@
 """Train a series of wake words sequentially on the livekit pipeline.
 
 One phrase at a time (no parallelism). Reads phrases from training/phrases.txt (or
-positional args), derives a per-phrase config from training/calcifer.yaml — dropping
-its Calcifer-specific negatives so livekit auto-generates adversarials — and runs the
+positional args), derives a per-phrase config from training/vesta.yaml — dropping
+its Vesta-specific negatives so livekit auto-generates adversarials — and runs the
 same flow as train.py per phrase, streaming each livekit run's stage output live under
 a per-phrase header. A failing (or gate-failing) phrase is recorded and the batch
 continues; the run ends with the manifest table.
 
   python training/train_batch.py                        # phrases from training/phrases.txt
-  python training/train_batch.py "hey calcifer" athena  # phrases as positional args
+  python training/train_batch.py "hey penguin" athena   # phrases as positional args
   python training/train_batch.py --smoke                # fast tiny end-to-end per phrase
   python training/train_batch.py --n-samples 5000 --steps 20000   # reduced-scale sweep
 
@@ -30,9 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import manifest  # noqa: E402  (training/ module, not the hearth package)
 from train import REPO, apply_overrides, apply_smoke_overrides, run_training  # noqa: E402
 
-BASE_CONFIG = REPO / "training" / "calcifer.yaml"
+BASE_CONFIG = REPO / "training" / "vesta.yaml"
 PHRASES_FILE = REPO / "training" / "phrases.txt"
-# calcifer.yaml fields tuned for the Calcifer phrase specifically; they must not
+# vesta.yaml fields tuned for the Vesta phrase specifically; they must not
 # leak onto other phrases (livekit auto-generates their adversarial negatives).
 PHRASE_SPECIFIC = ("custom_negative_phrases",)
 
@@ -49,7 +49,7 @@ def parse_phrases(text: str) -> list[str]:
 
 def derive_config(base: dict, phrase: str) -> dict:
     """Per-phrase config from the base template: set model_name + target_phrases and
-    drop the Calcifer-specific fields so nothing carries across phrases."""
+    drop the Vesta-specific fields so nothing carries across phrases."""
     cfg = copy.deepcopy(base)
     cfg["model_name"] = manifest.slug(phrase)
     cfg["target_phrases"] = [phrase]

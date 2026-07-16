@@ -1,8 +1,8 @@
-# Production wake-word config for "Calcifer" (livekit-wakeword).
+# Production wake-word config for "Prometheus" (livekit-wakeword).
 # Modeled on livekit's configs/prod.yaml. Trained via `python training/train.py`
 # in .venv-train (see bootstrap.sh); the runtime consumes the exported .onnx only.
-model_name: calcifer
-target_phrases: ["calcifer"]
+model_name: prometheus
+target_phrases: ["prometheus"]
 
 # ---------------------------------------------------------------------------
 # Data generation
@@ -15,23 +15,23 @@ tts_batch_size: 50           # 100 OOMs on the 16 GB RX 9070 XT in practice (tor
                              # ~13 GB steady + ~3.6 GB batch spike); failed batches are
                              # silently skipped, shrinking the dataset — keep at 50
 
-# Adversarial hard negatives — 1-2 phoneme edits from "calcifer", not near-identical.
+# Adversarial hard negatives — 1-2 phoneme edits from "prometheus", not near-identical.
 custom_negative_phrases:
-  - "calcify"
-  - "calcified"
-  - "calcifies"
-  - "calcification"
-  - "calcium"
-  - "classifier"
-  - "classify"
-  - "lucifer"
-  - "hey lucifer"
-  - "california"
-  - "calculate"
-  - "cal cipher"
-  - "kelsey fur"
-  - "qualifier"
-  - "pacifier"
+  - "promethium"
+  - "prometheum"
+  - "for me the us"
+  - "prometheus'"
+  - "prometheous"
+  - "promethius"
+  - "prom of theus"
+  - "premise"
+  - "prom a theus"
+  - "prometeus"
+  - "for me thesis"
+  - "promotheus"
+  - "protheus"
+  - "prometheous'"
+  - "problem theus"
 
 # ---------------------------------------------------------------------------
 # TTS parameters (Piper VITS + SLERP speaker blending)
