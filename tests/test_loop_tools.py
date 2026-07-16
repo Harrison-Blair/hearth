@@ -504,3 +504,31 @@ async def test_turn_timeout_logs_marker_and_counts_failed_call(
 
     for client in clients.values():
         await client.aclose()
+
+
+async def test_timeout_marker_carries_category_tag(tmp_path, two_tier_llm_config, caplog):
+    """FTHR-017 AC-2: the turn-timeout WARNING marker also carries
+    `category="metrics"` (no change to message text or level)."""
+    caplog.set_level(logging.WARNING)
+
+    def local_handler(request, n):
+        return httpx.Response(200, json=_tool_call_completion("consult_brain", {"query": "x"}))
+
+    def remote_handler(request, n):
+        raise AssertionError("remote should not be called: consult is faked")
+
+    router, clients, _ = _build(two_tier_llm_config, local_handler, remote_handler)
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = Loop(
+        router, log, _Config(agent=_Agent(turn_timeout_s=0.05)), consult=_BlockingConsult()
+    )
+
+    await loop.run_turn("s1", "t1", "look it up")
+
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    timeout_records = [r for r in warning_records if "timeout" in r.getMessage().lower()]
+    assert timeout_records
+    assert timeout_records[0].category == "metrics"
+
+    for client in clients.values():
+        await client.aclose()

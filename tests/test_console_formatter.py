@@ -169,6 +169,49 @@ def test_server_category_gets_registered_coloring(monkeypatch):
     assert server_codes != connection_codes, "server must not reuse connection's color"
 
 
+def test_metrics_category_gets_registered_coloring(monkeypatch):
+    """FTHR-017 registers a "metrics" coloring rule in _CATEGORY_COLORS:
+    per-call/per-turn metrics lines get distinguishable per-segment coloring,
+    distinct from an uncategorized line, from the connection/server
+    categories, and never reusing the reserved ERROR/CRITICAL color."""
+    from hearth.logging_setup import _CATEGORY_COLORS, ColorFormatter
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    assert "metrics" in _CATEGORY_COLORS
+
+    formatter = ColorFormatter()
+    msg = (
+        "llm call tier=default model=x round=1 in=12 out=6 thinking=n/a "
+        "duration_s=1.2s tok/s=5.0"
+    )
+    plain = _make_record(logging.INFO, msg)
+    metrics = _make_record(logging.INFO, msg, category="metrics")
+    metrics.created = plain.created
+    metrics.msecs = plain.msecs
+
+    plain_out = formatter.format(plain)
+    metrics_out = formatter.format(metrics)
+
+    reset = "\x1b[0m"
+    plain_codes = set(ANSI_RE.findall(plain_out)) - {reset}
+    metrics_codes = set(ANSI_RE.findall(metrics_out)) - {reset}
+    reserved_error_code = "\x1b[1;31m"
+
+    assert metrics_codes, "expected the metrics category to add ANSI coloring"
+    assert metrics_codes != plain_codes
+    assert reserved_error_code not in metrics_codes
+    assert len(metrics_codes) >= 2, "expected distinguishable per-segment coloring"
+
+    connection_out = formatter.format(_make_record(logging.INFO, msg, category="connection"))
+    server_out = formatter.format(_make_record(logging.INFO, msg, category="server"))
+    connection_codes = set(ANSI_RE.findall(connection_out)) - {reset}
+    server_codes = set(ANSI_RE.findall(server_out)) - {reset}
+    assert not (metrics_codes & connection_codes), "metrics must not reuse connection's color"
+    assert not (metrics_codes & server_codes), "metrics must not reuse server's color"
+
+
 def test_no_color_when_not_a_tty(monkeypatch):
     from hearth.logging_setup import ColorFormatter
 
