@@ -34,3 +34,7 @@ training/.venv-train/
 # fledge — per-run intermediates, regenerable
 .fledge/nest/raw/
 .fledge/broods/
+*.lock
+# fledge — per-run intermediates, regenerable
+.fledge/roster/
+.alloc.lock

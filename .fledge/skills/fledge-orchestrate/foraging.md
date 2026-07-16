@@ -22,7 +22,7 @@ You are the commissioner when you spawn a forager and wait on it: the orchestrat
 
 If repeated by-name nudges across successive idles still produce no final message, do not decide unilaterally: surface the situation to the user through a `confirm-gate` (intervene — terminate and respawn a fresh forager, or fall back to inline synthesis — or keep waiting). Only the user chooses to abandon a forager.
 
-**On the final message, verify and release.** When the by-name final message arrives, confirm the result with `fledge nest status` (it should report complete, with `index.md`'s `commit` at HEAD), relay the forager's coverage notes, and request the forager's graceful shutdown by name. Its species frees only once shutdown is confirmed.
+**On the final message, verify and release.** When the by-name final message arrives, confirm the result with `fledge nest status` (it should report complete, with `index.md`'s `commit` at HEAD), relay the forager's coverage notes, and request the forager's graceful shutdown by name; the party holding the `spawn-worker`/kill primitive (on Claude Code, the orchestrator, `team-lead`) force-terminates it if it does not exit promptly — acknowledging a shutdown request is not the same as ending its session. Its species frees only once shutdown is confirmed.
 
 ## Forager
 
@@ -65,7 +65,7 @@ Report: modules scanned, scouts spawned (and any re-spawns), documents written, 
 
 ### Lifecycle
 
-A forager is one-shot, but "one-shot" ends when `fledge nest status` reports complete (step 7), not at the scout fan-out. You are done only once every pipeline step is written, `fledge nest status` passes, **and** you have sent your final message. Going idle before that final message is a stall, not completion: if you find yourself idle with the raw reports present and the concern docs still stubs, you have stopped mid-pipeline — resume synthesis immediately rather than waiting to be prompted. `fledge nest status` is your objective check for exactly this: run it on any wake to see whether you still owe synthesis. After the final message you have no further work. In harnesses where workers persist after their final message, the worker that commissioned it (the incubator or the orchestrator) will request its shutdown by name once the nest output is verified — comply promptly. Scouts are unnamed (no species): they self-terminate on their one-line final message and are never addressed by name.
+A forager is one-shot, but "one-shot" ends when `fledge nest status` reports complete (step 7), not at the scout fan-out. You are done only once every pipeline step is written, `fledge nest status` passes, **and** you have sent your final message. Going idle before that final message is a stall, not completion: if you find yourself idle with the raw reports present and the concern docs still stubs, you have stopped mid-pipeline — resume synthesis immediately rather than waiting to be prompted. `fledge nest status` is your objective check for exactly this: run it on any wake to see whether you still owe synthesis. After the final message you have no further work. In harnesses where workers persist after their final message, the party that commissioned it requests its shutdown by name once the nest output is verified — comply promptly, and expect the orchestrator (on Claude Code, `team-lead`; the party holding the `spawn-worker`/kill primitive) to force-terminate you if you do not exit promptly, since acknowledging a shutdown request is not the same as ending your session. Scouts are unnamed (no species): they self-terminate on their one-line final message and are never addressed by name.
 
 ## Scout
 
@@ -79,6 +79,7 @@ A scout's prompt assigns a module name and an explicit list of files. Its entire
 - Follow the section order in `templates/scout-report.md` in this skill's directory exactly — every section present, in order. Write `None observed.` under any section with nothing to report; never omit a section.
 - Frontmatter is stamped by `fledge nest scout`; refresh it with `fledge nest stamp <file>` if needed.
 - Report facts you observed, with file paths. Do not speculate about code you did not read; put uncertainties under Open Questions.
+- Any count, total, or enumerated size you state (e.g. "N commands," "N fixtures," "N files in module X") must come from an exact computation run at write time — a `grep -c`, a `find`/glob count, `wc -l`, or equivalent — never estimated by eye or recalled from memory. Cite or show the command that produced it so the count is re-derivable by a later reader, not merely asserted. This applies equally to counts carried into any synthesized doc.
 - Be dense: bullet points, file references, identifier names. No prose padding.
 
 ### Final message

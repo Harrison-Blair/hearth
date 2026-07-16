@@ -11,7 +11,7 @@ This step is addressed to the orchestrator (the main session) and is **capabilit
   You (the orchestrator) are then a **pure relay** and hold no planning context:
   - When the incubator sends a `GATE` or `QUESTION` message (envelope in `worker-protocols.md` §Incubator), present its material to the user through your `confirm-gate` mechanism **verbatim and in full** — never summarize it, never answer on the user's behalf — and send the user's choice and any feedback back verbatim (`message-peer`).
   - When it sends a `SPAWN-REQUEST` (a worker kind it cannot spawn itself — e.g. the forager, on harnesses where workers cannot spawn workers), spawn that worker with exactly the spawn prompt provided and confirm back to the incubator.
-  - When it sends `PHASE-CLOSE`, relay the closing report to the user, then request the incubator's graceful shutdown by name; its species frees once shutdown is confirmed.
+  - When it sends `PHASE-CLOSE`, relay the closing report to the user, then request the incubator's graceful shutdown by name, force-terminating it if it does not exit promptly; its species frees once shutdown is confirmed.
   - A user refusal relays as-is: the incubator pauses the phase cleanly (spec state untouched) and stays alive awaiting direction. If the incubator is lost (killed, or gone after a resume), the specs on disk are the recovery point — spawn a fresh incubator (fresh species) with the same feature request plus a note of what is already hatched.
 - **If you do not provide both:** run steps 1–4 yourself in the main session, gating directly with the user.
 
@@ -20,9 +20,9 @@ From here on, **"you" means whoever runs the phase**: the incubator when delegat
 ## 1. Freshness gate
 
 - If `.fledge/nest/index.md` does not exist → go to step 2.
-- Otherwise compare the `commit` in its frontmatter to `git rev-parse HEAD`:
-  - Equal → context is fresh; skip to step 3.
-  - Different → summarize the staleness (`git log --oneline <commit>..HEAD`: how many commits, which areas changed) and run a `confirm-gate` (decision): regenerate context, or proceed with existing context. Respect their choice.
+- Otherwise run `fledge nest status --json` and read `index_commit_matches`:
+  - `true` → context is fresh; skip to step 3.
+  - `false` → summarize the staleness (`git log --oneline <index_commit>..HEAD`, where `<index_commit>` is the `index_commit` field from that same JSON: how many commits, which areas changed) and run a `confirm-gate` (decision): regenerate context, or proceed with existing context. Respect their choice.
 
 ## 2. Gather context (when needed)
 
@@ -32,7 +32,7 @@ This step is **capability-conditional** on the `spawn-worker` primitive.
 
   **Wait on the forager exactly as the "Commissioner" section of `foraging.md` specifies — that section is the single source of truth for the wait.** In short: the **only** signal that it is done is its explicit final message (the coverage summary it sends you by name); a bare idle or "worker finished" notification is not completion, and on-disk `.fledge/nest/` state is never an input to that decision. You are re-invoked by events, so you never `sleep`-poll and never eyeball the nest to gauge progress. On a genuine idle with no final message, run `fledge nest status` once to tell a finished forager from one still owing synthesis; send at most a few by-name nudges (`message-peer`) across successive idles, and if none is answered with a final message, escalate to the user via a `confirm-gate` (decision) rather than deciding unilaterally. Only the user chooses to abandon a forager; you never autonomously churn one.
 
-  Once the final message arrives, confirm with `fledge nest status` that `.fledge/nest/index.md` is complete and stamped to HEAD, then request the forager's graceful shutdown by name (`message-peer`); its species frees only after shutdown is confirmed. Relay the forager's coverage notes to the user. Foragers are one-shot: obtain a fresh forager (fresh species) for each regeneration; never reuse a previous one.
+  Once the final message arrives, confirm with `fledge nest status` that `.fledge/nest/index.md` is complete and stamped to HEAD, then request the forager's graceful shutdown by name (`message-peer`), force-terminating it if it does not exit promptly; its species frees only after shutdown is confirmed. Relay the forager's coverage notes to the user. Foragers are one-shot: obtain a fresh forager (fresh species) for each regeneration; never reuse a previous one.
 - **If you do not provide `spawn-worker` (and have no orchestrator to request one from):** gather the context yourself — read the repo's modules and synthesize the eight concern documents into `.fledge/nest/` plus `index.md` following the conventions at `templates/context-doc.md` and the forager pipeline in `foraging.md` (you perform both the forager's and the scout's roles, sequentially). The output set is the same either way.
 
 ## 3. Plumage interrogation

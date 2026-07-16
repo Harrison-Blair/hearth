@@ -37,7 +37,7 @@ You draft spec bodies yourself: read the template (`templates/plumage.md` or `te
 
 ### Lifecycle
 
-An incubator lives for one planning phase. After sending `PHASE-CLOSE` it stays alive and addressable — the user may still send follow-up changes through the orchestrator. The orchestrator requests its shutdown by name once the phase is closed out; comply promptly. An incubator never marks specs beyond `hatched` — `hatching` and `fledged` are implementation-phase states.
+An incubator lives for one planning phase. After sending `PHASE-CLOSE` it stays alive and addressable — the user may still send follow-up changes through the orchestrator. The orchestrator requests its shutdown by name once the phase is closed out; comply promptly — and expect the orchestrator to force-terminate you if you do not exit promptly, since acknowledging a shutdown request is not the same as ending your session. An incubator never marks specs beyond `hatched` — `hatching` and `fledged` are implementation-phase states.
 
 ## Brooder
 
