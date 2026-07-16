@@ -1,7 +1,7 @@
 ---
 id: PLM-006
 title: "Vesta & Prometheus wake-word retrain"
-status: hatched
+status: fledged
 priority: P1
 authored: 2026-07-16T02:40:35Z
 agent: fledge-orchestrate/planning
@@ -33,15 +33,15 @@ Production training (25k samples, 100k steps) requires a specific ROCm-capable G
 8. FC-8: The legacy Calcifer wake-word artifact is fully retired: `models/wake/calcifer.onnx` is deleted, and its `"calcifer"` entry is removed from `models/wake/models.json`. `manifest.py` currently has no removal subcommand (only `upsert`/`list`/`regen`/`select`) — a `remove <slug>` subcommand (mirroring `upsert`'s shape: loads the manifest, deletes the key, saves) is added to `manifest.py` and used to perform the removal, rather than hand-editing the JSON, so future cleanups have a real mechanism.
 
 ## Acceptance Criteria
-- [ ] AC-1: `training/vesta.yaml` exists with `model_name`/`target_phrases` = `vesta` and Vesta-specific curated negative phrases; `training/calcifer.yaml` no longer exists (FC-1).
-- [ ] AC-2: `training/prometheus.yaml` exists with `model_name`/`target_phrases` = `prometheus`, Prometheus-specific curated negative phrases, and matches `vesta.yaml`'s structure/knobs (FC-2).
-- [ ] AC-3: `train.py --config` is a required argument with no default value (FC-3).
-- [ ] AC-4: `train_batch.py`'s `BASE_CONFIG` resolves to `training/vesta.yaml` (FC-4).
-- [ ] AC-5: `README.md` names both "Vesta" and "Prometheus" as wake words with both model paths; no remaining "Calcifer" wake-word reference (FC-5).
-- [ ] AC-6: `training/README.md` contains no remaining reference to `calcifer.yaml` or "Calcifer" as the default/example phrase (FC-6).
-- [ ] AC-7: Both smoke runs (`vesta.yaml`, `prometheus.yaml`) complete successfully, produce their respective `*_smoke.onnx` files, and both are listed by `manifest.py list` (FC-7).
-- [ ] AC-8: No occurrence of "calcifer"/"Calcifer" remains anywhere under `training/` (configs, scripts, README) or `models/wake/` (artifacts + manifest entries).
-- [ ] AC-9: `models/wake/calcifer.onnx` no longer exists on disk and `models/wake/models.json` has no `"calcifer"` key; `manifest.py` gained a `remove <slug>` subcommand used to perform the removal (FC-8).
+- [x] AC-1: `training/vesta.yaml` exists with `model_name`/`target_phrases` = `vesta` and Vesta-specific curated negative phrases; `training/calcifer.yaml` no longer exists (FC-1).
+- [x] AC-2: `training/prometheus.yaml` exists with `model_name`/`target_phrases` = `prometheus`, Prometheus-specific curated negative phrases, and matches `vesta.yaml`'s structure/knobs (FC-2).
+- [x] AC-3: `train.py --config` is a required argument with no default value (FC-3).
+- [x] AC-4: `train_batch.py`'s `BASE_CONFIG` resolves to `training/vesta.yaml` (FC-4).
+- [x] AC-5: `README.md` names both "Vesta" and "Prometheus" as wake words with both model paths; no remaining "Calcifer" wake-word reference (FC-5).
+- [x] AC-6: `training/README.md` contains no remaining reference to `calcifer.yaml` or "Calcifer" as the default/example phrase (FC-6).
+- [x] AC-7: Both smoke runs (`vesta.yaml`, `prometheus.yaml`) complete successfully, produce their respective `*_smoke.onnx` files, and both are listed by `manifest.py list` (FC-7).
+- [x] AC-8: No occurrence of "calcifer"/"Calcifer" remains anywhere under `training/` (configs, scripts, README) or `models/wake/` (artifacts + manifest entries).
+- [x] AC-9: `models/wake/calcifer.onnx` no longer exists on disk and `models/wake/models.json` has no `"calcifer"` key; `manifest.py` gained a `remove <slug>` subcommand used to perform the removal (FC-8).
 
 ## Out of Scope
 - Wiring live wake-word detection into the running daemon (`hearth run`) — no `hearth/wake/` module exists today; neither `config.yaml` nor `default-config.yaml` has a `wake` section, and this plumage does not add one. Runtime behavior is entirely unchanged.

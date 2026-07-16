@@ -1,7 +1,7 @@
 ---
 id: PLM-005
 title: Vesta persona rework
-status: hatched
+status: fledged
 priority: P1
 authored: 2026-07-16T02:29:29Z
 agent: fledge-orchestrate/planning
@@ -32,13 +32,13 @@ This plumage covers only the assistant's **text/voice identity** — the persona
 7. FC-7: A minimal, durable smoke test asserts the real shipped `persona.system_prompt` (loaded from config) contains "Vesta", does not contain "Calcifer", and contains a stable marker for the conflict-de-escalation rule (e.g. a keyword like "de-escalat", "argue", or "take sides") — without pinning exact prose wording.
 
 ## Acceptance Criteria
-- [ ] AC-1: `default-config.yaml`'s `persona.system_prompt` opens with `You are Vesta.` and contains no mythological titles/epithets (FC-1).
-- [ ] AC-2: The system prompt's voice/behavior rules reflect the calm/warm/measured/steady register from FC-2, replacing all "fire demon"/"dryly funny" Calcifer characterization.
-- [ ] AC-3: The system prompt contains an explicit conflict-de-escalation / non-engagement instruction (FC-3).
-- [ ] AC-4: The `consult_brain(query)` tool-use instruction is present and functionally unchanged in mechanism (still tells the orchestrator when/how to use the tool) (FC-4).
-- [ ] AC-5: No occurrence of "Calcifer" remains in `default-config.yaml`'s `persona` section, `README.md`'s persona-character prose (excluding wake-word-specific lines), or `hearth/loop.py`'s module docstring (FC-5, FC-6).
-- [ ] AC-6: A new automated test (test-first: written, shown failing against the unchanged config, then passing) asserts `persona.system_prompt` contains "Vesta", excludes "Calcifer", and contains the conflict-de-escalation marker (FC-7).
-- [ ] AC-7: Full existing test suite (`pytest`) still passes unmodified — no existing test's placeholder fixture strings (e.g. `"You are Calcifer."` in `test_orchestrator_persona.py`, `test_loop_tools.py`, `test_logging.py`, `test_loop.py`, `test_e2e_veneer.py`) are touched, since they test mechanism, not shipped persona content.
+- [x] AC-1: `default-config.yaml`'s `persona.system_prompt` opens with `You are Vesta.` and contains no mythological titles/epithets (FC-1).
+- [x] AC-2: The system prompt's voice/behavior rules reflect the calm/warm/measured/steady register from FC-2, replacing all "fire demon"/"dryly funny" Calcifer characterization.
+- [x] AC-3: The system prompt contains an explicit conflict-de-escalation / non-engagement instruction (FC-3).
+- [x] AC-4: The `consult_brain(query)` tool-use instruction is present and functionally unchanged in mechanism (still tells the orchestrator when/how to use the tool) (FC-4).
+- [x] AC-5: No occurrence of "Calcifer" remains in `default-config.yaml`'s `persona` section, `README.md`'s persona-character prose (excluding wake-word-specific lines), or `hearth/loop.py`'s module docstring (FC-5, FC-6).
+- [x] AC-6: A new automated test (test-first: written, shown failing against the unchanged config, then passing) asserts `persona.system_prompt` contains "Vesta", excludes "Calcifer", and contains the conflict-de-escalation marker (FC-7).
+- [x] AC-7: Full existing test suite (`pytest`) still passes unmodified — no existing test's placeholder fixture strings (e.g. `"You are Calcifer."` in `test_orchestrator_persona.py`, `test_loop_tools.py`, `test_logging.py`, `test_loop.py`, `test_e2e_veneer.py`) are touched, since they test mechanism, not shipped persona content.
 
 ## Out of Scope
 - Renaming or retraining the audio wake word ("Calcifer" → "Vesta"/"Prometheus") — covered by a separate plumage against the `training/` pipeline.
