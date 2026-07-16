@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 
 from hearth.brain.base import BrainResult, Message
+from hearth.brain.errors import BrainError
 from hearth.brain.router import Router
 from hearth.events import EventSink, ToolActivity, null_sink
 from hearth.memory.log import EventLog
@@ -36,6 +38,10 @@ class ReactRoundsMetrics:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     duration_s: float = 0.0
+    # FTHR-014: calls that raised `BrainError` or timed out. Included in
+    # `call_count`/`duration_s`, excluded from `prompt_tokens`/
+    # `completion_tokens` (they produced no completion).
+    failed_count: int = 0
 
 
 @dataclass
@@ -67,6 +73,22 @@ def _log_call_metrics(result: BrainResult, round_no: int) -> None:
         pass
 
 
+def _log_failed_call_marker(tier: str, round_no: int, reason: str, elapsed: float) -> None:
+    """FTHR-014 AC-2: a FAILED marker for a `brain.complete()` call that
+    raised `BrainError`. Logs `.reason` only -- `.detail` may carry raw HTTP
+    body text and must never reach the log (see conventions.md)."""
+    try:
+        logger.warning(
+            "llm call tier=%s round=%d FAILED reason=%s after=%.1fs",
+            tier,
+            round_no,
+            reason,
+            elapsed,
+        )
+    except Exception:  # never let logging break a turn (AC-5)
+        pass
+
+
 async def run_react_rounds(
     *,
     brain,
@@ -79,11 +101,19 @@ async def run_react_rounds(
     turn_id: str,
     emit: EventSink,
     label_for,
+    metrics: ReactRoundsMetrics | None = None,
 ) -> ReactRoundsResult:
     """Thought -> Action -> Observation over `brain`, capped at `round_cap`
     tool rounds. Shared by the orchestrator's own turn and a nested brain
-    consult -- no duplicated ReAct logic between the two call sites."""
-    metrics = ReactRoundsMetrics()
+    consult -- no duplicated ReAct logic between the two call sites.
+
+    `metrics` may be supplied by the caller (FTHR-014): a `BrainError` from
+    `brain.complete()` is logged and re-raised unchanged, but the metrics
+    mutation up to that point (including the failed call itself) happens
+    in-place on this object, so a caller that passed it in can still read
+    partial/failure metrics after catching the exception."""
+    if metrics is None:
+        metrics = ReactRoundsMetrics()
 
     def _record(res: BrainResult, round_no: int) -> None:
         metrics.round_count = round_no
@@ -96,7 +126,20 @@ async def run_react_rounds(
             metrics.duration_s += res.duration_s
         _log_call_metrics(res, round_no)
 
-    result = await brain.complete(messages, tools=tools)
+    async def _complete(round_no: int) -> BrainResult:
+        start = time.monotonic()
+        try:
+            return await brain.complete(messages, tools=tools)
+        except BrainError as exc:
+            elapsed = time.monotonic() - start
+            metrics.round_count = round_no
+            metrics.call_count += 1
+            metrics.failed_count += 1
+            metrics.duration_s += elapsed
+            _log_failed_call_marker(getattr(brain, "tier", "?"), round_no, exc.reason, elapsed)
+            raise
+
+    result = await _complete(1)
     _record(result, 1)
 
     round_count = 0
@@ -140,7 +183,7 @@ async def run_react_rounds(
                 Message(role="tool", content=observation, tool_call_id=call.id)
             )
 
-        result = await brain.complete(messages, tools=tools)
+        result = await _complete(round_count + 1)
         _record(result, round_count + 1)
 
     if result.tool_calls and not result.text:
@@ -188,6 +231,9 @@ class Loop:
         try:
             round_count = own_metrics.round_count + sum(m.round_count for m in nested_metrics)
             call_count = own_metrics.call_count + sum(m.call_count for m in nested_metrics)
+            failed_count = own_metrics.failed_count + sum(
+                m.failed_count for m in nested_metrics
+            )
             prompt_tokens = own_metrics.prompt_tokens + sum(
                 m.prompt_tokens for m in nested_metrics
             )
@@ -196,11 +242,16 @@ class Loop:
             )
             duration_s = own_metrics.duration_s + sum(m.duration_s for m in nested_metrics)
             tokens_per_s = f"{completion_tokens / duration_s:.1f}" if duration_s > 0 else "n/a"
+            # FTHR-014 AC-4: a failed/timed-out call counts toward `calls`
+            # and `duration_s` but not `in`/`out` -- the "(K failed)" suffix
+            # only appears when at least one call failed (no "(0 failed)"
+            # clutter on the happy path).
+            calls_str = str(call_count) + (f" ({failed_count} failed)" if failed_count else "")
             logger.info(
-                "turn summary turn=%d rounds=%d calls=%d in=%d out=%d duration_s=%.1fs tok/s=%s",
+                "turn summary turn=%d rounds=%d calls=%s in=%d out=%d duration_s=%.1fs tok/s=%s",
                 turn_number,
                 round_count,
-                call_count,
+                calls_str,
                 prompt_tokens,
                 completion_tokens,
                 duration_s,
@@ -278,6 +329,7 @@ class Loop:
             return spec.label if spec else name
 
         own_metrics = ReactRoundsMetrics()
+        turn_start = time.monotonic()
         try:
             react_run = await asyncio.wait_for(
                 run_react_rounds(
@@ -291,12 +343,28 @@ class Loop:
                     turn_id=turn_id,
                     emit=emit,
                     label_for=label_for,
+                    metrics=own_metrics,
                 ),
                 timeout=self._config.agent.turn_timeout_s,
             )
             own_metrics = react_run.metrics
             answer_text = react_run.result.text or ""
         except asyncio.TimeoutError:
+            # FTHR-014 AC-3/AC-4: log a timeout marker and count it as one
+            # failed call toward the turn's call count/wall time. `own_metrics`
+            # already reflects any rounds that completed before cancellation
+            # (mutated in place by `run_react_rounds`); this adds the timed-
+            # out attempt itself.
+            elapsed = time.monotonic() - turn_start
+            own_metrics.call_count += 1
+            own_metrics.failed_count += 1
+            own_metrics.duration_s += elapsed
+            try:
+                logger.warning(
+                    "turn timeout tier=%s after=%.1fs", selection.tier, elapsed
+                )
+            except Exception:  # never let logging break a turn (AC-5)
+                pass
             answer_text = "That took too long — here's what I have so far."
 
         answer = await restyle(answer_text, ctx=None)
