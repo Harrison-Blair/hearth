@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import httpx
 
@@ -93,6 +94,48 @@ async def test_loop_multi_turn_reconstructs_history(tmp_path, llm_config, canned
     third_contents = [m["content"] for m in requests_seen[2]["messages"]]
     assert "first message" not in third_contents
     assert third_contents == [PERSONA_PROMPT, "second message", "answer 2", "third message"]
+
+    await client.aclose()
+
+
+async def test_loop_logs_per_call_and_per_turn_metrics(
+    tmp_path, llm_config, canned_completion, caplog
+):
+    """AC-3/AC-4: a per-call INFO line (tier/round/in/out/thinking) and a
+    per-turn summary INFO line (turn number + aggregate totals) are emitted;
+    the turn number increments across turns in the same session."""
+    caplog.set_level(logging.INFO)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=canned_completion(
+                text="answer one",
+                usage={"prompt_tokens": 12, "completion_tokens": 6, "total_tokens": 18},
+            ),
+        )
+
+    router, client = _make_router(handler, llm_config)
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = Loop(router, log, _Config())
+
+    await loop.run_turn("s1", "t1", "hello")
+
+    messages = [record.getMessage() for record in caplog.records]
+
+    call_lines = [m for m in messages if "round=1" in m and "tier=" in m]
+    assert call_lines, messages
+    assert "in=" in call_lines[0]
+    assert "out=" in call_lines[0]
+    assert "thinking=n/a" in call_lines[0]
+
+    summary_lines = [m for m in messages if "turn=1" in m]
+    assert summary_lines, messages
+
+    caplog.clear()
+    await loop.run_turn("s1", "t2", "hello again")
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("turn=2" in m for m in messages), messages
 
     await client.aclose()
 
