@@ -2,7 +2,7 @@
 id: FTHR-016
 title: Console color formatter
 plumage: PLM-004
-status: pipping
+status: fledged
 priority: P2
 depends_on: []
 authored: 2026-07-16T00:17:37Z
