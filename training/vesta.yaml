@@ -11,9 +11,12 @@ n_samples: 25000
 n_samples_val: 5000
 n_background_samples: 2000
 n_background_samples_val: 500
-tts_batch_size: 50           # 100 OOMs on the 16 GB RX 9070 XT in practice (torch holds
-                             # ~13 GB steady + ~3.6 GB batch spike); failed batches are
-                             # silently skipped, shrinking the dataset — keep at 50
+tts_batch_size: 25           # 50 still OOMs sporadically on the 16 GB RX 9070 XT — VITS's
+                             # stochastic duration predictor occasionally blows up the
+                             # decoder's [B, 1, T] burst (~9 GiB at B=50); halving to 25
+                             # halves the burst and halves the per-failure clip loss.
+                             # train.py sets the ROCm PYTORCH_CUDA_ALLOC_CONF (note:
+                             # expandable_segments is unsupported on ROCm builds).
 
 # Adversarial hard negatives — 1-2 phoneme edits from "vesta", not near-identical.
 custom_negative_phrases:

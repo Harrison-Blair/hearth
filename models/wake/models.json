@@ -1,1 +1,11 @@
-{}
+{
+  "vesta": {
+    "fpph": 0.07727975270479134,
+    "gate_passed": true,
+    "model_path": "models/wake/vesta.onnx",
+    "phrase": "Vesta",
+    "recall": 0.8746,
+    "threshold": 0.77,
+    "trained_at": "2026-07-16T05:28:05"
+  }
+}
