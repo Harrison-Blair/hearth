@@ -1,7 +1,7 @@
 # hearth
 
-An offline-first voice personal assistant — themed around **Calcifer**, the
-sharp-tongued fire demon bound to the hearth.
+An offline-first voice personal assistant — themed around **Vesta**, the
+calm, steady presence of the hearth.
 
 That's the goal. **The current build is a text-driven spine**, not yet a voice
 assistant: you talk to it by typing, over a small localhost control surface. The
@@ -13,7 +13,7 @@ progress, not wired into the runtime yet.
 | Working today | Roadmap (not yet in the runtime) |
 | --- | --- |
 | `hearth` daemon + WebSocket "veneer" control surface | Audio capture → wake word → STT → TTS voice pipeline |
-| Two-tier LLM: local persona (Calcifer) + remote "brain" | Raspberry Pi 5 target (config-driven device/model/threshold) |
+| Two-tier LLM: local persona (Vesta) + remote "brain" | Raspberry Pi 5 target (config-driven device/model/threshold) |
 | Wikipedia tool via a nested ReAct loop | Scheduling, calendar, weather, web search extras |
 | sqlite event log + per-session transcripts | Wake-word detector consuming `models/wake/calcifer.onnx` |
 
@@ -25,13 +25,13 @@ current runtime consumes them yet.
 
 hearth is built around a **two-tier LLM design**:
 
-- A **local persona orchestrator** answers every turn *as Calcifer* — warm, dry,
-  in the first person. It runs on a local model (Ollama `qwen3:14b` by default) and
-  has exactly one tool.
+- A **local persona orchestrator** answers every turn *as Vesta* — calm, warm,
+  measured, in the first person. It runs on a local model (Ollama `qwen3:14b` by
+  default) and has exactly one tool.
 - That tool, **`consult_brain(query)`**, routes to a **remote "brain"** (OpenRouter
-  by default) whenever Calcifer needs a fact she doesn't know. The brain is a plain
+  by default) whenever Vesta needs a fact she doesn't know. The brain is a plain
   research subsystem, kept in its lane by a `brain_guard_prompt`, and its answer is
-  folded back into Calcifer's voice.
+  folded back into Vesta's voice.
 - The brain can reach for a **Wikipedia** tool through a nested ReAct loop to ground
   its answers in real content.
 
@@ -45,7 +45,7 @@ surface bound to localhost — using the bundled client.
 ```
 client ⇄ veneer → persona (local LLM) ──consult_brain──▶ brain (remote LLM) → wikipedia
                      │                                                            │
-                     └────────────── answer in Calcifer's voice ◀────────────────┘
+                     └────────────── answer in Vesta's voice ◀────────────────┘
 ```
 
 ## Quickstart
@@ -146,7 +146,7 @@ Config sections (as in the active `config.yaml`):
 | `veneer` | `host` / `port` of the localhost control surface (default `127.0.0.1:8765`) |
 | `tool` | Wikipedia lookup — language, endpoint, result count, char cap, timeout |
 | `agent` | Orchestrator limits — `max_tool_rounds`, `turn_timeout_s`, `tool_mode`, consult rounds/timeout |
-| `persona` | Calcifer's `system_prompt` and the `brain_guard_prompt` for consult requests |
+| `persona` | Vesta's `system_prompt` and the `brain_guard_prompt` for consult requests |
 | `conversation` | `max_history_turns` kept in-session |
 | `storage` | `db_path` for the sqlite event log |
 | `logging` | Rotating file handler + per-session transcript settings |
@@ -179,7 +179,7 @@ criteria). The wake-word training pipeline is entirely separate — see
 ## FAQ / Good to know
 
 **Why do I need both Ollama and an OpenRouter key?**
-Two tiers: Ollama runs Calcifer locally; OpenRouter serves the `consult_brain`
+Two tiers: Ollama runs Vesta locally; OpenRouter serves the `consult_brain`
 lookups. To run fully local (no key), set `llm.tiers.tool: local` in `config.yaml`.
 
 **Is this a voice assistant?**

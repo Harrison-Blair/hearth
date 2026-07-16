@@ -45,10 +45,10 @@ Add to `tests/test_config.py` (loads the real shipped `default-config.yaml` via 
 Implementation order (fixed): (1) write all four tests above against the **current, unmodified** `default-config.yaml` (still "Calcifer") and confirm they FAIL for the expected reason (asserting "Vesta"/de-escalation text that isn't there yet, or asserting "Calcifer" absence that isn't true yet) — capture this output verbatim in the evidence file; (2) rewrite the config per the Approach; (3) confirm all four tests pass, and run the full `pytest` suite to confirm no existing test (the Calcifer-placeholder fixture tests) broke.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: `default-config.yaml`'s `persona.system_prompt` opens with `You are Vesta.` and contains no mythological titles/epithets (satisfies PLM-005 AC-1/FC-1).
-- [ ] AC-3: The system prompt's voice/behavior rules reflect the calm/warm/measured/steady register, with all "fire demon"/"dryly funny" Calcifer characterization removed (satisfies PLM-005 AC-2/FC-2).
-- [ ] AC-4: The system prompt contains an explicit conflict-de-escalation / non-engagement instruction (satisfies PLM-005 AC-3/FC-3).
-- [ ] AC-5: The `consult_brain(query)` tool-use instruction is present and functionally unchanged in mechanism (satisfies PLM-005 AC-4/FC-4).
-- [ ] AC-6: No occurrence of "Calcifer" remains in `default-config.yaml`'s `persona` section (including comments), `config.yaml`'s `persona` section, `README.md`'s persona-character prose (excluding wake-word-specific lines), or `hearth/loop.py`'s module docstring (satisfies PLM-005 AC-5/FC-5/FC-6).
-- [ ] AC-7: Full existing `pytest` suite passes unmodified — no existing test file's Calcifer-placeholder fixture strings were touched (satisfies PLM-005 AC-7).
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: `default-config.yaml`'s `persona.system_prompt` opens with `You are Vesta.` and contains no mythological titles/epithets (satisfies PLM-005 AC-1/FC-1).
+- [x] AC-3: The system prompt's voice/behavior rules reflect the calm/warm/measured/steady register, with all "fire demon"/"dryly funny" Calcifer characterization removed (satisfies PLM-005 AC-2/FC-2).
+- [x] AC-4: The system prompt contains an explicit conflict-de-escalation / non-engagement instruction (satisfies PLM-005 AC-3/FC-3).
+- [x] AC-5: The `consult_brain(query)` tool-use instruction is present and functionally unchanged in mechanism (satisfies PLM-005 AC-4/FC-4).
+- [x] AC-6: No occurrence of "Calcifer" remains in `default-config.yaml`'s `persona` section (including comments), `config.yaml`'s `persona` section, `README.md`'s persona-character prose (excluding wake-word-specific lines), or `hearth/loop.py`'s module docstring (satisfies PLM-005 AC-5/FC-5/FC-6).
+- [x] AC-7: Full existing `pytest` suite passes unmodified — no existing test file's Calcifer-placeholder fixture strings were touched (satisfies PLM-005 AC-7).
