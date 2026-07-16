@@ -60,7 +60,7 @@ class ColorFormatter(logging.Formatter):
         use_color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 
         timestamp = self.formatTime(record, self.datefmt)
-        ts_level = f"{timestamp} {record.levelname}"
+        ts_level = _DELIMITER.join([timestamp, record.levelname])
         level_color = _LEVEL_COLORS.get(record.levelno, "") if use_color else ""
         if level_color:
             ts_level = f"{level_color}{ts_level}{_RESET}"

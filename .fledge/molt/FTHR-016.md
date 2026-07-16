@@ -116,15 +116,64 @@ tests/test_wikipedia.py ....                                             [100%]
 
 ## AC-2
 
-`test_delimiter_present_in_every_line` formats both a plain record (no
-category) and a `category="metrics"`-tagged record through `ColorFormatter`
-and asserts ` │ ` appears in both outputs. `ColorFormatter.format()`
-(`hearth/logging_setup.py`) always joins `[ts_level, message]` with
-`_DELIMITER = " │ "` regardless of category or color state — verified
-passing above (see AC-1 post-implementation output,
-`test_delimiter_present_in_every_line PASSED`). `test_no_color_when_not_a_tty`
-and `test_no_color_when_no_color_env_set` further assert the delimiter
-survives when color is suppressed.
+**Skua finding (review round 1):** the original implementation only joined
+`[ts_level, message]` with the delimiter, so a formatted line contained a
+single ` │ ` (before the message) rather than one between each of the three
+named fields (timestamp, levelname, message) the spec's Approach item 2
+calls for. Fixed by joining `timestamp` and `levelname` themselves with
+`_DELIMITER` (`ts_level = _DELIMITER.join([timestamp, record.levelname])`),
+with the level color still wrapping the whole `timestamp │ levelname`
+segment. Tightened `test_delimiter_present_in_every_line` from `assert " │ "
+in output` (true even with only one delimiter) to `assert output.count(" │
+") == 2`, and captured it FAILING against the pre-fix code first:
+
+```
+============================= test session starts ==============================
+collecting ... collected 1 item
+
+tests/test_console_formatter.py::test_delimiter_present_in_every_line FAILED [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_delimiter_present_in_every_line _____________________
+    assert plain.count(" │ ") == 2
+E   AssertionError: assert 1 == 2
+E    +  where 1 = <built-in method count of str object at 0x7f26663d45d0>(' │ ')
+E    +    where <built-in method count of str object at 0x7f26663d45d0> = '2026-07-15 20:45:59,620 INFO │ hello'.count
+
+============================== 1 failed in 0.02s ===============================
+```
+
+Post-fix, `test_delimiter_present_in_every_line` formats both a plain record
+(no category) and a `category="metrics"`-tagged record through
+`ColorFormatter` and asserts exactly two ` │ ` instances in each output
+(three fields: timestamp, levelname, message). Passing — see full
+`test_console_formatter.py` run below. `test_no_color_when_not_a_tty` and
+`test_no_color_when_no_color_env_set` further assert the delimiter survives
+when color is suppressed.
+
+**Post-fix full run — `PYTHONPATH="$(pwd)" .venv/bin/pytest tests/test_console_formatter.py tests/test_logging.py -v`:**
+
+```
+tests/test_console_formatter.py::test_delimiter_present_in_every_line PASSED [  6%]
+tests/test_console_formatter.py::test_error_color_is_exclusive PASSED    [ 13%]
+tests/test_console_formatter.py::test_unknown_category_falls_back_to_level_only PASSED [ 20%]
+tests/test_console_formatter.py::test_no_color_when_not_a_tty PASSED     [ 26%]
+tests/test_console_formatter.py::test_no_color_when_no_color_env_set PASSED [ 33%]
+tests/test_console_formatter.py::test_file_handler_unaffected PASSED     [ 40%]
+tests/test_logging.py::test_setup_logging_creates_rotating_handler PASSED [ 46%]
+tests/test_logging.py::test_setup_logging_is_idempotent PASSED           [ 53%]
+tests/test_logging.py::test_console_handler_streams_to_stdout PASSED     [ 60%]
+tests/test_logging.py::test_console_handler_absent_when_disabled PASSED  [ 66%]
+tests/test_logging.py::test_websockets_logger_routed_to_file PASSED      [ 73%]
+tests/test_logging.py::test_websockets_logger_not_duplicated PASSED      [ 80%]
+tests/test_logging.py::test_consult_turn_logs_both_models PASSED         [ 86%]
+tests/test_logging.py::test_transcript_contains_ordered_turn_lines PASSED [ 93%]
+tests/test_logging.py::test_logging_failure_does_not_crash_turn PASSED   [100%]
+
+============================== 15 passed in 0.03s ==============================
+```
+
+Full 83-test suite and `ruff check` re-verified green after the fix too.
 
 ## AC-3
 

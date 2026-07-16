@@ -32,14 +32,17 @@ def _make_record(level: int, msg: str, category: str | None = None) -> logging.L
 
 
 def test_delimiter_present_in_every_line():
+    """The delimiter must separate all three named fields (timestamp,
+    levelname, message) -- two ` │ ` instances per line, not just one before
+    the message."""
     from hearth.logging_setup import ColorFormatter
 
     formatter = ColorFormatter()
     plain = formatter.format(_make_record(logging.INFO, "hello"))
     tagged = formatter.format(_make_record(logging.INFO, "value=1", category="metrics"))
 
-    assert " │ " in plain
-    assert " │ " in tagged
+    assert plain.count(" │ ") == 2
+    assert tagged.count(" │ ") == 2
 
 
 def test_error_color_is_exclusive(monkeypatch):
