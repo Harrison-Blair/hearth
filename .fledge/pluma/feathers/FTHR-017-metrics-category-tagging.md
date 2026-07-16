@@ -2,7 +2,7 @@
 id: FTHR-017
 title: Metrics category tagging
 plumage: PLM-004
-status: egg
+status: fledged
 priority: P2
 depends_on: [FTHR-016, FTHR-013, FTHR-014]
 authored: 2026-07-16T00:26:12Z
