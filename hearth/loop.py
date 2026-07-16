@@ -3,7 +3,7 @@ consult_brain tool, and the shared `run_react_rounds` ReAct engine used by
 both the top-level orchestrator turn and a nested brain consult.
 
 Thought -> Action -> Observation: the top-level turn is always served by the
-local tier, carrying a Calcifer persona system prompt, and offers exactly one
+local tier, carrying a Vesta persona system prompt, and offers exactly one
 tool -- `consult_brain(query)` -- gated on `router.brain_available()`.
 Calling it runs a nested ReAct round on the remote tier over the real data
 tools (see `hearth.tools.consult`); its findings return as an observation the
