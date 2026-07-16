@@ -2,7 +2,7 @@
 id: FTHR-018
 title: Connection category tagging
 plumage: PLM-004
-status: egg
+status: fledged
 priority: P2
 depends_on: [FTHR-016]
 authored: 2026-07-16T00:27:18Z
