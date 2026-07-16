@@ -1,7 +1,7 @@
 ---
 id: PLM-003
 title: Turn Metrics Logging
-status: hatched
+status: fledged
 priority: P1
 authored: 2026-07-15T23:44:08Z
 agent: fledge-orchestrate/planning
@@ -91,33 +91,33 @@ happened inside a nested consult).
    field or toggle is introduced to gate this behavior on or off.
 
 ## Acceptance Criteria
-- [ ] AC-1: A per-call log line is emitted after every successful LLM
+- [x] AC-1: A per-call log line is emitted after every successful LLM
       completion (both local and remote backends), showing tier, model,
       ReAct round number, input tokens, output tokens, thinking tokens (or
       `n/a`), call duration, and tokens/sec — verified with a test that
       asserts on the emitted log record's content for each backend type.
-- [ ] AC-2: A per-turn summary log line is emitted once per `Loop.run_turn`
+- [x] AC-2: A per-turn summary log line is emitted once per `Loop.run_turn`
       call, showing the session-sequential turn number, total ReAct round
       count, call count (with failure count when applicable), total
       input/output tokens, total turn wall-clock time, and blended
       tokens/sec — verified with a test asserting on the emitted summary
       for both a single-call turn and a turn that triggers a nested
       `consult_brain` call.
-- [ ] AC-3: The per-turn aggregate correctly includes tokens/timing from
+- [x] AC-3: The per-turn aggregate correctly includes tokens/timing from
       calls made inside a nested `consult_brain` invocation, not just the
       orchestrator's own calls — verified with a test that exercises a turn
       including a `consult_brain` round and asserts the aggregate reflects
       both tiers' calls.
-- [ ] AC-4: A failed or timed-out LLM call produces a distinct FAILED-style
+- [x] AC-4: A failed or timed-out LLM call produces a distinct FAILED-style
       log marker (not a normal metrics line and not silence), is excluded
       from the turn's token/tokens-per-second math, but is included in the
       turn's call count and wall-clock time — verified with a test that
       forces a `BrainError` and a test that forces a turn timeout.
-- [ ] AC-5: Thinking/reasoning tokens print as a numeric value when the
+- [x] AC-5: Thinking/reasoning tokens print as a numeric value when the
       backend response includes `usage.completion_tokens_details.reasoning_tokens`,
       and print the literal `n/a` when it is absent — verified with tests
       covering both a response with and without that field.
-- [ ] AC-6: No metrics data introduced by this plumage crosses the veneer
+- [x] AC-6: No metrics data introduced by this plumage crosses the veneer
       WebSocket wire — `hearth/veneer/protocol.py::serialize`'s existing
       whitelist and its `forbidden_keys` test coverage are unaffected;
       verified by confirming the existing wire-protocol tests still pass

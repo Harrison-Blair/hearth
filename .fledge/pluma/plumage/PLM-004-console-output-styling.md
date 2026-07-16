@@ -1,7 +1,7 @@
 ---
 id: PLM-004
 title: Console Output Styling
-status: hatched
+status: fledged
 priority: P2
 authored: 2026-07-16T00:03:59Z
 agent: fledge-orchestrate/planning
@@ -87,28 +87,28 @@ error-adjacent coloring under this plumage's level-based rules).
    remain plain text, unaffected by this plumage.
 
 ## Acceptance Criteria
-- [ ] AC-1: Every line the console handler emits contains the ` │ ` delimiter
+- [x] AC-1: Every line the console handler emits contains the ` │ ` delimiter
       between its logical fields, verified with a test that captures
       console output (with color disabled, e.g. non-TTY) and asserts the
       delimiter's presence/positioning for a representative line from each
       category plus an untagged line.
-- [ ] AC-2: On a TTY with `NO_COLOR` unset, `ERROR`/`CRITICAL` lines are
+- [x] AC-2: On a TTY with `NO_COLOR` unset, `ERROR`/`CRITICAL` lines are
       wrapped in an ANSI color code that no `DEBUG`/`INFO`/`WARNING` line or
       any category ever uses, verified with a test asserting the full set
       of colors used across levels/categories has no overlap with the
       error color.
-- [ ] AC-3: A log call with `extra={"category": "metrics"}` (and similarly
+- [x] AC-3: A log call with `extra={"category": "metrics"}` (and similarly
       `"connection"`, `"server"`) is rendered with that category's
       field-coloring rules; a log call with no `category` extra (including
       a simulated third-party-style log record) renders with only
       timestamp+level coloring and no category-specific rule — verified
       with tests covering all three categories plus the uncategorized
       fallback.
-- [ ] AC-4: With `sys.stdout.isatty()` false, or `NO_COLOR` set to a
+- [x] AC-4: With `sys.stdout.isatty()` false, or `NO_COLOR` set to a
       non-empty value, no ANSI escape codes appear anywhere in the
       formatted output (delimiter and content unaffected) — verified with
       tests covering both suppression conditions independently.
-- [ ] AC-5: The rotating file handler's output is unaffected by this
+- [x] AC-5: The rotating file handler's output is unaffected by this
       plumage (no ANSI codes, no forced delimiter change beyond what
       already exists) — verified by a test asserting file-handler output is
       unchanged for a line that the console handler renders with color and
