@@ -46,6 +46,9 @@ class Veneer:
 
     async def _handle_connection(self, websocket) -> None:
         session_id = uuid.uuid4().hex
+        logger.info(
+            "client connected session=%s", session_id, extra={"category": "connection"}
+        )
         # A client disconnecting mid-turn (awaiting run_turn or sending a
         # reply) raises ConnectionClosed; treat that as a clean end of this
         # connection rather than an unhandled exception out of the handler,
@@ -61,7 +64,11 @@ class Veneer:
                 try:
                     request = parse_request(raw)
                 except (json.JSONDecodeError, KeyError, TypeError):
-                    logger.warning("rejecting malformed request frame for session %s", session_id)
+                    logger.warning(
+                        "rejecting malformed request frame for session %s",
+                        session_id,
+                        extra={"category": "connection"},
+                    )
                     self._log.append(
                         session_id, "", "error", "veneer", {"message": "malformed request"}
                     )
@@ -90,5 +97,9 @@ class Veneer:
                 await websocket.send(json.dumps(answer_message(request.turn_id, answer_text)))
                 await websocket.send(json.dumps(done_message(request.turn_id)))
         except websockets.ConnectionClosed:
-            logger.info("client disconnected mid-turn for session %s", session_id)
+            logger.info(
+                "client disconnected mid-turn for session %s",
+                session_id,
+                extra={"category": "connection"},
+            )
             return
