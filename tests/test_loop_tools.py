@@ -414,3 +414,93 @@ async def test_turn_timeout_emits_balanced_tool_activity(tmp_path, two_tier_llm_
 
     for client in clients.values():
         await client.aclose()
+
+
+async def test_turn_summary_counts_failed_nested_consult_call(
+    tmp_path, two_tier_llm_config, caplog
+):
+    """AC-2/AC-4: a `BrainError` from the nested consult's remote call logs a
+    FAILED marker and, because `BrainConsult` degrades rather than
+    propagating, the turn completes -- its per-turn summary must count the
+    failed call in `calls=N (K failed)` and total wall time, while excluding
+    it from the token totals."""
+    caplog.set_level(logging.INFO)
+
+    def local_handler(request, n):
+        if n == 1:
+            body = _tool_call_completion("consult_brain", {"query": "x"})
+            body["usage"] = {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14}
+            return httpx.Response(200, json=body)
+        body = _chat_completion("done")
+        body["usage"] = {"prompt_tokens": 20, "completion_tokens": 8, "total_tokens": 28}
+        return httpx.Response(200, json=body)
+
+    def remote_handler(request, n):
+        # Malformed body (no "choices") -> BrainError("unreadable response", ...).
+        return httpx.Response(200, json={"choices": []})
+
+    router, clients, router_fn = _build(two_tier_llm_config, local_handler, remote_handler)
+    log = EventLog(str(tmp_path / "events.db"))
+    registry = _FakeRegistry()
+    consult = BrainConsult(router, registry, log, _Config())
+
+    loop = Loop(router, log, _Config(), consult=consult)
+    answer = await loop.run_turn("s1", "t1", "look it up")
+
+    assert answer == "done"
+
+    messages = [record.getMessage() for record in caplog.records]
+
+    failed_lines = [m for m in messages if "FAILED" in m]
+    assert failed_lines, messages
+    assert "unreadable response" in failed_lines[0]
+
+    summary_lines = [m for m in messages if "turn=1" in m]
+    assert summary_lines, messages
+    summary = summary_lines[-1]
+
+    # Orchestrator: in=10+20=30, out=4+8=12; the failed remote call contributes 0.
+    assert "in=30" in summary
+    assert "out=12" in summary
+    assert "calls=3 (1 failed)" in summary  # 2 orchestrator calls + 1 failed nested call
+
+    for client in clients.values():
+        await client.aclose()
+
+
+async def test_turn_timeout_logs_marker_and_counts_failed_call(
+    tmp_path, two_tier_llm_config, caplog
+):
+    """AC-3/AC-4: a turn-level timeout logs a WARNING marker from
+    `Loop.run_turn`'s existing `except asyncio.TimeoutError` handler and the
+    per-turn summary counts it as a failed call, without changing the
+    existing "that took too long" fallback answer text."""
+    caplog.set_level(logging.INFO)
+
+    def local_handler(request, n):
+        return httpx.Response(200, json=_tool_call_completion("consult_brain", {"query": "x"}))
+
+    def remote_handler(request, n):
+        raise AssertionError("remote should not be called: consult is faked")
+
+    router, clients, _ = _build(two_tier_llm_config, local_handler, remote_handler)
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = Loop(
+        router, log, _Config(agent=_Agent(turn_timeout_s=0.05)), consult=_BlockingConsult()
+    )
+
+    answer = await loop.run_turn("s1", "t1", "look it up")
+
+    assert "too long" in answer  # unchanged fallback behavior
+
+    messages = [record.getMessage() for record in caplog.records]
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    timeout_lines = [r.getMessage() for r in warning_records if "timeout" in r.getMessage().lower()]
+    assert timeout_lines, messages
+
+    summary_lines = [m for m in messages if "turn=1" in m]
+    assert summary_lines, messages
+    assert "(1 failed)" in summary_lines[-1]
+
+    for client in clients.values():
+        await client.aclose()
