@@ -68,6 +68,7 @@ def _log_call_metrics(result: BrainResult, round_no: int) -> None:
             thinking,
             duration_str,
             tokens_per_s,
+            extra={"category": "metrics"},
         )
     except Exception:  # never let logging break a turn (AC-5)
         pass
@@ -84,6 +85,7 @@ def _log_failed_call_marker(tier: str, round_no: int, reason: str, elapsed: floa
             round_no,
             reason,
             elapsed,
+            extra={"category": "metrics"},
         )
     except Exception:  # never let logging break a turn (AC-5)
         pass
@@ -256,6 +258,7 @@ class Loop:
                 completion_tokens,
                 duration_s,
                 tokens_per_s,
+                extra={"category": "metrics"},
             )
         except Exception:  # never let logging break a turn (AC-5)
             pass
@@ -361,7 +364,10 @@ class Loop:
             own_metrics.duration_s += elapsed
             try:
                 logger.warning(
-                    "turn timeout tier=%s after=%.1fs", selection.tier, elapsed
+                    "turn timeout tier=%s after=%.1fs",
+                    selection.tier,
+                    elapsed,
+                    extra={"category": "metrics"},
                 )
             except Exception:  # never let logging break a turn (AC-5)
                 pass

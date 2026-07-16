@@ -178,6 +178,64 @@ async def test_loop_logs_failed_marker_on_brain_error_never_leaks_detail(
     await client.aclose()
 
 
+async def test_metrics_calls_carry_category_tag(
+    tmp_path, llm_config, canned_completion, caplog
+):
+    """FTHR-017 AC-2: the per-call and per-turn metrics INFO lines carry
+    `category="metrics"` (no change to message text or level) so the console
+    formatter can style them."""
+    caplog.set_level(logging.INFO)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=canned_completion(
+                text="answer one",
+                usage={"prompt_tokens": 12, "completion_tokens": 6, "total_tokens": 18},
+            ),
+        )
+
+    router, client = _make_router(handler, llm_config)
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = Loop(router, log, _Config())
+
+    await loop.run_turn("s1", "t1", "hello")
+
+    call_records = [
+        r for r in caplog.records if "round=1" in r.getMessage() and "tier=" in r.getMessage()
+    ]
+    assert call_records
+    assert call_records[0].category == "metrics"
+
+    summary_records = [r for r in caplog.records if "turn=1" in r.getMessage()]
+    assert summary_records
+    assert summary_records[0].category == "metrics"
+
+    await client.aclose()
+
+
+async def test_failed_marker_carries_category_tag(tmp_path, llm_config, caplog):
+    """FTHR-017 AC-2: the FAILED-call WARNING marker also carries
+    `category="metrics"` (no change to message text or level)."""
+    caplog.set_level(logging.WARNING)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    router, client = _make_router(handler, llm_config)
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = Loop(router, log, _Config())
+
+    with pytest.raises(BrainError):
+        await loop.run_turn("s1", "t1", "hello")
+
+    failed_records = [r for r in caplog.records if "FAILED" in r.getMessage()]
+    assert failed_records
+    assert failed_records[0].category == "metrics"
+
+    await client.aclose()
+
+
 async def test_persona_restyle_noop():
     from hearth.persona import restyle
 
