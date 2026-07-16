@@ -1,0 +1,80 @@
+# Production wake-word config for "Prometheus" (livekit-wakeword).
+# Modeled on livekit's configs/prod.yaml. Trained via `python training/train.py`
+# in .venv-train (see bootstrap.sh); the runtime consumes the exported .onnx only.
+model_name: prometheus
+target_phrases: ["prometheus"]
+
+# ---------------------------------------------------------------------------
+# Data generation
+# ---------------------------------------------------------------------------
+n_samples: 25000
+n_samples_val: 5000
+n_background_samples: 2000
+n_background_samples_val: 500
+tts_batch_size: 50           # 100 OOMs on the 16 GB RX 9070 XT in practice (torch holds
+                             # ~13 GB steady + ~3.6 GB batch spike); failed batches are
+                             # silently skipped, shrinking the dataset — keep at 50
+
+# Adversarial hard negatives — 1-2 phoneme edits from "prometheus", not near-identical.
+custom_negative_phrases:
+  - "promethium"
+  - "prometheum"
+  - "for me the us"
+  - "prometheus'"
+  - "prometheous"
+  - "promethius"
+  - "prom of theus"
+  - "premise"
+  - "prom a theus"
+  - "prometeus"
+  - "for me thesis"
+  - "promotheus"
+  - "protheus"
+  - "prometheous'"
+  - "problem theus"
+
+# ---------------------------------------------------------------------------
+# TTS parameters (Piper VITS + SLERP speaker blending)
+# ---------------------------------------------------------------------------
+noise_scales: [0.98]
+noise_scale_ws: [0.98]
+length_scales: [0.75, 1.0, 1.25]
+slerp_weights: [0.2, 0.35, 0.5, 0.65, 0.8]
+
+# ---------------------------------------------------------------------------
+# Paths (under the repo's training/ dir; setup downloads into data_dir)
+# ---------------------------------------------------------------------------
+data_dir: training/data
+output_dir: training/output
+
+# ---------------------------------------------------------------------------
+# Augmentation
+# ---------------------------------------------------------------------------
+augmentation:
+  clip_duration: 2.0
+  batch_size: 16
+  rounds: 3
+  background_paths: [training/data/backgrounds]
+  rir_paths: [training/data/rirs]
+
+# ---------------------------------------------------------------------------
+# Model architecture — conv_attention is the accuracy win over oww's DNN head.
+# ---------------------------------------------------------------------------
+model:
+  model_type: conv_attention
+  model_size: medium
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
+steps: 100000
+learning_rate: 0.0001
+weight_decay: 0.01
+label_smoothing: 0.05
+max_negative_weight: 3000
+target_fp_per_hour: 0.1
+batch_n_per_class:
+  positive: 50
+  adversarial_negative: 50
+  ACAV100M_sample: 1024
+  background_noise: 50
