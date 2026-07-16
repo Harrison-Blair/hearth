@@ -83,8 +83,8 @@ coverage row for existing veneer test files).
   — this feather adds a log call and tags, nothing on the wire.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: A new INFO log line is emitted when `Veneer._handle_connection` accepts a connection, tagged `extra={"category": "connection"}`, before any turn is processed. Satisfies PLM-004 FC-5.
-- [ ] AC-3: The existing disconnect and malformed-frame log calls in `hearth/veneer/server.py` carry `extra={"category": "connection"}` with unchanged message text and level. Satisfies PLM-004 FC-5.
-- [ ] AC-4: The console formatter's `connection` category renders these lines distinctly from `metrics`/`server`/plain and never reuses the reserved ERROR/CRITICAL color, completing PLM-004 AC-3's connection-category coverage.
-- [ ] AC-5: Existing `test_veneer.py`/`test_veneer_errors.py` wire-whitelist and connection-behavior tests pass unmodified.
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: A new INFO log line is emitted when `Veneer._handle_connection` accepts a connection, tagged `extra={"category": "connection"}`, before any turn is processed. Satisfies PLM-004 FC-5.
+- [x] AC-3: The existing disconnect and malformed-frame log calls in `hearth/veneer/server.py` carry `extra={"category": "connection"}` with unchanged message text and level. Satisfies PLM-004 FC-5.
+- [x] AC-4: The console formatter's `connection` category renders these lines distinctly from `metrics`/`server`/plain and never reuses the reserved ERROR/CRITICAL color, completing PLM-004 AC-3's connection-category coverage.
+- [x] AC-5: Existing `test_veneer.py`/`test_veneer_errors.py` wire-whitelist and connection-behavior tests pass unmodified.
