@@ -108,9 +108,9 @@ file, see `.fledge/nest/testing.md` → FTHR-011 coverage) or a new
   insertion, no ANSI codes), proving the new formatter is console-only.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: Every console-handler-formatted line contains the ` │ ` delimiter between its fields, for both categorized and uncategorized records. Satisfies PLM-004 FC-1; PLM-004 AC-1.
-- [ ] AC-3: `ERROR`/`CRITICAL` records are colored with an ANSI code used by no other level and no category's field coloring, verified across every level and every registered category. Satisfies PLM-004 FC-2; PLM-004 AC-2.
-- [ ] AC-4: A record's `extra={"category": ...}` value selects that category's coloring rule when registered; an unregistered or absent category falls back to universal timestamp+level coloring only, identically to how a third-party (e.g. `websockets`) record is treated. Satisfies PLM-004 FC-3; PLM-004 AC-3 (partial — full AC-3 coverage across metrics/connection/server completes once FTHR-016/017/018 register those categories).
-- [ ] AC-5: No ANSI escape codes appear in console output when `sys.stdout.isatty()` is false or `NO_COLOR` is set to a non-empty value; the delimiter and content are unaffected in both cases. Satisfies PLM-004 FC-7; PLM-004 AC-4.
-- [ ] AC-6: The rotating file handler's formatter and output are unchanged by this feather. Satisfies PLM-004 FC-8; PLM-004 AC-5.
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: Every console-handler-formatted line contains the ` │ ` delimiter between its fields, for both categorized and uncategorized records. Satisfies PLM-004 FC-1; PLM-004 AC-1.
+- [x] AC-3: `ERROR`/`CRITICAL` records are colored with an ANSI code used by no other level and no category's field coloring, verified across every level and every registered category. Satisfies PLM-004 FC-2; PLM-004 AC-2.
+- [x] AC-4: A record's `extra={"category": ...}` value selects that category's coloring rule when registered; an unregistered or absent category falls back to universal timestamp+level coloring only, identically to how a third-party (e.g. `websockets`) record is treated. Satisfies PLM-004 FC-3; PLM-004 AC-3 (partial — full AC-3 coverage across metrics/connection/server completes once FTHR-016/017/018 register those categories).
+- [x] AC-5: No ANSI escape codes appear in console output when `sys.stdout.isatty()` is false or `NO_COLOR` is set to a non-empty value; the delimiter and content are unaffected in both cases. Satisfies PLM-004 FC-7; PLM-004 AC-4.
+- [x] AC-6: The rotating file handler's formatter and output are unchanged by this feather. Satisfies PLM-004 FC-8; PLM-004 AC-5.

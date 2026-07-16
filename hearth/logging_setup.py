@@ -15,10 +15,63 @@ import logging
 import logging.handlers
 import os
 import sys
+from typing import Callable
 
 from hearth.config import LoggingConfig
 
 _CONFIGURED_MARKER = "_hearth_logging_configured"
+
+# --- console color formatter (FTHR-016) -----------------------------------
+#
+# Console-only styling: a ` │ ` field delimiter, timestamp+level ANSI color
+# keyed by level (ERROR/CRITICAL's color is reserved -- no other level, and
+# no category rule below, may reuse it), a category-dispatch registry read
+# off `record.category` (later feathers register entries here as they tag
+# real call sites -- FTHR-017/018/019), and TTY/NO_COLOR auto-suppression.
+# The rotating file handler keeps its own plain `logging.Formatter` above,
+# untouched.
+
+_DELIMITER = " │ "
+_RESET = "\x1b[0m"
+
+_LEVEL_COLORS = {
+    logging.DEBUG: "\x1b[2m",  # dim
+    logging.INFO: "",  # no color
+    logging.WARNING: "\x1b[33m",  # yellow
+    logging.ERROR: "\x1b[1;31m",  # bold red -- reserved, exclusive to ERROR/CRITICAL
+    logging.CRITICAL: "\x1b[1;31m",
+}
+
+# Category name -> function coloring the message field. Empty until a later
+# feather registers a real category (e.g. "metrics"); an unregistered or
+# absent category (default "plain") falls back to level-only coloring.
+_CATEGORY_COLORS: dict[str, Callable[[str], str]] = {}
+
+
+class ColorFormatter(logging.Formatter):
+    """Console-only formatter: fields joined by ` │ `, timestamp+level
+    colored by `record.levelno`, and an optional per-category coloring rule
+    applied to the message when `record.category` is registered. Colors are
+    suppressed entirely (delimiter/content unaffected) when `sys.stdout` is
+    not a TTY or `NO_COLOR` is set to a non-empty value.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        use_color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+        timestamp = self.formatTime(record, self.datefmt)
+        ts_level = _DELIMITER.join([timestamp, record.levelname])
+        level_color = _LEVEL_COLORS.get(record.levelno, "") if use_color else ""
+        if level_color:
+            ts_level = f"{level_color}{ts_level}{_RESET}"
+
+        message = record.getMessage()
+        category = getattr(record, "category", "plain")
+        colorize = _CATEGORY_COLORS.get(category) if use_color else None
+        if colorize is not None:
+            message = colorize(message)
+
+        return _DELIMITER.join([ts_level, message])
 
 
 def setup_logging(config: LoggingConfig) -> None:
@@ -47,7 +100,7 @@ def setup_logging(config: LoggingConfig) -> None:
     # `logging.console: false` for a quiet daemon (file logging is unaffected).
     if config.console:
         console = logging.StreamHandler(sys.stdout)
-        console.setFormatter(formatter)
+        console.setFormatter(ColorFormatter())
         console.setLevel(config.level)
         handlers.append(console)
 
