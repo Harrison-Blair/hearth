@@ -7,6 +7,7 @@ Subcommands (run from the repo root):
   upsert <slug> --phrase "X" --eval <eval.json>   # record one model (used by train.py)
   list                                            # show the trained series
   regen                                           # rebuild manifest from models/wake/*.onnx on disk
+  remove <slug>                                   # drop one manifest entry (no-op if absent)
   select <slug-or-phrase> [...]                   # load this series: writes config.yaml wake.model_paths
 
 `select` also accepts a bare slug whose .onnx exists on disk but isn't in the
@@ -101,6 +102,14 @@ def cmd_regen(_a: argparse.Namespace) -> None:
     print(f"manifest: added {len(added)} model(s)" + (f": {', '.join(added)}" if added else ""))
 
 
+def cmd_remove(a: argparse.Namespace) -> None:
+    m = load()
+    existed = a.slug in m
+    m.pop(a.slug, None)
+    save(m)
+    print(f"manifest: removed {a.slug!r}" if existed else f"manifest: {a.slug!r} not found")
+
+
 def _resolve(ref: str, m: dict) -> str:
     """A manifest slug, a manifest phrase, or a slug whose .onnx exists on disk."""
     if ref in m:
@@ -189,6 +198,10 @@ if __name__ == "__main__":
 
     sub.add_parser("list").set_defaults(func=cmd_list)
     sub.add_parser("regen").set_defaults(func=cmd_regen)
+
+    rm = sub.add_parser("remove")
+    rm.add_argument("slug")
+    rm.set_defaults(func=cmd_remove)
 
     sel = sub.add_parser("select")
     sel.add_argument("refs", nargs="+", help="slugs and/or phrases to load")
