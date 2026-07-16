@@ -6,6 +6,7 @@ Extracted from FTHR-002's `LocalBackend` so `LocalBackend` and `RemoteBackend`
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 
@@ -88,6 +89,7 @@ class _OpenAICompatBackend:
         # error", e.g. a bad key or rate limit) instead of "backend
         # unreachable".
         attempt = 0
+        start = time.monotonic()
         while True:
             try:
                 response = await self._client.post(
@@ -106,6 +108,7 @@ class _OpenAICompatBackend:
                 raise BrainError("backend error", detail=detail) from exc
             except httpx.HTTPError as exc:
                 raise BrainError("backend unreachable", detail=str(exc)) from exc
+        duration_s = time.monotonic() - start
 
         body = response.json()
         try:
@@ -131,10 +134,21 @@ class _OpenAICompatBackend:
                 "unreadable response", detail=f"bad tool call: {exc!r}"
             ) from exc
 
+        usage = body.get("usage") or {}
+        reasoning_tokens = (usage.get("completion_tokens_details") or {}).get(
+            "reasoning_tokens"
+        )
+
         return BrainResult(
             text=message.get("content"),
             tool_calls=tool_calls,
             finish_reason=choice.get("finish_reason", "stop"),
             backend=self.name,
             tier=self.tier,
+            model=self._config.model,
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+            reasoning_tokens=reasoning_tokens,
+            total_tokens=usage.get("total_tokens"),
+            duration_s=duration_s,
         )

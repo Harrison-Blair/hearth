@@ -118,6 +118,108 @@ async def test_no_retry_exhausts_and_raises(llm_config):
     await client.aclose()
 
 
+async def test_local_backend_captures_usage_and_model(llm_config, canned_completion):
+    """AC-2: prompt/completion/total tokens and model are captured from the
+    `usage` block on a successful completion."""
+    backend_config = llm_config.backends["local"]
+    body = canned_completion(
+        text="hi there",
+        usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=backend_config.base_url
+    )
+    backend = LocalBackend(backend_config, client=client, name="local", tier="default")
+
+    result = await backend.complete([Message(role="user", content="hi")], tools=None)
+
+    assert result.model == backend_config.model
+    assert result.prompt_tokens == 10
+    assert result.completion_tokens == 5
+    assert result.total_tokens == 15
+    assert result.reasoning_tokens is None
+
+    await client.aclose()
+
+
+async def test_local_backend_captures_reasoning_tokens(llm_config, canned_completion):
+    """AC-2: `completion_tokens_details.reasoning_tokens`, when present, is
+    surfaced as `reasoning_tokens`."""
+    backend_config = llm_config.backends["local"]
+    body = canned_completion(
+        text="hi there",
+        usage={
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "completion_tokens_details": {"reasoning_tokens": 3},
+        },
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=backend_config.base_url
+    )
+    backend = LocalBackend(backend_config, client=client, name="local", tier="default")
+
+    result = await backend.complete([Message(role="user", content="hi")], tools=None)
+
+    assert result.reasoning_tokens == 3
+
+    await client.aclose()
+
+
+async def test_local_backend_missing_usage_defaults_to_none(llm_config, canned_completion):
+    """AC-2: when `usage` is absent entirely, every numeric metrics field is
+    `None` -- never fabricated as `0` -- and `complete()` doesn't raise."""
+    backend_config = llm_config.backends["local"]
+    body = canned_completion(text="hi there")  # no usage key
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=backend_config.base_url
+    )
+    backend = LocalBackend(backend_config, client=client, name="local", tier="default")
+
+    result = await backend.complete([Message(role="user", content="hi")], tools=None)
+
+    assert result.prompt_tokens is None
+    assert result.completion_tokens is None
+    assert result.total_tokens is None
+    assert result.reasoning_tokens is None
+
+    await client.aclose()
+
+
+async def test_local_backend_duration_is_positive_float(llm_config, canned_completion):
+    """AC-2: `duration_s` is captured regardless of whether `usage` is present."""
+    backend_config = llm_config.backends["local"]
+    body = canned_completion(text="hi there")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=backend_config.base_url
+    )
+    backend = LocalBackend(backend_config, client=client, name="local", tier="default")
+
+    result = await backend.complete([Message(role="user", content="hi")], tools=None)
+
+    assert result.duration_s is not None
+    assert result.duration_s >= 0
+
+    await client.aclose()
+
+
 async def test_timeout_is_not_retried(llm_config):
     """A read timeout means the model is already too slow -- retrying just
     burns the turn budget, so it must NOT be retried even with max_retries."""

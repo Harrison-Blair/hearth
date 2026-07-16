@@ -100,11 +100,19 @@ def two_tier_llm_config() -> LLMConfig:
 
 @pytest.fixture
 def canned_completion():
-    def _make(text: str = "hello there", tool_calls=None, finish_reason: str = "stop") -> dict:
+    def _make(
+        text: str = "hello there",
+        tool_calls=None,
+        finish_reason: str = "stop",
+        usage: dict | None = None,
+    ) -> dict:
         message: dict = {"role": "assistant", "content": text}
         if tool_calls:
             message["tool_calls"] = tool_calls
-        return {"choices": [{"message": message, "finish_reason": finish_reason}]}
+        body: dict = {"choices": [{"message": message, "finish_reason": finish_reason}]}
+        if usage is not None:
+            body["usage"] = usage
+        return body
 
     return _make
 

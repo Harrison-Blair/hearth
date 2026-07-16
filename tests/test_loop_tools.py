@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import httpx
 
@@ -259,6 +260,56 @@ async def test_nested_tool_round_cap(tmp_path, two_tier_llm_config):
 
     for client in clients.values():
         await client.aclose()
+
+async def test_turn_summary_includes_nested_consult_metrics(
+    tmp_path, two_tier_llm_config, caplog
+):
+    """AC-4: the per-turn summary's totals include both the orchestrator's
+    own call(s) and the nested consult_brain call(s), not just the
+    orchestrator's."""
+    caplog.set_level(logging.INFO)
+
+    def local_handler(request, n):
+        if n == 1:
+            body = _tool_call_completion("consult_brain", {"query": "Ada Lovelace"})
+            body["usage"] = {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14}
+            return httpx.Response(200, json=body)
+        body = _chat_completion("Ada Lovelace was a mathematician.")
+        body["usage"] = {"prompt_tokens": 20, "completion_tokens": 8, "total_tokens": 28}
+        return httpx.Response(200, json=body)
+
+    def remote_handler(request, n):
+        if n == 1:
+            body = _tool_call_completion("wikipedia_search", {"query": "Ada Lovelace"})
+            body["usage"] = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+            return httpx.Response(200, json=body)
+        body = _chat_completion("Findings: Ada Lovelace, mathematician.")
+        body["usage"] = {"prompt_tokens": 6, "completion_tokens": 2, "total_tokens": 8}
+        return httpx.Response(200, json=body)
+
+    router, clients, router_fn = _build(two_tier_llm_config, local_handler, remote_handler)
+    log = EventLog(str(tmp_path / "events.db"))
+    registry = _FakeRegistry()
+    consult = BrainConsult(router, registry, log, _Config())
+
+    loop = Loop(router, log, _Config(), consult=consult)
+    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace")
+
+    assert answer == "Ada Lovelace was a mathematician."
+
+    messages = [record.getMessage() for record in caplog.records]
+    summary_lines = [m for m in messages if "turn=1" in m]
+    assert summary_lines, messages
+    summary = summary_lines[-1]
+
+    # Orchestrator: in=10+20=30, out=4+8=12. Nested consult: in=5+6=11, out=3+2=5.
+    assert "in=41" in summary
+    assert "out=17" in summary
+    assert "calls=4" in summary  # 2 orchestrator rounds + 2 nested consult rounds
+
+    for client in clients.values():
+        await client.aclose()
+
 
 class _RecordingConsult:
     """Same call shape as `BrainConsult`; records the per-turn context it was
