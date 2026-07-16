@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from hearth.brain.base import Message, ToolSpec
 from hearth.brain.errors import BrainError
@@ -103,6 +104,13 @@ class BrainConsult:
             )
             return spec.label if spec else name
 
+        # `self.last_metrics` is set to `metrics` up front (FTHR-014) so that
+        # a `BrainError` re-raised out of `run_react_rounds` -- which mutates
+        # `metrics` in place before raising -- still leaves the failed call's
+        # count/duration visible to `Loop.run_turn`'s nested-metrics collection,
+        # not just the happy path.
+        metrics = self.last_metrics
+        consult_start = time.monotonic()
         try:
             react_run = await asyncio.wait_for(
                 run_react_rounds(
@@ -116,6 +124,7 @@ class BrainConsult:
                     turn_id=turn_id,
                     emit=emit,
                     label_for=label_for,
+                    metrics=metrics,
                 ),
                 timeout=self._config.agent.consult_timeout_s,
             )
@@ -124,6 +133,18 @@ class BrainConsult:
         except BrainError:
             findings = "consult_brain: couldn't reach the external knowledge source right now."
         except asyncio.TimeoutError:
+            # FTHR-014 AC-3/AC-4: log a timeout marker and count it as one
+            # failed call toward this consult's call count/wall time.
+            elapsed = time.monotonic() - consult_start
+            metrics.call_count += 1
+            metrics.failed_count += 1
+            metrics.duration_s += elapsed
+            try:
+                logger.warning(
+                    "consult timeout tier=%s after=%.1fs", selection.tier, elapsed
+                )
+            except Exception:  # never let logging break a turn (AC-5)
+                pass
             findings = "consult_brain: that took too long, continuing without it."
 
         self._append_transcript(session_id, f"consult findings: {findings}")

@@ -5,7 +5,9 @@ import json
 import logging
 
 import httpx
+import pytest
 
+from hearth.brain.errors import BrainError
 from hearth.brain.router import Router
 from hearth.loop import Loop
 from hearth.memory.log import EventLog
@@ -136,6 +138,42 @@ async def test_loop_logs_per_call_and_per_turn_metrics(
     await loop.run_turn("s1", "t2", "hello again")
     messages = [record.getMessage() for record in caplog.records]
     assert any("turn=2" in m for m in messages), messages
+
+    await client.aclose()
+
+
+async def test_loop_logs_failed_marker_on_brain_error_never_leaks_detail(
+    tmp_path, llm_config, caplog
+):
+    """AC-2: a `BrainError` from `brain.complete()` produces a one-line
+    FAILED marker at WARNING level (tier, round, `.reason`) before
+    propagating unchanged, and `.detail` (which may carry raw HTTP body
+    text) never appears in the log output."""
+    caplog.set_level(logging.WARNING)
+
+    secret_body = "internal-diagnostic-body-should-never-be-logged"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text=secret_body)
+
+    router, client = _make_router(handler, llm_config)
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = Loop(router, log, _Config())
+
+    with pytest.raises(BrainError) as excinfo:
+        await loop.run_turn("s1", "t1", "hello")
+
+    assert secret_body in excinfo.value.detail  # sanity: detail really carries it
+
+    messages = [record.getMessage() for record in caplog.records]
+    failed_lines = [m for m in messages if "FAILED" in m]
+    assert failed_lines, messages
+    assert "tier=" in failed_lines[0]
+    assert "round=1" in failed_lines[0]
+    assert "backend error" in failed_lines[0]  # BrainError.reason for a status error
+
+    full_log = "\n".join(messages)
+    assert secret_body not in full_log
 
     await client.aclose()
 

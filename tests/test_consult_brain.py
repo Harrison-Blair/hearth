@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import httpx
 
@@ -184,5 +185,41 @@ async def test_consult_timeout_emits_balanced_tool_activity(tmp_path, two_tier_l
 
     assert "too long" in result
     assert [(e.phase, e.label) for e in emitted] == [("start", "search"), ("end", "search")]
+
+    await client.aclose()
+
+
+async def test_consult_timeout_logs_marker(tmp_path, two_tier_llm_config, caplog):
+    """AC-3/AC-4: a consult-level timeout logs a WARNING marker from
+    `BrainConsult.__call__`'s existing `except asyncio.TimeoutError` handler,
+    without changing its existing degraded-findings-string behavior, and the
+    consult's own metrics count the timed-out call as failed."""
+    caplog.set_level(logging.WARNING)
+
+    async def slow_handler(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(1)
+        return httpx.Response(200, json=_chat_completion("too slow"))
+
+    remote_config = two_tier_llm_config.backends["remote"]
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(slow_handler), base_url=remote_config.base_url
+    )
+    router = Router(two_tier_llm_config, clients={"remote": client})
+    log = EventLog(str(tmp_path / "events.db"))
+    registry = _FakeRegistry()
+    consult = BrainConsult(
+        router, registry, log, _Config(agent=AgentConfig(max_tool_rounds=3, consult_timeout_s=0.01))
+    )
+
+    result = await consult("s1", "t1", "who was Ada Lovelace")
+
+    assert isinstance(result, str)
+    assert result
+
+    messages = [record.getMessage() for record in caplog.records]
+    timeout_lines = [m for m in messages if "timeout" in m.lower()]
+    assert timeout_lines, messages
+
+    assert consult.last_metrics.failed_count == 1
 
     await client.aclose()
