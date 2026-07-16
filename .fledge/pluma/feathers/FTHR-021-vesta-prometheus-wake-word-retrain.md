@@ -53,13 +53,13 @@ Retire "Calcifer" as a wake word entirely and replace it with two hand-curated, 
 - Additionally verify: `python training/manifest.py list` no longer shows a `calcifer` entry after the `remove` step (real end-to-end use of the now-unit-tested subcommand); `ls models/wake/` no longer shows `calcifer.onnx`; `train.py --smoke` (no `--config` at all) now fails with an argparse "required" error (proves AC-4 without needing a full run).
 
 ## Acceptance Criteria
-- [ ] AC-1: Both `training/test_manifest.py`'s unit tests and the smoke-run verification in Tests were observed failing (for the expected reasons — no `remove` subcommand; missing config files) before implementation, and passing after.
-- [ ] AC-2: `training/vesta.yaml` exists with `model_name`/`target_phrases` = `vesta` and Vesta-specific curated negative phrases; `training/calcifer.yaml` no longer exists (satisfies PLM-006 AC-1/FC-1).
-- [ ] AC-3: `training/prometheus.yaml` exists with `model_name`/`target_phrases` = `prometheus`, its own curated negative phrases, and the same structure/knobs as `vesta.yaml` otherwise (satisfies PLM-006 AC-2/FC-2).
-- [ ] AC-4: `train.py --config` is required — running without it fails with a clear argparse error, no silent default (satisfies PLM-006 AC-3/FC-3).
-- [ ] AC-5: `train_batch.py`'s `BASE_CONFIG` resolves to `training/vesta.yaml` (satisfies PLM-006 AC-4/FC-4).
-- [ ] AC-6: `README.md` names both "Vesta" and "Prometheus" as wake words with both model paths; no remaining Calcifer wake-word reference (satisfies PLM-006 AC-5/FC-5).
-- [ ] AC-7: `training/README.md` has no remaining reference to `calcifer.yaml` or "Calcifer" as the default/example phrase (satisfies PLM-006 AC-6/FC-6).
-- [ ] AC-8: No occurrence of "calcifer"/"Calcifer" remains anywhere under `training/` or `models/wake/` (configs, scripts, docs, artifacts, manifest) (satisfies PLM-006 AC-8).
-- [ ] AC-9: `models/wake/calcifer.onnx` no longer exists on disk, `models/wake/models.json` has no `"calcifer"` key, and `manifest.py` has a working `remove <slug>` subcommand, covered by `training/test_manifest.py`'s two unit tests, used to perform the real removal (satisfies PLM-006 AC-9/FC-8).
-- [ ] AC-10: Full existing `pytest` suite (including the new `training/test_manifest.py`) passes with no other test broken.
+- [x] AC-1: Both `training/test_manifest.py`'s unit tests and the smoke-run verification in Tests were observed failing (for the expected reasons — no `remove` subcommand; missing config files) before implementation, and passing after.
+- [x] AC-2: `training/vesta.yaml` exists with `model_name`/`target_phrases` = `vesta` and Vesta-specific curated negative phrases; `training/calcifer.yaml` no longer exists (satisfies PLM-006 AC-1/FC-1).
+- [x] AC-3: `training/prometheus.yaml` exists with `model_name`/`target_phrases` = `prometheus`, its own curated negative phrases, and the same structure/knobs as `vesta.yaml` otherwise (satisfies PLM-006 AC-2/FC-2).
+- [x] AC-4: `train.py --config` is required — running without it fails with a clear argparse error, no silent default (satisfies PLM-006 AC-3/FC-3).
+- [x] AC-5: `train_batch.py`'s `BASE_CONFIG` resolves to `training/vesta.yaml` (satisfies PLM-006 AC-4/FC-4).
+- [x] AC-6: `README.md` names both "Vesta" and "Prometheus" as wake words with both model paths; no remaining Calcifer wake-word reference (satisfies PLM-006 AC-5/FC-5).
+- [x] AC-7: `training/README.md` has no remaining reference to `calcifer.yaml` or "Calcifer" as the default/example phrase (satisfies PLM-006 AC-6/FC-6).
+- [x] AC-8: No occurrence of "calcifer"/"Calcifer" remains anywhere under `training/` or `models/wake/` (configs, scripts, docs, artifacts, manifest) (satisfies PLM-006 AC-8).
+- [x] AC-9: `models/wake/calcifer.onnx` no longer exists on disk, `models/wake/models.json` has no `"calcifer"` key, and `manifest.py` has a working `remove <slug>` subcommand, covered by `training/test_manifest.py`'s two unit tests, used to perform the real removal (satisfies PLM-006 AC-9/FC-8).
+- [x] AC-10: Full existing `pytest` suite (including the new `training/test_manifest.py`) passes with no other test broken.
