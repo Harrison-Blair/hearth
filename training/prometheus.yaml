@@ -11,7 +11,7 @@ n_samples: 25000
 n_samples_val: 5000
 n_background_samples: 2000
 n_background_samples_val: 500
-tts_batch_size: 50           # 100 OOMs on the 16 GB RX 9070 XT in practice (torch holds
+tts_batch_size: 25           # 100 OOMs on the 16 GB RX 9070 XT in practice (torch holds
                              # ~13 GB steady + ~3.6 GB batch spike); failed batches are
                              # silently skipped, shrinking the dataset — keep at 50
 
