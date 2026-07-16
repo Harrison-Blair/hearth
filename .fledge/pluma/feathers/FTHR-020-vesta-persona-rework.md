@@ -2,7 +2,7 @@
 id: FTHR-020
 title: Vesta persona rework
 plumage: PLM-005
-status: hatching
+status: fledged
 priority: P1
 depends_on: []
 authored: 2026-07-16T02:32:13Z
