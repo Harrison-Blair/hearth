@@ -1,7 +1,9 @@
 """Tests for hearth.config: YAML base -> HEARTH_* env -> .env secret precedence."""
 import os
+from pathlib import Path
 
 import pytest
+import yaml
 
 from hearth.config import Settings
 
@@ -136,3 +138,32 @@ def test_no_config_anywhere_fails_loud(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(FileNotFoundError, match="default-config.yaml"):
         Settings(_env_file=None)
+
+
+def _load_default_persona_prompt():
+    default_config_path = Path(__file__).parent.parent / "default-config.yaml"
+    data = yaml.safe_load(default_config_path.read_text())
+    return data["persona"]["system_prompt"]
+
+
+def test_default_persona_prompt_is_vesta():
+    prompt = _load_default_persona_prompt()
+    assert "You are Vesta." in prompt
+    assert "calcifer" not in prompt.lower()
+
+
+def test_default_persona_prompt_has_no_mythological_titles():
+    prompt = _load_default_persona_prompt()
+    lowered = prompt.lower()
+    assert "goddess" not in lowered
+    assert "keeper of the" not in lowered
+
+
+def test_default_persona_prompt_has_deescalation_rule():
+    prompt = _load_default_persona_prompt()
+    assert "de-escalat" in prompt.lower()
+
+
+def test_default_persona_prompt_retains_consult_brain_instruction():
+    prompt = _load_default_persona_prompt()
+    assert "consult_brain" in prompt
