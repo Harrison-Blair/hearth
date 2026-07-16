@@ -1,4 +1,6 @@
 """Tests for hearth.app CLI entry point."""
+import logging
+
 from hearth import __version__
 from hearth.app import _build_llm_clients, _run_daemon, main
 
@@ -54,3 +56,29 @@ async def test_run_daemon_wires_wikipedia_tool_brain_side(monkeypatch, tmp_path)
     assert exit_code == 0
     registry = captured["loop"]._consult._tool_registry
     assert registry.specs() != []  # config.yaml's wikipedia_enabled: true
+
+
+async def test_run_daemon_logs_server_lifecycle_lines(monkeypatch, tmp_path, caplog):
+    """_run_daemon must emit "daemon starting" and "veneer serving" INFO
+    lines tagged extra={"category": "server"} so FTHR-016's console
+    formatter can color the daemon's lifecycle distinctly -- today app.py
+    has no logger at all, so no such records exist."""
+
+    class _FakeVeneer:
+        def __init__(self, loop, log, config) -> None:
+            pass
+
+        async def serve(self, host=None, port=None) -> None:
+            return None
+
+    monkeypatch.chdir(tmp_path)  # keep the sqlite db out of the worktree
+    monkeypatch.setattr("hearth.veneer.server.Veneer", _FakeVeneer)
+
+    with caplog.at_level(logging.INFO):
+        exit_code = await _run_daemon()
+
+    assert exit_code == 0
+    server_records = [r for r in caplog.records if getattr(r, "category", None) == "server"]
+    messages = [r.getMessage() for r in server_records]
+    assert any("daemon starting" in m for m in messages)
+    assert any("veneer serving" in m for m in messages)
