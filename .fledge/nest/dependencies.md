@@ -1,69 +1,67 @@
 ---
-generated: 2026-07-15T22:30:28Z
-commit: a8489b1afa55662a54ba66548a2e176584a3f387
+generated: 2026-07-15T23:27:05Z
+commit: e41ba8a73a56364e7c3bb1acf1332cadab817e45
 agent: fledge-forager
-fledge_version: 0.5.4
+fledge_version: 0.5.5
 ---
 
 # Dependencies
 
-External libraries, tools, and services used across the repo, deduplicated with usage notes. See `pyproject.toml` for exact version pins/extras.
+External libraries, tools, and services, deduplicated across the runtime, test, and training modules, with usage notes. See `pyproject.toml` for the authoritative extras split — comments there explain each pin.
 
-## Base runtime dependencies (always installed)
+## Runtime — base (always installed)
 
-- **pydantic / pydantic-settings** — `hearth/config.py:Settings`; `YamlConfigSettingsSource`, `env_prefix="HEARTH_"`, `env_nested_delimiter="__"`, `env_file=".env"` (root.md, hearth.md).
-- **pyyaml** — config file parsing.
-- **sounddevice, numpy** — audio capture primitives (declared as base deps in `pyproject.toml`; not yet exercised by any code in the `hearth/` file list — roadmap per architecture.md).
-- **httpx** — `AsyncClient` per LLM backend in `hearth/brain/openai_compat.py`; also raw `httpx.get()` in `hearth/tools/wikipedia.py` (no dedicated Wikipedia client lib).
-- **websockets** — server (`hearth/veneer/server.py`) and client (`hearth/veneer/client.py`); its logger is wired into `hearth/logging_setup.py`.
+- **pydantic>=2, pydantic-settings>=2** — `hearth/config.py` `Settings` schema and layered source precedence.
+- **python-dotenv>=1** — loads `.env` secrets.
+- **pyyaml>=6** — parses `config.yaml`.
+- **httpx** — async HTTP client; one instance per LLM backend (`hearth/brain/local.py`, `remote.py`) plus one for Wikipedia (`hearth/tools/wikipedia.py`); `response.raise_for_status()` surfaces HTTP errors.
+- **websockets** — `hearth/veneer/server.py` (async `serve`), `hearth/veneer/client.py` (`connect`); `ping_interval=None` deliberately (see `conventions.md`).
+- **sounddevice, numpy** — present in base specifically to avoid import-time failures elsewhere, per `pyproject.toml` comments; not otherwise exercised by the wired runtime.
 
-## Optional-dependency extras (`pyproject.toml`, per-phase)
+## Runtime — optional extras (`pip install -e '.[extra]'`)
 
-Installed independently so each capability can be opted into (root.md):
-- `tts` — piper-tts
-- `wake` — livekit-wakeword, onnxruntime
-- `stt` — faster-whisper
-- `vad` — webrtcvad (pin `setuptools<81`, noted as a required workaround in `pyproject.toml`)
-- `llm` — httpx (already a base dep; kept for extra-install symmetry)
-- `nlu` — dateparser
-- `scheduling` — apscheduler
-- `search` — httpx + ddgs
-- `gcal` — google-auth, requests, httpx
-- `aec` — speexdsp — **deliberately excluded from `all`**: native/build-sensitive, app degrades gracefully when import fails
-- `tui` — textual~=8.2 + httpx — **deliberately excluded from `all`**, same reason
-- `dev` — pytest, pytest-asyncio, ruff
+Split per capability so each installs independently:
 
-None of `tts`/`wake`/`stt`/`vad`/`nlu`/`scheduling`/`search`/`gcal`/`aec`/`tui` are consumed by any file in the current `hearth/` module — all roadmap (hearth.md architecture cross-reference).
+- `tts` — piper-tts (roadmap, Phase 1+).
+- `wake` — livekit-wakeword, onnxruntime (roadmap; training-time only today — see `architecture.md`).
+- `stt` — faster-whisper (roadmap).
+- `vad` — webrtcvad (pins `setuptools<81` to dodge `pkg_resources` removal; roadmap).
+- `llm` — httpx (redundant with base, listed for clarity).
+- `nlu` — dateparser (roadmap).
+- `scheduling` — apscheduler (roadmap).
+- `search` — httpx, ddgs — backs the currently-wired Wikipedia tool plus future DuckDuckGo search.
+- `gcal` — httpx, google-auth, requests (roadmap).
+- `aec` — speexdsp (needs system `libspeexdsp-dev`); **deliberately excluded from `all`** — app must degrade gracefully if this import fails.
+- `tui` — textual~=8.2, httpx; **deliberately excluded from `all`** — separate child process.
+- `all` = `[tts, wake, stt, vad, llm, nlu, scheduling, search, gcal]` (excludes `aec`, `tui`).
+- `dev` — pytest, pytest-asyncio, ruff.
 
-## Secrets / external services (config-referenced, root.md)
+## External services
 
-- **Ollama** (local LLM backend) — `http://localhost:11434/v1`, default model `qwen3:14b`.
-- **OpenRouter** (remote LLM backend) — `https://openrouter.ai/api/v1`, default model `tencent/hy3:free`; API key via `HEARTH_LLM__OPENROUTER_API_KEY` in `.env`.
-- **Wikipedia REST API** — `https://{lang}.wikipedia.org/w/rest.php/v1/search/page`, requires a Wikimedia-policy-compliant User-Agent header; consumed only by `hearth/tools/wikipedia.py`.
+- **Ollama** — local LLM, default backend for the `default` tier (`http://localhost:11434/v1`).
+- **OpenRouter** — remote LLM, default backend for the `tool` tier (`https://openrouter.ai/api/v1`); requires `HEARTH_LLM__OPENROUTER_API_KEY`.
+- **Wikipedia REST API** (`en.wikipedia.org/w/rest.php/v1/search/page`) — the only currently-wired data tool.
 
-## Wake-word training pipeline dependencies (isolated `training/.venv-train`, ROCm)
+## Test-only dependencies
 
-Never installed alongside the runtime venv (training.md):
-- **torch / torchaudio** — ROCm ≥6.4 wheels, pinned to a rocm6.4+ index specifically to avoid pulling CUDA builds on AMD hardware.
-- **livekit-wakeword[train,eval,export]** — training orchestrator, wraps the conv-attention/DNN classifier training and ONNX export.
-- **pyyaml** — training config loading/dumping.
-- System packages (Arch, per `training/bootstrap.sh` warnings): `espeak-ng` (Piper's TTS backend), `libsndfile`, `ffmpeg`, `sox`.
-- First-run data downloads (~16 GB, cached under `training/data`, reused via `--skip-setup`): ACAV100M negative-sample embeddings, MUSAN background noise, MIT RIRs, Piper VITS voice models.
+- **pytest, pytest-asyncio** — `asyncio_mode=auto` (async `def test_*` needs no decorator); confirmed in `pyproject.toml` and exercised throughout `tests/`.
+- **httpx.MockTransport** — hermetic stubbing of every LLM/Wikipedia call; paired with a `HostRouter` conftest fixture that branches by request host for deterministic multi-backend assertions.
+- **websockets test doubles** — `FakeWebSocket` for unit-level veneer error tests; real `websockets.serve()` only in `test_e2e_veneer.py`.
 
-`training/manifest.py` is the one training-side script that deliberately depends on stdlib only, so it can run from the repo root without the training venv.
+## Build/CI dependencies
 
-## Packaging / release dependencies
+- **PyInstaller** — `packaging/build.sh` produces `dist/hearth-$(uname -m)`; `HEARTH_BUILD_EXTRAS` env var controls which extras get baked in (default `all`); `--add-data config.yaml:.` lands the config at `sys._MEIPASS`; `--collect-submodules hearth` covers function-level imports PyInstaller's static analysis would otherwise miss.
+- **GitHub Actions** (`.github/workflows/release.yml`) — native build matrix on `ubuntu-24.04` (x86_64) and `ubuntu-24.04-arm` (aarch64); no cross-compilation.
 
-- **PyInstaller** — single-file binary generation, `--collect-submodules hearth` (packaging.md).
-- Host build system libraries (Ubuntu, per `.github/workflows/release.yml`): `portaudio19-dev`, `libportaudio2`, `libsndfile1`, `espeak-ng`.
-- **GitHub Actions**: `actions/checkout@v4`, `actions/setup-python@v5`, `actions/upload-artifact@v4`, `actions/download-artifact@v4`, `softprops/action-gh-release@v2`.
-- **Python 3.12** exact pin at build time (`.python-version` = 3.12.13; CI installs 3.12 via `actions/setup-python`).
+## Training-pipeline dependencies (isolated venv, never merged with runtime)
 
-## Dev / test tooling
-
-- **pytest** + **pytest-asyncio** (`asyncio_mode=auto`) — see testing.md.
-- **ruff** — `ruff check .`, line-length 100 (`pyproject.toml [tool.ruff]`).
+- **livekit-wakeword[train,eval,export]** — full ONNX wake-word pipeline (`setup` downloads data, `run` executes training stages).
+- **torch, torchaudio** (ROCm builds, `rocm6.4` index) — installed by `training/bootstrap.sh` for RDNA4/gfx1201 GPUs; asserts HIP availability.
+- **PyYAML** — used by `train.py`, `train_batch.py`, `manifest.py` to read/write training configs and to hand-edit `config.yaml`'s `wake.model_paths`.
+- **Piper VITS** (via livekit) — synthesizes positive/negative training clips.
+- **ACAV100M, MUSAN, MIT RIRs** (livekit-managed downloads) — negative training set, background noise, and room-impulse-response augmentation data, respectively.
+- **System packages** (Arch, per `bootstrap.sh`) — `espeak-ng`, `libsndfile`, `ffmpeg`, `sox`.
 
 ## Open Questions
 
-- `sounddevice`/`numpy` are base (non-extra) dependencies despite no current code path using them — confirm whether this is intentional pre-provisioning for the audio-capture stage or accidental scope (root.md).
+- None beyond the general extras-vs-roadmap wiring gap already tracked in `architecture.md`.

@@ -1,67 +1,73 @@
 ---
-generated: 2026-07-15T22:30:28Z
-commit: a8489b1afa55662a54ba66548a2e176584a3f387
+generated: 2026-07-15T23:27:05Z
+commit: e41ba8a73a56364e7c3bb1acf1332cadab817e45
 agent: fledge-forager
-fledge_version: 0.5.4
+fledge_version: 0.5.5
 ---
 
 # Entry Points
 
-How to run, build, and interface with hearth — CLIs, exported APIs, and build outputs.
+How to install, run, build, and release `hearth`, and the public interfaces each module exposes.
 
-## Running the daemon
+## Install
 
-- **Package entry point** (`pyproject.toml`): `hearth = hearth.app:main` → installed as the `hearth` CLI.
-- `hearth.app:main(argv)` — argparse CLI (`--version`, `run` subcommand) (hearth.md).
-- `hearth.app:_run_daemon()` — async startup: load `.env`, build `Settings`, `setup_logging`, wire `Router`/`Loop`/`Veneer`/`EventLog`/`BrainConsult`/`ToolRegistry`, then `Veneer.serve()` (hearth.md).
-- Dev install: `pip install -e '.[all]'` (every runtime capability) or `pip install -e '.[dev]'` (pytest/ruff only) (`CLAUDE.md`).
+```bash
+pip install -e '.[all]'   # every wired runtime capability
+pip install -e '.[dev]'   # pytest, pytest-asyncio, ruff
+```
 
-## WebSocket control surface (the "veneer")
+## Run
 
-- **Server**: `hearth.veneer.server.Veneer(loop, log, config).serve(host, port)` — bound to `127.0.0.1:8765` by default (config-driven `veneer.host`/`veneer.port`), one session per connection (root.md, hearth.md).
-- Wire-in: `hearth.veneer.protocol.parse_request(raw) -> Request(turn_id, final_user_transcript)`.
-- Wire-out: `answer_message(turn_id, text)`, `done_message(turn_id)`, `error_message(turn_id, message)` — via `hearth.veneer.protocol.serialize(event)`, whitelist-only (see conventions.md).
-- **Reference client**: `python -m hearth.veneer.client` — `hearth.veneer.client.run_client(host, port)` (async stdin readline loop) and `hearth.veneer.client.send_turn(websocket, transcript) -> list[dict]` (root.md, hearth.md).
+- **Console script:** `hearth = hearth.app:main` (`pyproject.toml [project.scripts]`).
+- **CLI:** `main(argv)` → `argparse` (`--version`, `run` subcommand) → `asyncio.run(_run_daemon())`.
+- **Daemon:** `hearth run` → `hearth/app.py::_run_daemon()` loads `.env`, instantiates `Settings`, wires `Router` / `EventLog` / `ToolRegistry` / `Loop` / `Veneer`, calls `veneer.serve(host, port)`.
+- **Client:** `python -m hearth.veneer.client` — companion CLI that connects to the running daemon's WebSocket, reads stdin on a background thread, prints answers/tool-activity/errors.
 
-## Core orchestration API (internal, not exposed over the wire)
+## Build / release
 
-- `hearth.loop.Loop.run_turn(session_id, turn_id, transcript, emit)` — one full turn: log user input, reconstruct history from `EventLog`, run the ReAct loop on the `default` tier, apply persona restyle, log `final_answer`, return text.
-- `hearth.loop.run_react_rounds(brain, messages, tools, dispatch, round_cap, log, session_id, turn_id, emit, label_for)` — shared ReAct engine, used both by the top-level orchestrator and by `BrainConsult`.
-- `hearth.brain.router.Router.select(tier_override=None) -> Selection` — resolves which backend answers this round.
-- `hearth.brain.router.Router.brain_available() -> bool` — gates whether `consult_brain` is offered as a tool this turn.
-- `hearth.tools.consult.BrainConsult(router, tool_registry, log, config, transcript)` — callable `__call__(session_id, turn_id, query, emit)`; the nested-ReAct implementation behind the `consult_brain` tool.
-- `hearth.tools.registry.ToolRegistry.specs() -> list[ToolSpec]`, `.dispatch(name, args) -> str`.
-- `hearth.tools.wikipedia.wikipedia_search(query, client, endpoint, result_count, max_chars, lang, timeout) -> str`.
-- `hearth.memory.log.EventLog(db_path).append(...)`, `.read_session(session_id, limit)`.
-- `hearth.memory.reader.EventReader(log).read_since(cursor, limit)`, `.latest_cursor()`.
+```bash
+make release   # -> packaging/build.sh: PyInstaller single-file binary, dist/hearth-$(uname -m)
+make clean      # -> rm -rf build dist .build-venv
+```
 
-(all: hearth.md)
+- `packaging/build.sh` — `HEARTH_BUILD_EXTRAS` env var (default `all`) controls which extras get baked in; no cross-compilation, run once per target arch.
+- `packaging/entry.py` — thin PyInstaller entry point, imports `hearth.app:main`.
+- **CI/release:** push a `v*` tag → `.github/workflows/release.yml` builds natively on `ubuntu-24.04` (x86_64) and `ubuntu-24.04-arm` (aarch64), smoke-tests (`--version`, cold start), uploads both binaries to the GitHub Release.
+- **Manual smoke test:** `MANUAL_SMOKE.md` — non-hermetic procedure against real Ollama/OpenRouter/Wikipedia, with environment-vs-bug triage guidance.
 
-## Build & release
+## Test
 
-- `make release` → `packaging/build.sh` — builds a single-file PyInstaller binary for the **host architecture only** (no cross-compile) at `dist/hearth-$(uname -m)`; run once per target arch (x86_64 + aarch64) (`CLAUDE.md`, packaging.md).
-- `make clean` — removes build artifacts.
-- CI: `.github/workflows/release.yml` — triggered by `v*` tag push or manual `workflow_dispatch`; matrix over `ubuntu-24.04` (x86_64) / `ubuntu-24.04-arm` (aarch64); runs `packaging/build.sh`, smoke-tests the binary (`--version`, DEBUG-level startup), uploads artifacts, and (tag-triggered only) creates/updates the GitHub Release via `softprops/action-gh-release@v2` with both binaries attached (packaging.md).
-- `HEARTH_BUILD_EXTRAS` env var controls which extras get bundled into the binary (default `all`; CI always uses `all` for releases) (packaging.md).
+```bash
+pytest                              # asyncio_mode=auto, all tests
+pytest tests/test_loop.py           # one file
+pytest tests/test_loop.py::test_x   # one test
+pytest -v                           # verbose
+ruff check .                        # line-length 100
+```
 
-## Wake-word training CLIs (separate from the runtime; run inside `training/.venv-train`)
+## Public interfaces per module (where execution/data enters)
 
-- `python training/train.py [--config] [--smoke] [--skip-setup] [--n-samples] [--steps] [--fresh] [--fresh-clips]` — trains one model; exports `run_training(cfg, *, skip_setup=False)`.
-- `python training/train_batch.py [phrases ...] [--smoke] [--n-samples] [--steps] [--skip-setup]` — trains multiple phrases sequentially (defaults to reading `training/phrases.txt`).
-- `python training/manifest.py {upsert,list,regen,select}` — model registry management; `select <slug>` is what points `config.yaml`'s `wake.model_paths` at a trained model (stdlib-only, runnable from repo root).
-- `training/bootstrap.sh` — builds the isolated `training/.venv-train` (ROCm torch + livekit-wakeword[train,eval,export]).
+- **`Loop.run_turn(session_id, turn_id, transcript, emit=null_sink) -> str`** (`hearth/loop.py`) — the turn dispatcher: reconstructs history from `EventLog`, selects the brain via `Router`, runs the shared ReAct engine, logs every phase, appends to transcript. Called once per inbound WebSocket request.
+- **`run_react_rounds(brain, messages, tools, dispatch, round_cap, log, session_id, turn_id, emit, label_for) -> BrainResult`** (`hearth/loop.py`) — shared ReAct engine; both the top-level orchestrator turn and the nested `consult_brain` call reuse this, never duplicate it.
+- **`ToolRegistry.dispatch(name, args) -> str`** (`hearth/tools/registry.py`) — routes a tool call to its implementation (currently only `wikipedia_search`) or raises `KeyError`.
+- **`wikipedia_search(query, client, endpoint, result_count, max_chars, lang, timeout) -> str`** (`hearth/tools/wikipedia.py`).
+- **`BrainConsult.__call__(session_id, turn_id, query, emit) -> str`** (`hearth/tools/consult.py`) — nested ReAct over the `tool` tier; degrades `BrainError`/timeout to a plain-text observation.
+- **`Veneer.serve(host, port)`** (`hearth/veneer/server.py`) — the WebSocket daemon; `_handle_connection(websocket)` handles one connection, parsing `Request` JSON and sending `answer`/`tool_activity`/`done`/`error` messages.
+- **`EventLog.append(session_id, turn_id, type, provenance, payload) -> Event`**, **`read_session(session_id, limit) -> list[Event]`** (`hearth/memory/log.py`) — the only two writer-facing operations; append-only.
+- **`EventReader.read_since(cursor, limit) -> list[Event]`**, **`latest_cursor() -> int`** (`hearth/memory/reader.py`) — the read-only Layer-2 seam for a future background indexer.
 
-(training.md)
+## Training-pipeline entry points (isolated venv — see `dependencies.md`)
 
-## Testing entry points
+```bash
+bash training/bootstrap.sh                                   # one-time .venv-train setup
+training/.venv-train/bin/python training/train.py [OPTIONS]  # single-model training
+training/.venv-train/bin/python training/train_batch.py      # multi-phrase batch training
+python training/manifest.py list|upsert|regen|select ...     # model registry / config.yaml wiring
+```
 
-- `pytest` — full suite, `asyncio_mode=auto`.
-- `pytest path/to/test_x.py::test_name` — single test.
-- `ruff check .` — lint (line-length 100).
-- `MANUAL_SMOKE.md` — manual procedure against **real** Ollama/OpenRouter/Wikipedia (`hearth run` + `python -m hearth.veneer.client`, run by hand, not automated) (root.md).
-
-See `testing.md` for the automated-test breakdown.
+- `train.py` flags: `--smoke`, `--skip-setup`, `--n-samples N`, `--steps N`, `--fresh`, `--fresh-clips`.
+- `manifest.py select <refs>` — the step that actually writes `config.yaml`'s `wake.model_paths` (or set `HEARTH_WAKE__MODEL_PATHS` env var equivalently); the model itself is still not consumed anywhere in `hearth/` today.
 
 ## Open Questions
 
-None observed beyond those already logged in `architecture.md` (wake-word runtime integration timing).
+- None beyond what's already tracked in `architecture.md` / `dependencies.md`.

@@ -1,83 +1,67 @@
 ---
-generated: 2026-07-15T22:30:28Z
-commit: a8489b1afa55662a54ba66548a2e176584a3f387
+generated: 2026-07-15T23:27:05Z
+commit: e41ba8a73a56364e7c3bb1acf1332cadab817e45
 agent: fledge-forager
-fledge_version: 0.5.4
+fledge_version: 0.5.5
 ---
 
 # Data Model
 
-Core types, schemas, and persisted structures across the runtime, its config, its tests, and the wake-word training pipeline.
+Core types and schemas defined in `hearth/`, plus the on-disk formats used by the training pipeline.
 
-## Runtime configuration (`hearth/config.py`)
+## Brain boundary types (`hearth/brain/base.py`)
 
-- `Settings` — root pydantic-settings model; loads `config.yaml` + `.env` + `HEARTH_*` env with the precedence described in conventions.md.
-- `LLMConfig(backends, tiers, timeout, max_retries)`, `LLMBackend(base_url, model, api_key_env, supports_tools, supports_streaming, context_window, cost_tier, enabled)`.
-- `LLMTiers(default, tool)` — maps a routing role to a backend name.
-- `VeneerConfig(host, port)`, `ToolConfig(wikipedia_*)`.
+- `Capabilities(supports_tools, supports_streaming, context_window, cost_tier)`
+- `ToolCall(id, name, arguments)`
+- `Message(role, content, tool_calls, tool_call_id)`
+- `ToolSpec(name, description, parameters, label)`
+- `BrainResult(text, tool_calls, finish_reason, backend, tier)`
+- `Brain` — frozen protocol implemented by `local.py`/`remote.py` backends
+
+## Errors (`hearth/brain/errors.py`)
+
+- `BrainError(reason, detail)` — `reason` client-safe, `detail` internal-only diagnostic; never leaks secrets.
+
+## Routing (`hearth/brain/router.py`)
+
+- `Selection(brain, tier, backend_name, reason)` — result of `Router.select()`.
+
+## Events (`hearth/events.py`)
+
+- `ToolActivity(turn_id, phase, label)` — `phase` is `"start"` or `"end"`.
+- `EventSink = Callable[[object], Awaitable[None]]`; `null_sink` — no-op default.
+
+## Event log (`hearth/memory/log.py`)
+
+- `Event(id, session_id, turn_id, ts_utc, type, provenance, payload)` — `type` in `{user_input, routing_decision, tool_call, observation, final_answer, error}`.
+- Backing store: sqlite (`hearth.db` by default, `storage.db_path`), `events` table, append-only (no update/delete). `EventLog.append(...) -> Event`; `read_session(session_id, limit) -> list[Event]` (oldest-first).
+- `EventReader.read_since(cursor, limit) -> list[Event]` (ascending by id); `latest_cursor() -> int` — the read-only Layer-2 seam.
+
+## Wire protocol (`hearth/veneer/protocol.py`)
+
+- `Request(turn_id, final_user_transcript)` — inbound.
+- Outbound message shapes (whitelisted by `serialize`): `answer` (`type, turn_id, text`), `tool_activity` (`type, turn_id, phase, label`), `done` (`type, turn_id`), `error` (`type, turn_id, message`).
+
+## Configuration schema (`hearth/config.py`, pydantic-settings)
+
+- `LLMBackend(base_url, model, api_key_env, supports_tools, supports_streaming, context_window, cost_tier, enabled)` with `resolve_api_key() -> Optional[str]`.
+- `LLMTiers(default, tool)` — backend names per tier role.
+- `LLMConfig(backends, tiers, timeout, max_retries)` with `resolve_tier(tier) -> LLMBackend`.
+- `VeneerConfig(host, port)`.
+- `ToolConfig` — flat Wikipedia settings (language, result count, max chars, timeout, etc.).
 - `AgentConfig(max_tool_rounds, turn_timeout_s, tool_mode, max_consult_rounds, consult_timeout_s)`.
-- `PersonaConfig(enabled, system_prompt, brain_guard_prompt)`, `ConversationConfig(max_history_turns)`, `StorageConfig(db_path)`.
+- `PersonaConfig(enabled, system_prompt, brain_guard_prompt)`.
+- `ConversationConfig(max_history_turns)`.
+- `StorageConfig(db_path)`.
 - `LoggingConfig(level, dir, file_name, max_bytes, backup_count, console, transcript_enabled, transcript_dir)`.
 
-(all: hearth.md)
+## Training-pipeline on-disk formats (`training/`, `models/wake/`)
 
-## Brain protocol (`hearth/brain/base.py`)
-
-- `Capabilities(supports_tools, supports_streaming, context_window, cost_tier)`.
-- `Message(role, content, tool_calls, tool_call_id)` — `role ∈ {"system", "user", "assistant", "tool"}`.
-- `ToolCall(id, name, arguments)`.
-- `ToolSpec(name, description, parameters, label)` — `parameters` is a JSON-schema dict describing the tool's arguments to the LLM.
-- `BrainResult(text, tool_calls, finish_reason, backend, tier)`.
-- `Brain` (Protocol) — `async complete(messages, tools) -> BrainResult`.
-- `Selection(brain, tier, backend_name, reason)` (`hearth/brain/router.py`) — what `Router.select()` returns.
-
-(hearth.md)
-
-## Events & memory (`hearth/events.py`, `hearth/memory/`)
-
-- `ToolActivity(turn_id, phase, label)` — `phase ∈ {"start", "end"}`; the only object serialized across the veneer WebSocket boundary.
-- `EventSink = Callable[[object], Awaitable[None]]`; `null_sink` is a no-op implementation.
-- `Event(id, session_id, turn_id, ts_utc, type, provenance, payload)` — one row of the append-only SQLite `EventLog`. `EVENT_TYPES = {user_input, routing_decision, tool_call, observation, final_answer, error}`.
-- `EventLog(db_path)` — `.append(session_id, turn_id, type, provenance, payload) -> Event`, `.read_session(session_id, limit) -> list[Event]`. Append-only: no update/delete API (verified by `tests/test_event_log.py`).
-- `EventReader(log)` — cursor-based pull: `.read_since(cursor, limit) -> list[Event]`, `.latest_cursor() -> int`.
-- `Layer2Consumer` (Protocol, `hearth/memory/consumer.py`) + `pull_once()` — a seam for a not-yet-implemented downstream indexer (Graphiti/FalkorDB per Open Questions).
-
-(hearth.md)
-
-## Veneer wire protocol (`hearth/veneer/protocol.py`)
-
-- `Request(turn_id, final_user_transcript)` — what `parse_request(raw)` produces from an incoming frame.
-- Outbound wire messages (dict-shaped, not dataclasses per scout report): `answer_message(turn_id, text)`, `done_message(turn_id)`, `error_message(turn_id, message)`.
-- `serialize(event)` — whitelist-only conversion of a `ToolActivity` to a dict; nothing else is serializable across this boundary today.
-
-(hearth.md)
-
-## Persisted storage
-
-- **`hearth.db`** (SQLite, path from `StorageConfig.db_path`) — the `EventLog` table described above; auto-created on daemon start (root.md, hearth.md).
-- **Rotating file logs** under `logging.dir`, rotated at `max_bytes` keeping `backup_count` files (root.md).
-- **Per-session transcripts** under `logging.transcript_dir`, one human-readable file per `session_id` (root.md, hearth.md).
-
-## Wake-word training data (`training/`, `models/`)
-
-- **`training/calcifer.yaml`** training config (YAML): `model_name`, `target_phrases: list[str]`, `n_samples`/`n_samples_val`, `n_background_samples`/`n_background_samples_val`, `tts_batch_size`, `custom_negative_phrases: list[str]`, `noise_scales`/`noise_scale_ws`/`length_scales`/`slerp_weights: list[float]`, `data_dir`/`output_dir`, `augmentation` (dict: clip_duration, batch_size, rounds, background_paths, rir_paths), `model` (dict: model_type, model_size), `steps`/`learning_rate`/`weight_decay`/`label_smoothing`/`max_negative_weight`/`target_fp_per_hour`, `batch_n_per_class` (dict of positive/adversarial_negative/ACAV100M_sample/background_noise counts).
-- **`models/wake/models.json`** manifest (per model, keyed by slug): `slug: str`, `phrase: str`, `model_path: str`, `fpph: float` (false positives per hour), `recall: float`, `threshold: float`, `gate_passed: bool`, `trained_at: str` (ISO 8601). Regenerated entries from orphaned `.onnx` files may lack eval metrics.
-- **Livekit `eval.json`** (intermediate, read by `manifest.py upsert`): `optimal_fpph`, `optimal_recall`, `optimal_threshold`.
-- **`models/wake/calcifer.onnx`** — the trained classifier artifact itself (binary, 962 KB); not a structured data type, consumed as an opaque model file.
-
-(training.md, models.md)
-
-## Test-local fixture types (`tests/`)
-
-Not part of the production data model, but shape how the runtime types above are exercised:
-- `_Config`, `_Agent`, `_Persona`, `_Conversation` — minimal stand-ins for the corresponding `hearth/config.py` models.
-- OpenAI-like mocked response body: `{"choices": [{"message": {"role", "content", "tool_calls"}, "finish_reason"}]}`.
-- Mocked tool-call structure: `{"id", "type": "function", "function": {"name", "arguments": json_string}}`.
-- EventLog rows read back as `Event` namedtuples/dataclasses: `{"id", "session_id", "turn_id", "type", "role", "payload_json"}`.
-
-(tests.md)
+- `calcifer.yaml` (and per-phrase derivatives) — YAML dict: `model_name`, `target_phrases`, sample/step counts, `custom_negative_phrases`, TTS variation params (`noise_scales`, `length_scales`, `slerp_weights`), `augmentation` block (`clip_duration`, `batch_size`, `rounds`, `background_paths`, `rir_paths`), `model` block (`model_type`, `model_size`), training hyperparams (`steps`, `learning_rate`, `weight_decay`, `label_smoothing`, `max_negative_weight`, `target_fp_per_hour`), `batch_n_per_class`.
+- `models/wake/models.json` — `{<slug>: {phrase, model_path, fpph?, recall?, threshold?, gate_passed?, trained_at}}`; `gate_passed = optimal_fpph <= target_fpph`.
+- `<model>_eval.json` (livekit output, consumed by `manifest.py upsert`) — `optimal_fpph`, `optimal_recall`, `optimal_threshold`.
+- `models/wake/calcifer.onnx` — the exported binary classifier; **no corresponding Python type in `hearth/` yet** since nothing in the runtime loads it (see `architecture.md`).
 
 ## Open Questions
 
-- No data types were observed in `packaging/` or root-level files beyond configuration — `dependencies.md`/`entry-points.md` cover their behavior instead.
-- Is `hearth.db`'s schema versioned/migrated anywhere, or is it created fresh (`CREATE TABLE IF NOT EXISTS`) with no migration path? Not visible in the assigned `hearth/` files (hearth.md).
+- Exact `payload_json`/`payload` schema per `Event.type` (routing_decision, observation, etc.) is not formally documented anywhere in the assigned source — inferred only from usage.

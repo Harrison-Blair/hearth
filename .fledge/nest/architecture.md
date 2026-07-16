@@ -1,84 +1,48 @@
 ---
-generated: 2026-07-15T22:30:28Z
-commit: a8489b1afa55662a54ba66548a2e176584a3f387
+generated: 2026-07-15T23:27:05Z
+commit: e41ba8a73a56364e7c3bb1acf1332cadab817e45
 agent: fledge-forager
-fledge_version: 0.5.4
+fledge_version: 0.5.5
 ---
 
 # Architecture
 
-How hearth's pieces fit together: the runtime package (`hearth/`), the separate wake-word training pipeline (`training/` → `models/`), and the packaging/release path (`packaging/`, `.github/workflows/release.yml`). Config-driven throughout so the Pi 5 port stays config-only.
+Covers the runtime request path, the two-tier LLM brain, and the module seams that make `hearth` config-driven. Cross-references `hearth/*`.
 
-## Runtime shape (implemented today)
+`hearth` is an offline-first voice personal assistant, packaged as the `hearth` distribution (console entry point `hearth = hearth.app:main`, `pyproject.toml`). The current build is a **text-driven spine**: `hearth run` starts a single asyncio daemon; a localhost WebSocket "veneer" carries turns in as text and answers back out; a two-tier LLM orchestrator does the reasoning; an append-only sqlite event log records everything. Wake word, STT/TTS/VAD/AEC, and scheduling/calendar/weather/search are roadmap only — present as `pyproject` extras and (for wake word) an offline `training/` pipeline, but not wired into the runtime import graph.
 
-hearth is a **daemon** (`hearth.app:main` → `hearth = hearth.app:main` entry point) that, once running, exposes a single async orchestration loop reached over a localhost WebSocket ("veneer"). The parts that exist today implement the **text/LLM spine**; the voice pipeline described in CLAUDE.md (audio capture → wake → VAD → STT → … → TTS) is largely roadmap — only the wake-word **training** side (`training/`, `models/`) exists, not the runtime consumer (hearth/app.py, hearth/config.py, hearth/loop.py, training/README.md).
+## Request path
 
-```
-WebSocket client (hearth/veneer/client.py)
-        │  Request(turn_id, final_user_transcript)
-        ▼
-hearth/veneer/server.py  Veneer.serve()  ── per-connection session_id
-        │  parse_request → run_turn → answer_message/done_message
-        ▼
-hearth/loop.py  Loop.run_turn()
-        │  reconstruct history from EventLog, inject persona system prompt
-        ▼
-hearth/loop.py  run_react_rounds()  (shared ReAct engine: Thought→Action→Observation)
-        │  offers one tool: consult_brain
-        ├─► hearth/brain/router.py  Router.select(tier="default") → LocalBackend
-        │       (default tier: local Ollama-style backend, no data tools)
-        └─► hearth/tools/consult.py  BrainConsult (invoked as the consult_brain tool)
-                │  nested run_react_rounds() on tier="tool"
-                ▼
-            hearth/brain/router.py  Router.select(tier="tool") → RemoteBackend
-                │
-                ▼
-            hearth/tools/registry.py  ToolRegistry → hearth/tools/wikipedia.py
-```
+`Veneer` (`hearth/veneer/server.py`) → `Loop.run_turn` (`hearth/loop.py`) → `Router` (`hearth/brain/router.py`) → LLM backend (`hearth/brain/local.py` / `hearth/brain/remote.py`) → `EventLog` (`hearth/memory/log.py`).
 
-Both the top-level orchestrator and the nested brain-consult reuse the same `run_react_rounds()` in `hearth/loop.py` — there is one ReAct implementation, parameterized by which tier/tools it's given (hearth/loop.py:run_react_rounds).
+`hearth/app.py::_run_daemon()` wires the object graph once at startup: loads `.env`, instantiates `Settings` (`hearth/config.py`), constructs `Router`, `EventLog`, `ToolRegistry` (`hearth/tools/registry.py`), `Loop`, and `Veneer`, then calls `veneer.serve(host, port)`. `main(argv)` is the CLI entry (`argparse`: `--version`, `run`), wrapping `_run_daemon()` in `asyncio.run`.
 
-## Two-tier LLM architecture
+## The two-tier brain
 
-- **`default` tier** ("Calcifer"/persona) — always `LocalBackend` (hearth/brain/local.py), answers every turn in character, has exactly one tool available: `consult_brain`.
-- **`tool` tier** ("brain") — always `RemoteBackend` (hearth/brain/remote.py), used only inside a nested `BrainConsult` round, has access to real data tools (currently `wikipedia_search`).
-- Both backends speak an OpenAI-compatible `/chat/completions` protocol via `hearth/brain/openai_compat.py`; `Router._build(tier)` deterministically maps tier → backend class (hearth/brain/router.py).
-- Rationale (root.md): local model handles ordinary conversation cheaply/fast; remote model is reserved for tool-calling/research rounds where a stronger model earns its cost.
+Both tiers are named roles resolved to backends via `llm.tiers` config (`hearth/config.py::LLMTiers`, `LLMConfig.resolve_tier`):
 
-## Cross-cutting subsystems
+- **`default` tier — local persona orchestrator.** Every turn is served by this tier (local Ollama by default), carrying the Calcifer persona system prompt (`hearth/persona.py`, `PersonaConfig.system_prompt`). It exposes exactly one tool, `consult_brain(query)`, gated per-turn on `Router.brain_available()` — preserving a local-only fallback when the remote tier is disabled or unhealthy.
+- **`tool` tier — remote "brain".** `consult_brain` (`hearth/tools/consult.py::BrainConsult`) runs a *nested* ReAct loop on the `tool` tier (OpenRouter by default), kept in its lane by `persona.brain_guard_prompt` injected as the nested loop's first system message. It reaches real data tools — currently only Wikipedia (`hearth/tools/wikipedia.py`) via `ToolRegistry.dispatch` — and returns findings as an observation the orchestrator folds back into Calcifer's voice. `BrainConsult` degrades `BrainError`/timeout to a plain-text observation rather than propagating.
 
-- **Config** (`hearth/config.py`) — pydantic-settings `Settings`, precedence init > `HEARTH_*` env > `.env` (secrets only) > `config.yaml` > `default-config.yaml`. Resolves `config.yaml` path from `HEARTH_CONFIG` env, then package-adjacent, then cwd; fails loudly if absent (root.md, hearth.md).
-- **Event log** (`hearth/memory/log.py`) — append-only SQLite (`hearth.db`), one row per event (`user_input`, `routing_decision`, `tool_call`, `observation`, `final_answer`, `error`), keyed by `session_id`/`turn_id`. `hearth/memory/reader.py` provides a cursor-based `EventReader` for consumers; `hearth/memory/consumer.py` defines a `Layer2Consumer` protocol + `pull_once()` — a seam for a future Graphiti/FalkorDB indexer, not yet implemented.
-- **Transcript** (`hearth/transcript.py`) — best-effort, per-session human-readable log; swallows `OSError` so a disk issue never crashes a turn.
-- **Logging** (`hearth/logging_setup.py`) — idempotent root logger setup (guarded by a marker attribute) with `RotatingFileHandler` + optional console handler; websockets' own logger is wired in explicitly.
-- **Veneer protocol** (`hearth/veneer/protocol.py`) — a strict serialization whitelist: only `ToolActivity.phase`/`.label` cross the WebSocket boundary. Tool query/arguments/observation content never reaches the client — this is a deliberate opacity boundary, verified by `tests/test_veneer.py`.
+Both call sites share one ReAct engine: `run_react_rounds` in `hearth/loop.py` (Thought → Action → Observation, capped by `round_cap`, balanced start/end tool-activity emission even under timeout/cancellation — `CancelledError` is a `BaseException` and isn't swallowed by the inner `except Exception`). Do not duplicate this loop logic elsewhere.
 
-## Wake-word training pipeline (separate from the runtime)
+## Key seams
 
-`training/` and `models/` form a self-contained subsystem that does **not** share a virtualenv or any package with the runtime (training/README.md, root.md):
+- **`hearth/brain/`** — `base.py` holds the frozen `Brain` protocol and boundary types (`Message`, `ToolCall`, `ToolSpec`, `BrainResult`, `Capabilities`); `router.py::Router.select()` maps a tier role to a backend instance and returns a `Selection(brain, tier, backend_name, reason)`; `local.py` (Ollama-style) and `remote.py` (OpenRouter, Bearer auth) both build on shared OpenAI-compatible request/response logic in `openai_compat.py`; `errors.py::BrainError` normalizes backend failures into a client-safe `reason` plus internal `detail` (retries only on transient `httpx.TransportError`, never on timeout or `HTTPStatusError`).
+- **`hearth/veneer/`** — the localhost control surface. `protocol.py::serialize` is a strict **whitelist**: only `type`/`turn_id`/`phase`/`label`/`text` cross the wire (forbidden keys: `query`, `arguments`, `observation`, `result`), so tool query/arguments/observation content can never leak to the client; unknown event types raise — fail loud. `server.py::Veneer.serve`/`_handle_connection` runs `Loop.run_turn` per WebSocket connection with a per-turn emit sink, disables `ping_interval` (idle localhost connections shouldn't false-close). `client.py` is a companion CLI client (`python -m hearth.veneer.client`) that offloads stdin reads to a thread so the event loop stays free for keepalive.
+- **`hearth/memory/`** — `log.py::EventLog` is an append-only sqlite store (`append`, `read_session`; no update/delete); `reader.py::EventReader` is a read-only, cursor-based pull interface (`latest_cursor`, `read_since`) — the Layer-2 seam a future background indexer attaches to; `consumer.py` defines a `NoOpConsumer` reference implementation. Don't couple writers to the reader.
+- **`hearth/transcript.py`** — optional per-session human-readable transcripts under `logs/transcripts/<session_id>.txt`, separate from the event log; best-effort (swallows `OSError`).
+- **`hearth/persona.py`** — currently a no-op `restyle` stub (FTHR-011 placeholder); persona shaping is config (`system_prompt`, `brain_guard_prompt`) rather than code today.
 
-```
-training/calcifer.yaml (config)
-        ▼
-training/train.py  run_training()  ──uses──►  livekit-wakeword (training/.venv-train, ROCm torch)
-        │   synthesizes positives (Piper VITS) + adversarial negatives,
-        │   augments with MUSAN noise / MIT RIRs, trains conv-attention classifier
-        ▼
-models/wake/calcifer.onnx  (963 KB, exported model artifact)
-        +
-training/manifest.py  ──writes──►  models/wake/models.json  (fpph, recall, threshold, gate_passed, trained_at)
-        │
-        └─ manifest.py select <slug>  ──writes──►  config.yaml `wake.model_paths` (regex block edit, preserves comments)
-```
+## Config-driven-ness
 
-`training/train_batch.py` drives `train.py`'s `run_training()` across multiple phrases (`training/phrases.txt`), reusing the one-time ~16 GB data download (ACAV100M, MUSAN, RIRs, Piper voices) across phrases via `--skip-setup` after the first. The only artifact exchanged with the runtime is the `.onnx` file plus the `wake.model_paths`/`wake.threshold` config values — the runtime-side consumer (`hearth/wake/livekit_detector.py` per CLAUDE.md) does not exist yet in `hearth/` (training.md, models.md; open question below).
+Every device id, model path, and threshold lives in `config.yaml`/`default-config.yaml` (loaded via `pydantic-settings`; see `dependencies.md` and `entry-points.md`), which is deliberate: per `CLAUDE.md`, the Raspberry Pi 5 port is meant to be **config-only**, no code changes.
 
-## Packaging & release
+## Roadmap vs. wired (verified against source)
 
-`packaging/build.sh` (invoked by `make release`) builds a PyInstaller single-file binary per architecture (`dist/hearth-$(uname -m)`), bundling `config.yaml` at the bundle root and forcing `--collect-submodules hearth` to catch dynamic imports. `.github/workflows/release.yml` runs this natively on `ubuntu-24.04` (x86_64) and `ubuntu-24.04-arm` (aarch64) matrix runners on `v*` tag pushes (or manual dispatch), smoke-tests the binary (`--version`, DEBUG startup), and attaches both binaries to the GitHub Release via `softprops/action-gh-release` (packaging.md). No cross-compilation — each arch must be built on native hardware.
+Confirmed by directory listing: `hearth/` contains only `app.py`, `brain/`, `config.py`, `events.py`, `logging_setup.py`, `loop.py`, `memory/`, `persona.py`, `tools/`, `transcript.py`, `veneer/` — **no** `wake/`, `stt/`, `tts/`, `vad/`, `aec/`, `scheduling/`, or `calendar/` package. The `training/` pipeline (see `domain.md`) exports `models/wake/calcifer.onnx`, but **nothing under `hearth/` imports or loads it** — it is inert until a future feather wires it in. (One scout report claimed a `hearth/wake/livekit_detector.py` consumer; this was checked against the actual directory listing and does not exist — corrected here.)
 
 ## Open Questions
 
-- How/when do the audio-facing stages (wake detection, VAD, STT, TTS) integrate with `hearth/loop.py`? Nothing under `hearth/` currently consumes `models/wake/calcifer.onnx` (hearth.md, models.md).
-- Where do `aec`/`barge_in`, `scheduling` (apscheduler), `web_search`, `weather`, `calendar` cross-cutting features (named in CLAUDE.md/pyproject extras) actually live? Not present in the current `hearth/` file list (hearth.md).
-- `hearth/persona.py:restyle()` is a no-op stub — is persona revoicing (FTHR-011) actively planned next, or blocked on TTS integration (hearth.md)?
+- Whether `EventLog`'s sqlite connection has explicit thread-safety guards for a future concurrent Layer-2 reader (writes are autocommit, one transaction per `append()`) — not fully verified from source alone.
+- Exact enforcement mechanism for the "secrets only in `.env`" rule (FTHR-015) — no schema validation currently prevents a stray key field in YAML.

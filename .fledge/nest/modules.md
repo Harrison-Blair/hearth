@@ -1,66 +1,77 @@
 ---
-generated: 2026-07-15T22:30:28Z
-commit: a8489b1afa55662a54ba66548a2e176584a3f387
+generated: 2026-07-15T23:27:05Z
+commit: e41ba8a73a56364e7c3bb1acf1332cadab817e45
 agent: fledge-forager
-fledge_version: 0.5.4
+fledge_version: 0.5.5
 ---
 
 # Modules
 
-Repo map: one entry per module scanned by `fledge scan`, its purpose, its key files, and where to look for what.
+Repo map: each module, its purpose, key files, and where to look for what.
 
-## `<root>`
+## `hearth/` — the runtime package
 
-**Purpose:** Project configuration, documentation, dependency spec, and build entry point for the `hearth` distribution.
+Purpose: the daemon itself — WebSocket control surface, two-tier LLM brain, tools, memory, config.
 
-**Key files:** `pyproject.toml` (package metadata, 12 optional extras, `hearth = hearth.app:main` entry point), `config.yaml` (active config), `default-config.yaml` (documented reference config), `.env.example` (secret template), `CLAUDE.md` (dev guidance), `README.md` (quickstart/FAQ), `MANUAL_SMOKE.md` (manual live-service test procedure), `Makefile` (`make release`/`make clean`), `.python-version` (3.12.13), `LICENSE` (AGPL v3), `.gitignore`.
+Key files:
+- `app.py` — CLI entry (`main`), daemon wiring (`_run_daemon`)
+- `config.py` — `Settings` (pydantic-settings): `LLMConfig`, `VeneerConfig`, `ToolConfig`, `AgentConfig`, `PersonaConfig`, `ConversationConfig`, `StorageConfig`, `LoggingConfig`
+- `loop.py` — `Loop.run_turn`, shared ReAct engine `run_react_rounds`
+- `persona.py` — Calcifer persona shaping (currently a no-op `restyle` stub, FTHR-011)
+- `events.py` — `ToolActivity`, `EventSink`, `null_sink`
+- `transcript.py` — per-session human-readable transcript writer
+- `logging_setup.py` — one-time rotating file + console handler setup
+- `brain/` — LLM backend abstraction: `base.py` (protocol + types), `router.py` (tier→backend selection), `local.py` (Ollama), `remote.py` (OpenRouter), `openai_compat.py` (shared request/response logic), `errors.py` (`BrainError`)
+- `veneer/` — WebSocket control surface: `server.py` (daemon), `client.py` (CLI client), `protocol.py` (wire whitelist)
+- `memory/` — `log.py` (`EventLog`, append-only sqlite), `reader.py` (`EventReader`, read-only cursor), `consumer.py` (`NoOpConsumer`)
+- `tools/` — `registry.py` (`ToolRegistry`), `wikipedia.py` (`wikipedia_search`), `consult.py` (`BrainConsult`, nested ReAct)
 
-**Look here for:** what config knobs exist and what they mean (`default-config.yaml`), how secrets vs. tunables are split (`CLAUDE.md`, `.env.example`), how to build/release (`Makefile` → `packaging/`), dependency extras (`pyproject.toml`).
+Look here for: adding/changing a turn's behavior, adding a new tool, changing LLM backend/tier routing, changing what crosses the WebSocket wire, changing what gets persisted.
 
-## `hearth`
+## `<root>` — project metadata, config, packaging (merges `.github`, `packaging`)
 
-**Purpose:** The runtime Python package — the daemon that implements the text/LLM spine of the voice assistant: WebSocket veneer → ReAct orchestration loop → two-tier LLM routing → tool dispatch → event logging.
+Purpose: dependency/build/config surface and top-level docs; no runtime logic.
 
-**Key files:**
-- `hearth/app.py` — CLI entry (`main`), async daemon startup (`_run_daemon`), wires every subsystem together.
-- `hearth/config.py` — `Settings` (pydantic-settings), config precedence and secret resolution.
-- `hearth/loop.py` — `Loop.run_turn()` (top-level orchestrator) and `run_react_rounds()` (shared ReAct engine used by both the orchestrator and nested brain consult).
-- `hearth/brain/` — `base.py` (Brain protocol, Message/ToolCall/ToolSpec/BrainResult), `router.py` (tier→backend selection), `local.py`/`remote.py` (backend implementations), `openai_compat.py` (shared OpenAI-style `/chat/completions` client), `errors.py` (`BrainError`).
-- `hearth/tools/` — `registry.py` (ToolRegistry), `consult.py` (`BrainConsult`, the nested ReAct tool), `wikipedia.py` (the one implemented data tool).
-- `hearth/veneer/` — `server.py` (WebSocket daemon loop), `protocol.py` (wire format + serialization whitelist), `client.py` (stdin/stdout reference client).
-- `hearth/memory/` — `log.py` (append-only SQLite `EventLog`), `reader.py` (`EventReader` cursor), `consumer.py` (future Layer2Consumer seam, not implemented).
-- `hearth/events.py` (`ToolActivity`, `EventSink`), `hearth/transcript.py` (best-effort transcript writer), `hearth/persona.py` (no-op `restyle()` stub), `hearth/logging_setup.py` (idempotent logging setup).
+Key files:
+- `pyproject.toml` — package metadata, version (`0.1.0`), console script, per-phase extras
+- `config.yaml` / `default-config.yaml` — active config / documented reference (same schema)
+- `.env.example` — secrets-only template (`HEARTH_LLM__OPENROUTER_API_KEY`)
+- `Makefile` — `release` (→ `packaging/build.sh`), `clean`
+- `packaging/build.sh` — PyInstaller single-file binary builder (`dist/hearth-$(uname -m)`), `HEARTH_BUILD_EXTRAS` controls baked-in extras
+- `packaging/entry.py` — thin PyInstaller entry importing `hearth.app:main`
+- `.github/workflows/release.yml` — CI: native build on `ubuntu-24.04` (x86_64) + `ubuntu-24.04-arm` (aarch64), smoke test, upload on `v*` tags
+- `README.md`, `CLAUDE.md`, `MANUAL_SMOKE.md` — user docs, dev/agent docs, manual smoke-test procedure
+- `.gitignore`, `.python-version` (3.12.13), `LICENSE` (AGPLv3)
 
-**Look here for:** the actual runtime behavior of every turn — routing, tool-calling, error handling, logging, the WebSocket contract. This is the module every feature touches.
+Look here for: install/build/release mechanics, what's a secret vs. a config tunable, extras (optional-dependency) definitions, CI behavior.
 
-## `tests`
+## `tests/` — test suite
 
-**Purpose:** Hermetic pytest suite (60+ tests, 19 files) covering config precedence, both LLM backends, tier routing, the ReAct loop, nested brain-consult, the veneer WebSocket boundary, event logging, and the wikipedia tool — all via `httpx.MockTransport` / `websockets` test doubles, no live services.
+Purpose: hermetic pytest coverage of every wired feather (FTHR-001, 003–011), plus one end-to-end assembly test and a manual (non-hermetic) smoke procedure documented separately in `MANUAL_SMOKE.md`.
 
-**Key files:** `conftest.py` (shared fixtures: `llm_config`, `two_tier_llm_config`, `canned_completion`, `HostRouter`), `test_e2e_veneer.py` (full-stack integration), `test_router.py`, `test_loop.py`/`test_loop_tools.py`, `test_consult_brain.py`/`test_brain_guard.py`, `test_veneer.py`/`test_veneer_errors.py`, `test_brain_errors.py`, `test_config.py`, `test_event_log.py`/`test_layer2_reader.py`, `test_wikipedia.py`.
+Key files:
+- `conftest.py` — shared fixtures (`llm_config`, `two_tier_llm_config`, `canned_completion`, `HostRouter`, `make_mock_client`, `_reset_logging_state`)
+- `test_e2e_veneer.py` — full stack (real `Veneer`/`Loop`/`Router`/`BrainConsult`/`ToolRegistry`/`EventLog`), all LLM/Wikipedia calls via `httpx.MockTransport`
+- one `test_*.py` per `hearth/` seam — see `testing.md` for the full file→feather map
 
-**Look here for:** expected behavior/contracts for any `hearth/` module (each test file mirrors a source module), and the pattern for hermetic async test doubles (`HostRouter`, `_FakeWebSocket`, etc.) to follow when adding tests.
+Look here for: how a given `hearth/` module is expected to behave, fixture/mocking patterns for LLM backends and the WebSocket, how to add a test for a new feather.
 
-## `training`
+## `training/` — wake-word training pipeline (merges `models/`)
 
-**Purpose:** Fully synthetic wake-word model training pipeline (livekit-wakeword + Piper TTS + MUSAN/RIR augmentation), producing `.onnx` classifiers for `models/wake/`. Runs in an isolated `training/.venv-train` (ROCm torch) that never shares packages with the runtime venv.
+Purpose: fully synthetic, offline training pipeline that produces the `.onnx` wake-word classifier. Entirely separate from the runtime — isolated venv, no shared imports.
 
-**Key files:** `train.py` (`run_training()`, single-model CLI, `--smoke` fast-path), `train_batch.py` (sequential multi-phrase driver, reuses the ~16 GB one-time data download), `manifest.py` (registry CLI: `upsert`/`list`/`regen`/`select`; writes `models/wake/models.json` and patches `config.yaml` `wake.model_paths`), `calcifer.yaml` (production training config), `phrases.txt` (batch phrase list), `bootstrap.sh` (builds `.venv-train`), `README.md` (full workflow doc).
+Key files:
+- `bootstrap.sh` — one-time `.venv-train` setup (ROCm torch + `livekit-wakeword[train,eval,export]`)
+- `calcifer.yaml` — production training config for the "Calcifer" wake word
+- `train.py` — single-model training orchestrator, exports `.onnx` to `models/wake/`
+- `train_batch.py` — sequential multi-phrase trainer (reads `phrases.txt`)
+- `manifest.py` — stdlib-only CLI registry (`upsert`, `list`, `regen`, `select`) over `models/wake/models.json`; `select` is what points `config.yaml`'s `wake.model_paths` at a trained model
+- `phrases.txt` — batch-trainer phrase list
+- `models/wake/calcifer.onnx` — exported classifier (962 KB binary); **not yet consumed by any code under `hearth/`**
+- `models/wake/models.json` — model manifest (recall/fpph/threshold per slug)
 
-**Look here for:** how a new wake word gets trained and how a trained model gets wired into `config.yaml` (`manifest.py select`). Entirely decoupled from `hearth/` — no code sharing, only the exported `.onnx` + config values cross the boundary.
+Look here for: how the wake-word model is trained/selected, why the training venv must never merge with the runtime venv, what `wake.*` config fields will eventually mean once wired in.
 
-## `models`
+## Open Questions
 
-**Purpose:** Asset directory holding the trained wake-word model(s) consumed (eventually) by the runtime's wake detector.
-
-**Key files:** `models/wake/calcifer.onnx` (963 KB binary ONNX classifier for "Calcifer", conv-attention architecture — not a text file, do not attempt to read it), `models/wake/models.json` (training manifest: per-model fpph/recall/threshold/gate_passed/trained_at, written by `training/manifest.py`).
-
-**Look here for:** which wake-word model(s) exist and their eval metrics (`models.json`). Note: `hearth/` has no code yet that loads `calcifer.onnx` — the runtime consumer is roadmap (see architecture.md Open Questions).
-
-## `packaging` (merged with `.github`)
-
-**Purpose:** Builds hearth as a single-file PyInstaller binary per architecture, locally (`make release`) and in CI (tag-triggered GitHub Actions release).
-
-**Key files:** `packaging/build.sh` (build driver: isolated `.build-venv`, PyInstaller invocation with `config.yaml` bundled and `--collect-submodules hearth`), `packaging/entry.py` (minimal PyInstaller entry point calling `hearth.app:main()`), `.github/workflows/release.yml` (matrix CI job: `ubuntu-24.04` x86_64 + `ubuntu-24.04-arm` aarch64, smoke test, `softprops/action-gh-release` upload on `v*` tags).
-
-**Look here for:** how the distributable binary is produced, what native/system deps a build host needs (`portaudio19-dev`, `libportaudio2`, `libsndfile1`, `espeak-ng`), and the release-tag → GitHub-Release flow.
+- None beyond what's carried into `architecture.md` and `domain.md` (the `hearth/wake/` consumer claim, and manifest.py's YAML-parsing robustness).
