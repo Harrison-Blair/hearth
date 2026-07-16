@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 
 from hearth.brain.base import BrainResult, Message
 from hearth.brain.router import Router
@@ -21,6 +22,49 @@ from hearth.memory.log import EventLog
 from hearth.persona import restyle
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ReactRoundsMetrics:
+    """Aggregate token/duration metrics across every `brain.complete()` call
+    made by one `run_react_rounds` invocation (FTHR-013). `round_count` and
+    `call_count` are the same number here -- each ReAct round is exactly one
+    LLM call -- but are named for what the per-turn summary reports."""
+
+    round_count: int = 0
+    call_count: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    duration_s: float = 0.0
+
+
+@dataclass
+class ReactRoundsResult:
+    result: BrainResult
+    metrics: ReactRoundsMetrics = field(default_factory=ReactRoundsMetrics)
+
+
+def _log_call_metrics(result: BrainResult, round_no: int) -> None:
+    try:
+        thinking = result.reasoning_tokens if result.reasoning_tokens is not None else "n/a"
+        if result.duration_s and result.duration_s > 0 and result.completion_tokens is not None:
+            tokens_per_s = f"{result.completion_tokens / result.duration_s:.1f}"
+        else:
+            tokens_per_s = "n/a"
+        duration_str = f"{result.duration_s:.1f}s" if result.duration_s is not None else "n/a"
+        logger.info(
+            "llm call tier=%s model=%s round=%d in=%s out=%s thinking=%s duration_s=%s tok/s=%s",
+            result.tier,
+            result.model,
+            round_no,
+            result.prompt_tokens,
+            result.completion_tokens,
+            thinking,
+            duration_str,
+            tokens_per_s,
+        )
+    except Exception:  # never let logging break a turn (AC-5)
+        pass
 
 
 async def run_react_rounds(
@@ -35,11 +79,25 @@ async def run_react_rounds(
     turn_id: str,
     emit: EventSink,
     label_for,
-) -> BrainResult:
+) -> ReactRoundsResult:
     """Thought -> Action -> Observation over `brain`, capped at `round_cap`
     tool rounds. Shared by the orchestrator's own turn and a nested brain
     consult -- no duplicated ReAct logic between the two call sites."""
+    metrics = ReactRoundsMetrics()
+
+    def _record(res: BrainResult, round_no: int) -> None:
+        metrics.round_count = round_no
+        metrics.call_count += 1
+        if res.prompt_tokens is not None:
+            metrics.prompt_tokens += res.prompt_tokens
+        if res.completion_tokens is not None:
+            metrics.completion_tokens += res.completion_tokens
+        if res.duration_s is not None:
+            metrics.duration_s += res.duration_s
+        _log_call_metrics(res, round_no)
+
     result = await brain.complete(messages, tools=tools)
+    _record(result, 1)
 
     round_count = 0
     while result.tool_calls and round_count < round_cap:
@@ -83,10 +141,11 @@ async def run_react_rounds(
             )
 
         result = await brain.complete(messages, tools=tools)
+        _record(result, round_count + 1)
 
     if result.tool_calls and not result.text:
         result.text = "I wasn't able to finish that within the allowed tool rounds."
-    return result
+    return ReactRoundsResult(result=result, metrics=metrics)
 
 
 class Loop:
@@ -118,6 +177,36 @@ class Loop:
         try:
             self._transcript.append(session_id, line)
         except Exception:  # never let a transcript write break a turn (AC-5)
+            pass
+
+    def _log_turn_metrics(
+        self,
+        turn_number: int,
+        own_metrics: ReactRoundsMetrics,
+        nested_metrics: list[ReactRoundsMetrics],
+    ) -> None:
+        try:
+            round_count = own_metrics.round_count + sum(m.round_count for m in nested_metrics)
+            call_count = own_metrics.call_count + sum(m.call_count for m in nested_metrics)
+            prompt_tokens = own_metrics.prompt_tokens + sum(
+                m.prompt_tokens for m in nested_metrics
+            )
+            completion_tokens = own_metrics.completion_tokens + sum(
+                m.completion_tokens for m in nested_metrics
+            )
+            duration_s = own_metrics.duration_s + sum(m.duration_s for m in nested_metrics)
+            tokens_per_s = f"{completion_tokens / duration_s:.1f}" if duration_s > 0 else "n/a"
+            logger.info(
+                "turn summary turn=%d rounds=%d calls=%d in=%d out=%d duration_s=%.1fs tok/s=%s",
+                turn_number,
+                round_count,
+                call_count,
+                prompt_tokens,
+                completion_tokens,
+                duration_s,
+                tokens_per_s,
+            )
+        except Exception:  # never let logging break a turn (AC-5)
             pass
 
     async def run_turn(
@@ -168,19 +257,29 @@ class Loop:
         )
         self._log_model("orchestrator", selection)
 
+        # nested_metrics collects one `ReactRoundsMetrics` per consult_dispatch
+        # call this turn, so the per-turn summary's totals include whatever
+        # happened inside a nested consult_brain invocation (FTHR-013).
+        nested_metrics: list[ReactRoundsMetrics] = []
+
         # Closure over this turn's session_id/turn_id/emit: `run_react_rounds`
         # fixes dispatch to `(name, args) -> str`, and binding per-turn context
         # here (not on self) keeps concurrent turns on the shared Loop from
         # leaking consult events into each other's session/sink.
         async def consult_dispatch(name: str, args: dict) -> str:
-            return await self._consult(session_id, turn_id, args["query"], emit)
+            findings = await self._consult(session_id, turn_id, args["query"], emit)
+            nested_metrics.append(
+                getattr(self._consult, "last_metrics", None) or ReactRoundsMetrics()
+            )
+            return findings
 
         def label_for(name: str) -> str:
             spec = next((s for s in (tools or []) if s.name == name), None)
             return spec.label if spec else name
 
+        own_metrics = ReactRoundsMetrics()
         try:
-            result = await asyncio.wait_for(
+            react_run = await asyncio.wait_for(
                 run_react_rounds(
                     brain=selection.brain,
                     messages=messages,
@@ -195,11 +294,15 @@ class Loop:
                 ),
                 timeout=self._config.agent.turn_timeout_s,
             )
-            answer_text = result.text or ""
+            own_metrics = react_run.metrics
+            answer_text = react_run.result.text or ""
         except asyncio.TimeoutError:
             answer_text = "That took too long — here's what I have so far."
 
         answer = await restyle(answer_text, ctx=None)
+
+        turn_number = sum(1 for e in turn_events if e.type == "final_answer") + 1
+        self._log_turn_metrics(turn_number, own_metrics, nested_metrics)
 
         self._log.append(session_id, turn_id, "final_answer", "brain", {"text": answer})
         self._append_transcript(session_id, f"answer: {answer}")

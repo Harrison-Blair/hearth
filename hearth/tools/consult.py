@@ -16,7 +16,7 @@ from hearth.brain.base import Message, ToolSpec
 from hearth.brain.errors import BrainError
 from hearth.brain.router import Router
 from hearth.events import EventSink, null_sink
-from hearth.loop import run_react_rounds
+from hearth.loop import ReactRoundsMetrics, run_react_rounds
 from hearth.memory.log import EventLog
 from hearth.tools.registry import ToolRegistry
 
@@ -53,6 +53,12 @@ class BrainConsult:
         self._log = log
         self._config = config
         self._transcript = transcript
+        # Aggregate metrics from the most recent `__call__`'s nested ReAct
+        # rounds (FTHR-013): a side attribute, not a return-value change, so
+        # `__call__`'s plain `str` return stays compatible with its role as a
+        # tool `dispatch` callable. `Loop.run_turn`'s `consult_dispatch`
+        # closure reads this after `await self._consult(...)` returns.
+        self.last_metrics = ReactRoundsMetrics()
 
     def _log_model(self, selection) -> None:
         try:
@@ -84,6 +90,7 @@ class BrainConsult:
         selection = self._router.select(tier_override="tool")
         self._log_model(selection)
         self._append_transcript(session_id, f"consult query: {query}")
+        self.last_metrics = ReactRoundsMetrics()
         messages: list[Message] = [
             Message(role="system", content=self._config.persona.brain_guard_prompt),
             Message(role="user", content=query),
@@ -97,7 +104,7 @@ class BrainConsult:
             return spec.label if spec else name
 
         try:
-            result = await asyncio.wait_for(
+            react_run = await asyncio.wait_for(
                 run_react_rounds(
                     brain=selection.brain,
                     messages=messages,
@@ -112,7 +119,8 @@ class BrainConsult:
                 ),
                 timeout=self._config.agent.consult_timeout_s,
             )
-            findings = result.text or "consult_brain: no findings."
+            self.last_metrics = react_run.metrics
+            findings = react_run.result.text or "consult_brain: no findings."
         except BrainError:
             findings = "consult_brain: couldn't reach the external knowledge source right now."
         except asyncio.TimeoutError:

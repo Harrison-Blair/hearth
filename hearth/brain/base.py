@@ -1,7 +1,9 @@
 """Boundary types for the Brain protocol.
 
 These signatures are frozen: FTHR-004 (router) and FTHR-006 (tools) build on
-them without changing shape.
+them without changing shape. `BrainResult` is the one exception: its shape is
+frozen for router/tool call sites, but it may gain additive, defaulted
+observability fields (FTHR-013's metrics capture) without breaking them.
 """
 from __future__ import annotations
 
@@ -47,6 +49,12 @@ class BrainResult:
     finish_reason: str = "stop"
     backend: str = ""
     tier: str = ""
+    model: str = ""
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    total_tokens: int | None = None
+    duration_s: float | None = None
 
 
 @runtime_checkable
