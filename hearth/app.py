@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 
 from hearth import __version__
+
+logger = logging.getLogger(__name__)
 
 
 def _build_llm_clients(settings):
@@ -43,6 +46,7 @@ async def _run_daemon() -> int:
 
     settings = Settings()
     setup_logging(settings.logging)
+    logger.info("hearth daemon starting", extra={"category": "server"})
     transcript = (
         Transcript(settings.logging.transcript_dir)
         if settings.logging.transcript_enabled
@@ -65,6 +69,12 @@ async def _run_daemon() -> int:
         consult = BrainConsult(router, wiki_registry, log, settings, transcript=transcript)
         loop = Loop(router, log, settings, consult=consult, transcript=transcript)
         veneer = Veneer(loop, log, settings)
+        logger.info(
+            "veneer serving host=%s port=%s",
+            settings.veneer.host,
+            settings.veneer.port,
+            extra={"category": "server"},
+        )
         await veneer.serve(settings.veneer.host, settings.veneer.port)
     finally:
         for client in clients.values():

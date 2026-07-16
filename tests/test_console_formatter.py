@@ -134,6 +134,41 @@ def test_connection_category_gets_registered_coloring(monkeypatch):
     assert not (tagged_codes & error_codes), "connection category leaked the reserved error color"
 
 
+def test_server_category_gets_registered_coloring(monkeypatch):
+    """FTHR-019 registers a "server" coloring rule in _CATEGORY_COLORS; it
+    must render distinctly from an unregistered/plain record and never
+    reuse the reserved ERROR/CRITICAL color."""
+    from hearth.logging_setup import _CATEGORY_COLORS, ColorFormatter
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    assert "server" in _CATEGORY_COLORS
+
+    formatter = ColorFormatter()
+    plain = _make_record(logging.INFO, "msg")
+    server = _make_record(logging.INFO, "msg", category="server")
+    server.created = plain.created
+    server.msecs = plain.msecs
+
+    plain_out = formatter.format(plain)
+    server_out = formatter.format(server)
+
+    plain_codes = set(ANSI_RE.findall(plain_out)) - {"\x1b[0m"}
+    server_codes = set(ANSI_RE.findall(server_out)) - {"\x1b[0m"}
+    reserved_error_code = "\x1b[1;31m"  # ERROR/CRITICAL's reserved color
+
+    assert server_codes, "expected the server category to add an ANSI code"
+    assert server_codes != plain_codes
+    assert reserved_error_code not in server_codes
+
+    connection_out = formatter.format(
+        _make_record(logging.INFO, "msg", category="connection")
+    )
+    connection_codes = set(ANSI_RE.findall(connection_out)) - {"\x1b[0m"}
+    assert server_codes != connection_codes, "server must not reuse connection's color"
+
+
 def test_no_color_when_not_a_tty(monkeypatch):
     from hearth.logging_setup import ColorFormatter
 
