@@ -76,6 +76,6 @@ plain/universal), then implement until passing.
   colors match the reserved ERROR/CRITICAL color.
 
 ## Acceptance Criteria
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: Every per-call, per-turn, and FAILED/timeout-marker log call from FTHR-013/FTHR-014 carries `extra={"category": "metrics"}`, with no change to message text or log level. Satisfies PLM-004 FC-4.
-- [ ] AC-3: The console formatter's `metrics` category renders these lines with distinguishable per-segment coloring that never reuses the reserved ERROR/CRITICAL color, completing PLM-004 AC-3's metrics-category coverage (FTHR-016 covers the fallback/registry mechanism; this feather completes the `metrics` case).
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: Every per-call, per-turn, and FAILED/timeout-marker log call from FTHR-013/FTHR-014 carries `extra={"category": "metrics"}`, with no change to message text or log level. Satisfies PLM-004 FC-4.
+- [x] AC-3: The console formatter's `metrics` category renders these lines with distinguishable per-segment coloring that never reuses the reserved ERROR/CRITICAL color, completing PLM-004 AC-3's metrics-category coverage (FTHR-016 covers the fallback/registry mechanism; this feather completes the `metrics` case).
