@@ -2,7 +2,7 @@
 id: FTHR-029
 title: "Wake detection: multiple models, per-model thresholds"
 plumage: PLM-008
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-028]
 authored: 2026-07-17T15:37:02Z
