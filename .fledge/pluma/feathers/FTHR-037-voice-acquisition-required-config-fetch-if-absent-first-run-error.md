@@ -128,23 +128,23 @@ lands at the first real run / FTHR-039.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: With **no voice configured**, the surface **refuses to start**, emitting a clear message
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: With **no voice configured**, the surface **refuses to start**, emitting a clear message
       that **names the missing setting** and **states how to discover valid voices**, and exits
       **non-zero without a stack trace** — a configuration problem, not a crash; a test asserts both
       message fragments (satisfies PLM-009 FC-2, FC-3).
-- [ ] AC-3: A **named-but-absent** voice is **fetched before serving begins**, and an
+- [x] AC-3: A **named-but-absent** voice is **fetched before serving begins**, and an
       **already-present** voice is **not re-fetched**; both branches proven with an injected fetcher
       and **no network** in CI (satisfies PLM-009 FC-4).
-- [ ] AC-4: The fetch runs behind an **injectable seam** so CI is fully offline; a test guards the
+- [x] AC-4: The fetch runs behind an **injectable seam** so CI is fully offline; a test guards the
       hermetic property (satisfies PLM-009 FC-11 for the acquisition path).
-- [ ] AC-5: **No `--list-voices` / voice-audition / picker subcommand or flag is added** — discovery
+- [x] AC-5: **No `--list-voices` / voice-audition / picker subcommand or flag is added** — discovery
       is a pointer inside the error message only; a test guards this explicit scope line (satisfies
       PLM-009 Out of Scope).
-- [ ] AC-6: This feather **consumes FTHR-035's `voice` key** (unset ⇒ absent) and does not redefine
+- [x] AC-6: This feather **consumes FTHR-035's `voice` key** (unset ⇒ absent) and does not redefine
       it; it does **not** render (FTHR-036), play or touch a device (FTHR-038), or do barge-in — any
       config-key insufficiency was raised as a finding against FTHR-035.
-- [ ] AC-7: Molt evidence records that CI proves the **startup policy and message content offline**;
+- [x] AC-7: Molt evidence records that CI proves the **startup policy and message content offline**;
       the **real download** and **whether the message reads well** are confirmed at the first real
       run / FTHR-039, not here.
-- [ ] AC-8: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-8: `ruff check .` is clean and the full existing test suite passes.

@@ -23,6 +23,7 @@ import contextlib
 import sys
 from contextlib import asynccontextmanager
 
+from hearth.audio import voice as voice_check
 from hearth.audio.config import AudioSettings
 from hearth.audio.source import LiveAudioSource
 from hearth.audio.stages import (
@@ -240,10 +241,18 @@ async def _run(settings: AudioSettings) -> None:
         await surface.run()
 
 
-def main() -> int:
+def main(*, fetch=voice_check.download_voice, voices_dir=voice_check.VOICES_DIR, serve=None) -> int:
     settings = AudioSettings()
+    # First-run voice check, BEFORE serving (FTHR-037): resolve the configured
+    # voice, fetch it if absent, or emit the absent-voice error and exit as a
+    # configuration problem. An unset voice raises SystemExit here -- non-zero, no
+    # traceback -- so serving is never reached. The seams are injected so tests
+    # (and CI) drive this offline; production wires the real defaults.
+    voice_check.ensure_voice(settings.voice, voices_dir=voices_dir, fetch=fetch)
+    if serve is None:
+        serve = lambda: asyncio.run(_run(settings))  # noqa: E731
     try:
-        asyncio.run(_run(settings))
+        serve()
     except EngineUnreachable as exc:
         print(str(exc), file=sys.stderr)
         return 1
