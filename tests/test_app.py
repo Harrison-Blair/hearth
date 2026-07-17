@@ -81,4 +81,4 @@ async def test_run_daemon_logs_server_lifecycle_lines(monkeypatch, tmp_path, cap
     server_records = [r for r in caplog.records if getattr(r, "category", None) == "server"]
     messages = [r.getMessage() for r in server_records]
     assert any("daemon starting" in m for m in messages)
-    assert any("veneer serving" in m for m in messages)
+    assert any("gateway serving" in m for m in messages)

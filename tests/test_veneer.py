@@ -67,6 +67,28 @@ async def test_veneer_roundtrip(tmp_path):
     assert _event_types(log) == ["user_input", "final_answer"]
 
 
+def test_no_engine_side_component_named_veneer():
+    """AC-2: no engine-side component is named "veneer". The server and
+    protocol modules moved to `hearth.gateway`, so `hearth/veneer/server.py`
+    and `hearth/veneer/protocol.py` no longer exist and the class is
+    `Gateway`. Scoped so it does not trip on `hearth/veneer/client.py`, which
+    legitimately remains until FTHR-024."""
+    import importlib
+    from pathlib import Path
+
+    import hearth
+
+    pkg_root = Path(hearth.__file__).parent
+    assert not (pkg_root / "veneer" / "server.py").exists()
+    assert not (pkg_root / "veneer" / "protocol.py").exists()
+
+    gateway_server = importlib.import_module("hearth.gateway.server")
+    gateway_protocol = importlib.import_module("hearth.gateway.protocol")
+    assert hasattr(gateway_server, "Gateway")
+    assert not hasattr(gateway_server, "Veneer")
+    assert hasattr(gateway_protocol, "serialize")
+
+
 async def test_no_tool_internals_cross_boundary(tmp_path):
     log = EventLog(str(tmp_path / "events.db"))
     loop = _FakeLoop(
