@@ -3,9 +3,10 @@
 # double underscore, e.g. HEARTH_STORAGE__DB_PATH) or, for secrets only, a
 # .env file (see .env.example). Exported env vars beat .env values.
 #
-# The daemon looks for the active config.yaml at: $HEARTH_CONFIG (if set),
-# then next to the package (a source checkout / the frozen bundle), then
-# ./config.yaml in the working directory -- and refuses to start without one.
+# The daemon looks for its active config/engine.yaml at: $HEARTH_CONFIG (if
+# set), then next to the package (a source checkout / the frozen bundle), then
+# ./config/engine.yaml in the working directory -- and refuses to start without
+# one. Copy this file to config/engine.yaml to create the active config.
 
 llm:
   # backends: named LLM endpoints. "local" and "remote" are the Phase 0 pair;
@@ -39,6 +40,10 @@ llm:
 
 veneer:
   host: "127.0.0.1"    # bind address for the local control surface
+  port: 8765
+
+gateway:
+  host: "127.0.0.1"    # bind address for the chat gateway (see FTHR-024); unused by the engine
   port: 8765
 
 tool:

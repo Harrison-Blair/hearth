@@ -19,32 +19,41 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
-CONFIG_YAML_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
 
-def resolve_config_path() -> Path:
-    """Locate the active config.yaml, failing loud when none exists.
+def resolve_config_path(component: str) -> Path:
+    """Locate a component's active config file, failing loud when none exists.
 
-    Order: `HEARTH_CONFIG` env var (must point at an existing file), the
-    package-adjacent default (a source checkout; also the PyInstaller bundle
-    root), then ./config.yaml in the working directory (wheel installs run
-    from a config-carrying directory). A missing config used to load silently
-    as empty and surface later as a bare KeyError in the router -- raise a
-    clear error at construction instead."""
+    Shared facility: the target filename is derived from `component`
+    (`config/<component>.yaml`), so a second component (e.g. the chat veneer)
+    reuses this resolver instead of copying it. The engine passes
+    `component="engine"`.
+
+    Order: `HEARTH_CONFIG` env var (must point at an existing file; still
+    engine-only -- a per-component override env var is not in scope), the
+    package-adjacent `config/<component>.yaml` (a source checkout; also the
+    PyInstaller bundle root), then `./config/<component>.yaml` in the working
+    directory (wheel installs run from a config-carrying directory). A missing
+    config used to load silently as empty and surface later as a bare KeyError
+    in the router -- raise a clear error at construction instead."""
     env_path = os.environ.get("HEARTH_CONFIG")
     if env_path:
         path = Path(env_path)
         if not path.is_file():
             raise FileNotFoundError(f"HEARTH_CONFIG points to a missing file: {path}")
         return path
-    if CONFIG_YAML_PATH.is_file():
-        return CONFIG_YAML_PATH
-    cwd_path = Path.cwd() / "config.yaml"
+    filename = f"{component}.yaml"
+    package_adjacent = CONFIG_DIR / filename
+    if package_adjacent.is_file():
+        return package_adjacent
+    cwd_path = Path.cwd() / "config" / filename
     if cwd_path.is_file():
         return cwd_path
     raise FileNotFoundError(
-        "no config.yaml found: copy default-config.yaml to config.yaml "
-        f"(looked in {CONFIG_YAML_PATH} and {cwd_path}) or set HEARTH_CONFIG"
+        f"no config/{filename} found: copy config/defaults/{filename} to "
+        f"config/{filename} (looked in {package_adjacent} and {cwd_path}) "
+        "or set HEARTH_CONFIG"
     )
 
 
@@ -83,6 +92,11 @@ class LLMConfig(BaseModel):
 
 
 class VeneerConfig(BaseModel):
+    host: str = "127.0.0.1"
+    port: int = 8765
+
+
+class GatewayConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8765
 
@@ -139,6 +153,7 @@ class Settings(BaseSettings):
 
     llm: LLMConfig = LLMConfig()
     veneer: VeneerConfig = VeneerConfig()
+    gateway: GatewayConfig = GatewayConfig()
     tool: ToolConfig = ToolConfig()
     agent: AgentConfig = AgentConfig()
     persona: PersonaConfig = PersonaConfig()
@@ -163,6 +178,6 @@ class Settings(BaseSettings):
             init_settings,
             env_settings,
             dotenv_settings,
-            YamlConfigSettingsSource(settings_cls, yaml_file=resolve_config_path()),
+            YamlConfigSettingsSource(settings_cls, yaml_file=resolve_config_path("engine")),
             file_secret_settings,
         )
