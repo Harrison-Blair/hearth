@@ -2,7 +2,7 @@
 id: FTHR-026
 title: Concurrent veneer proof
 plumage: PLM-007
-status: egg
+status: fledged
 priority: P0
 depends_on: [FTHR-024]
 authored: 2026-07-17T08:21:29Z
