@@ -18,6 +18,20 @@ stt:
   model: base
   language: en
 
+# --- speaking (FTHR-035) ---
+# TTS voice. NO shipped default: unset (null) = missing, which FTHR-037 turns
+# into the first-run acquisition error. Real speech is FTHR-036.
+voice: null
+
+# Output playback device (PortAudio name or index); null = system default.
+output_device: null
+
+# [heard]/[spoken] presentation colours (ANSI codes); distinct so the two read
+# apart at a glance.
+presentation:
+  heard_color: "36"   # cyan
+  spoken_color: "35"  # magenta
+
 retry:
   max_attempts: 30
   base_delay_s: 1.0
