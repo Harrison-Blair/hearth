@@ -2,7 +2,7 @@
 id: FTHR-025
 title: Surface provenance on logged turns
 plumage: PLM-007
-status: egg
+status: fledged
 priority: P0
 depends_on: [FTHR-024]
 authored: 2026-07-17T08:18:24Z
