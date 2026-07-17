@@ -2,7 +2,7 @@
 id: FTHR-032
 title: "Registry selection targets audio config; manifest.py defect fix"
 plumage: PLM-008
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-028]
 authored: 2026-07-17T15:44:56Z
