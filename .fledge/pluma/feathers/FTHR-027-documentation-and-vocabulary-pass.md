@@ -2,7 +2,7 @@
 id: FTHR-027
 title: Documentation and vocabulary pass
 plumage: PLM-007
-status: egg
+status: fledged
 priority: P0
 depends_on: [FTHR-025]
 authored: 2026-07-17T08:24:05Z
