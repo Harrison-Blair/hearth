@@ -2,7 +2,7 @@
 id: FTHR-024
 title: Chat veneer as a standalone process
 plumage: PLM-007
-status: egg
+status: fledged
 priority: P0
 depends_on: [FTHR-022, FTHR-023]
 authored: 2026-07-17T08:09:03Z
