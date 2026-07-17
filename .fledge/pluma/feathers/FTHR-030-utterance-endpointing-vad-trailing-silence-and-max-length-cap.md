@@ -2,7 +2,7 @@
 id: FTHR-030
 title: "Utterance endpointing: VAD trailing-silence and max-length cap"
 plumage: PLM-008
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-028]
 authored: 2026-07-17T15:39:59Z
