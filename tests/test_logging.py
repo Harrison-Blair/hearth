@@ -253,7 +253,7 @@ async def test_consult_turn_logs_both_models(tmp_path, two_tier_llm_config, capl
     log = EventLog(str(tmp_path / "events.db"))
     loop = make(log)
 
-    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace")
+    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace", "chat")
 
     assert answer == "Ada Lovelace was a mathematician."
 
@@ -275,7 +275,7 @@ async def test_transcript_contains_ordered_turn_lines(tmp_path, two_tier_llm_con
     log = EventLog(str(tmp_path / "events.db"))
     loop = make(log)
 
-    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace")
+    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace", "chat")
 
     contents = (transcript_dir / "s1.txt").read_text()
     user_pos = contents.index("who was Ada Lovelace")
@@ -315,7 +315,7 @@ async def test_logging_failure_does_not_crash_turn(tmp_path, llm_config, canned_
 
     loop = Loop(router, log, config, transcript=_RaisingTranscript())
 
-    answer = await loop.run_turn("s1", "t1", "hello")
+    answer = await loop.run_turn("s1", "t1", "hello", "chat")
 
     assert answer == "answer one"
 

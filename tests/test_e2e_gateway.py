@@ -236,8 +236,8 @@ async def test_e2e_multiturn_chat_and_consult(tmp_path):
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
-            turn1_messages = await send_turn(ws, "hello there")
-            turn2_messages = await send_turn(ws, "who was Ada Lovelace")
+            turn1_messages = await send_turn(ws, "hello there", "chat")
+            turn2_messages = await send_turn(ws, "who was Ada Lovelace", "chat")
     finally:
         server.close()
         await server.wait_closed()
@@ -357,7 +357,7 @@ async def test_e2e_remote_tier_consult_same_shape(tmp_path):
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
-            messages = await send_turn(ws, "who was Ada Lovelace")
+            messages = await send_turn(ws, "who was Ada Lovelace", "chat")
     finally:
         server.close()
         await server.wait_closed()
@@ -419,7 +419,7 @@ async def test_e2e_remote_disabled_stays_local_chat_only(tmp_path):
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
-            messages = await send_turn(ws, "who was Ada Lovelace")
+            messages = await send_turn(ws, "who was Ada Lovelace", "chat")
     finally:
         server.close()
         await server.wait_closed()
@@ -444,8 +444,8 @@ class _SlowFakeLoop:
     def __init__(self, log):
         self._log = log
 
-    async def run_turn(self, session_id, turn_id, transcript, emit=None):
-        self._log.append(session_id, turn_id, "user_input", "user", {"text": transcript})
+    async def run_turn(self, session_id, turn_id, transcript, surface, emit=None):
+        self._log.append(session_id, turn_id, "user_input", surface, {"text": transcript})
         await asyncio.sleep(0.1)
         self._log.append(session_id, turn_id, "final_answer", "brain", {"text": "answer"})
         return "answer"
@@ -463,14 +463,22 @@ async def test_serve_continues_after_one_connection_disconnects(tmp_path):
 
     try:
         ws1 = await websockets.connect(f"ws://127.0.0.1:{port}")
-        await ws1.send(json.dumps({"turn_id": "t1", "final_user_transcript": "disconnecting"}))
+        await ws1.send(
+            json.dumps(
+                {
+                    "turn_id": "t1",
+                    "final_user_transcript": "disconnecting",
+                    "surface": "chat",
+                }
+            )
+        )
         await ws1.close()  # client gone before the server's reply send()
 
         # Give the server a moment to hit the send-after-close and recover.
         await asyncio.sleep(0.3)
 
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws2:
-            messages = await send_turn(ws2, "second, should complete normally")
+            messages = await send_turn(ws2, "second, should complete normally", "chat")
     finally:
         server.close()
         await server.wait_closed()

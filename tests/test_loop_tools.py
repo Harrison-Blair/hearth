@@ -135,7 +135,7 @@ async def test_orchestrator_first_request_offers_consult_brain_at_default_tier(
     consult = BrainConsult(router, registry, log, _Config())
 
     loop = Loop(router, log, _Config(), consult=consult)
-    answer = await loop.run_turn("s1", "t1", "hello")
+    answer = await loop.run_turn("s1", "t1", "hello", "chat")
 
     assert answer == "hi there"
     assert router_fn.counts["local-llm.test"] == 1
@@ -178,7 +178,7 @@ async def test_consult_dispatches_nested_wikipedia_search(tmp_path, two_tier_llm
     async def emit(event):
         emitted.append(event)
 
-    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace", emit=emit)
+    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace", "chat", emit=emit)
 
     assert answer == "Ada Lovelace was a mathematician."
     assert registry.dispatched == [("wikipedia_search", {"query": "Ada Lovelace"})]
@@ -227,7 +227,7 @@ async def test_wikipedia_search_never_offered_at_top_level(tmp_path, two_tier_ll
     consult = BrainConsult(router, registry, log, _Config())
     loop = Loop(router, log, _Config(), consult=consult)
 
-    await loop.run_turn("s1", "t1", "hello")
+    await loop.run_turn("s1", "t1", "hello", "chat")
 
     for client in clients.values():
         await client.aclose()
@@ -249,7 +249,7 @@ async def test_nested_tool_round_cap(tmp_path, two_tier_llm_config):
     consult = BrainConsult(router, registry, log, consult_config)
 
     loop = Loop(router, log, _Config(), consult=consult)
-    answer = await loop.run_turn("s1", "t1", "look it up")
+    answer = await loop.run_turn("s1", "t1", "look it up", "chat")
 
     assert isinstance(answer, str)
     assert answer
@@ -293,7 +293,7 @@ async def test_turn_summary_includes_nested_consult_metrics(
     consult = BrainConsult(router, registry, log, _Config())
 
     loop = Loop(router, log, _Config(), consult=consult)
-    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace")
+    answer = await loop.run_turn("s1", "t1", "who was Ada Lovelace", "chat")
 
     assert answer == "Ada Lovelace was a mathematician."
 
@@ -363,8 +363,8 @@ async def test_concurrent_turns_keep_their_own_consult_context(tmp_path, two_tie
         sink_b.append(event)
 
     answer_a, answer_b = await asyncio.gather(
-        loop.run_turn("sA", "tA", "alpha", emit=emit_a),
-        loop.run_turn("sB", "tB", "beta", emit=emit_b),
+        loop.run_turn("sA", "tA", "alpha", "chat", emit=emit_a),
+        loop.run_turn("sB", "tB", "beta", "chat", emit=emit_b),
     )
 
     assert answer_a == "answer for alpha"
@@ -407,7 +407,7 @@ async def test_turn_timeout_emits_balanced_tool_activity(tmp_path, two_tier_llm_
     async def emit(event):
         emitted.append(event)
 
-    answer = await loop.run_turn("s1", "t1", "look it up", emit=emit)
+    answer = await loop.run_turn("s1", "t1", "look it up", "chat", emit=emit)
 
     assert "too long" in answer
     assert [(e.phase, e.label) for e in emitted] == [("start", "consult"), ("end", "consult")]
@@ -445,7 +445,7 @@ async def test_turn_summary_counts_failed_nested_consult_call(
     consult = BrainConsult(router, registry, log, _Config())
 
     loop = Loop(router, log, _Config(), consult=consult)
-    answer = await loop.run_turn("s1", "t1", "look it up")
+    answer = await loop.run_turn("s1", "t1", "look it up", "chat")
 
     assert answer == "done"
 
@@ -489,7 +489,7 @@ async def test_turn_timeout_logs_marker_and_counts_failed_call(
         router, log, _Config(agent=_Agent(turn_timeout_s=0.05)), consult=_BlockingConsult()
     )
 
-    answer = await loop.run_turn("s1", "t1", "look it up")
+    answer = await loop.run_turn("s1", "t1", "look it up", "chat")
 
     assert "too long" in answer  # unchanged fallback behavior
 
@@ -523,7 +523,7 @@ async def test_timeout_marker_carries_category_tag(tmp_path, two_tier_llm_config
         router, log, _Config(agent=_Agent(turn_timeout_s=0.05)), consult=_BlockingConsult()
     )
 
-    await loop.run_turn("s1", "t1", "look it up")
+    await loop.run_turn("s1", "t1", "look it up", "chat")
 
     warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
     timeout_records = [r for r in warning_records if "timeout" in r.getMessage().lower()]

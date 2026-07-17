@@ -80,7 +80,11 @@ class Gateway:
 
                 try:
                     answer_text = await self._loop.run_turn(
-                        session_id, request.turn_id, request.final_user_transcript, emit=sink
+                        session_id,
+                        request.turn_id,
+                        request.final_user_transcript,
+                        request.surface,
+                        emit=sink,
                     )
                 except websockets.ConnectionClosed:
                     raise

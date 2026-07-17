@@ -20,11 +20,19 @@ GENERIC_ERROR_MESSAGE = "the turn failed"
 class Request:
     turn_id: str
     final_user_transcript: str
+    surface: str
 
 
 def parse_request(raw: str) -> Request:
     data = json.loads(raw)
-    return Request(turn_id=data["turn_id"], final_user_transcript=data["final_user_transcript"])
+    # `surface` is required on the wire, with no default: a frame lacking it
+    # raises KeyError and hits the existing malformed-frame path. A wire-level
+    # default would silently re-create today's indistinguishable turns.
+    return Request(
+        turn_id=data["turn_id"],
+        final_user_transcript=data["final_user_transcript"],
+        surface=data["surface"],
+    )
 
 
 def serialize(event: object) -> dict:
