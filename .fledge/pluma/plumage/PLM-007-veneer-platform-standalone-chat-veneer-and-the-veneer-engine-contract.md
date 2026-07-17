@@ -1,7 +1,7 @@
 ---
 id: PLM-007
 title: "Veneer platform: standalone chat veneer and the veneer-engine contract"
-status: hatched
+status: fledged
 priority: P0
 authored: 2026-07-17T07:19:49Z
 agent: fledge-orchestrate/planning
@@ -106,44 +106,44 @@ existing one is a real, named, separately-configured program.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: A veneer runs as its own process and reaches the engine only over the wire; the
+- [x] AC-1: A veneer runs as its own process and reaches the engine only over the wire; the
       `chat` veneer holds no in-process reference to engine internals (FC-1).
-- [ ] AC-2: The engine-side gateway is named distinctly from the veneers, and no engine-side
+- [x] AC-2: The engine-side gateway is named distinctly from the veneers, and no engine-side
       component is named "veneer" (FC-2).
-- [ ] AC-3: The `chat` veneer is separately runnable by name and reproduces today's console
+- [x] AC-3: The `chat` veneer is separately runnable by name and reproduces today's console
       behavior — prompt, turn submission, tool-activity display, answer display, error display
       (FC-3).
-- [ ] AC-4: Safety policy lives in one shared place that every surface goes through; a test
+- [x] AC-4: Safety policy lives in one shared place that every surface goes through; a test
       demonstrates that a surface cannot present internal failure detail or tool internals, and
       that test is written so it applies to **any** surface rather than one specific one
       (FC-4).
-- [ ] AC-5: A test demonstrates two veneers connected to one engine concurrently, both served
+- [x] AC-5: A test demonstrates two veneers connected to one engine concurrently, both served
       (FC-5).
-- [ ] AC-6: A test demonstrates that a turn on one concurrently-connected veneer does not
+- [x] AC-6: A test demonstrates that a turn on one concurrently-connected veneer does not
       appear in another's conversation history (FC-6).
-- [ ] AC-7: A test demonstrates concurrent turns from two surfaces each being served, with no
+- [x] AC-7: A test demonstrates concurrent turns from two surfaces each being served, with no
       engine-side serialization (FC-7).
-- [ ] AC-8: Each logged turn records its originating surface, and a test asserts turns from
+- [x] AC-8: Each logged turn records its originating surface, and a test asserts turns from
       different surfaces are distinguishable in the log (FC-8).
-- [ ] AC-9: The engine and the `chat` veneer each read only their own configuration file from
+- [x] AC-9: The engine and the `chat` veneer each read only their own configuration file from
       the configuration directory; a test asserts each component's configuration is loaded
       independently of the other's (FC-9, FC-11).
-- [ ] AC-10: Configuration loading is provided by one shared facility used by both the engine
+- [x] AC-10: Configuration loading is provided by one shared facility used by both the engine
       and the `chat` veneer; a test covers that facility's resolution order and its fail-loud
       behavior on missing configuration (FC-10).
-- [ ] AC-11: The superseded single-surface configuration section and its environment-variable
+- [x] AC-11: The superseded single-surface configuration section and its environment-variable
       names are gone from the codebase, with no compatibility alias (FC-12).
-- [ ] AC-12: A test demonstrates that a veneer started against an unreachable engine reports a
+- [x] AC-12: A test demonstrates that a veneer started against an unreachable engine reports a
       plain, identifying message and exits non-zero without a stack trace (FC-13).
-- [ ] AC-13: The engine's release binary builds and resolves its configuration after the
+- [x] AC-13: The engine's release binary builds and resolves its configuration after the
       reorganization; the existing release smoke check passes unchanged in intent (FC-14).
-- [ ] AC-14: Documentation describes the engine, the `chat` veneer, how each is run and
+- [x] AC-14: Documentation describes the engine, the `chat` veneer, how each is run and
       configured, and the settled vocabulary; no superseded single-surface description remains
       in project documentation (FC-15).
-- [ ] AC-15: Every test in this plumage's feathers was written first and observed failing
+- [x] AC-15: Every test in this plumage's feathers was written first and observed failing
       against the unchanged code for the expected reason before the implementation was
       corrected until it passed.
-- [ ] AC-16: The full existing test suite passes.
+- [x] AC-16: The full existing test suite passes.
 
 ## Out of Scope
 
