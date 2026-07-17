@@ -19,21 +19,21 @@ How hearth's runtime spine is wired together: the daemon startup sequence, the t
 
 1. Load `.env` (`python-dotenv`), instantiate `Settings` (`hearth/config.py`).
 2. `setup_logging()` (idempotent, guards against duplicate handler stacking).
-3. Build one `httpx.AsyncClient` per configured LLM backend, plus one tool client (`_build_llm_clients()`).
+3. Build one `httpx.AsyncClient` per configured LLM backend (`_build_llm_clients()`); a separate bare `httpx.AsyncClient` is created in `_run_daemon` for tools.
 4. `Router(config.llm, clients)` — LLM tier→backend wiring.
 5. `EventLog(config.storage.db_path)` — sqlite append-only store.
 6. `ToolRegistry(config.tool, tool_client)` — registers Wikipedia if enabled.
 7. `BrainConsult(router, tool_registry, event_log, ...)` — the nested ReAct tool.
-8. `Loop(router, event_log, brain_consult, config, ...)`.
+8. `Loop(router, event_log, config, consult=brain_consult, transcript=...)`.
 9. `Veneer(loop, event_log, config)` → `Veneer.serve()`, runs until cancelled; httpx clients closed on shutdown.
 
 Frozen boundary: `Loop` never imports `Router`/`EventLog`/`Veneer` directly for wire purposes — it talks to the client only through an injected `EventSink` callable and `ToolActivity` events (`hearth/events.py`). This is the seam that keeps internal tool detail off the wire.
 
 ## The two-tier brain (the defining pattern)
 
-- **Local persona orchestrator** (tier `"default"`, `hearth/brain/local.py` → `LocalBackend`, Ollama-style) — every turn is served by this tier, carrying the persona system prompt (persona name "Vesta" in config/tests; "Calcifer" is the project's wake word, referenced in the persona prompt, not the orchestrator's own name — see `domain.md` for the reconciled terminology). It exposes exactly one tool, `consult_brain(query)`, gated per-turn on `Router.brain_available()`.
+- **Local persona orchestrator** (tier `"default"`, `hearth/brain/local.py` → `LocalBackend`, Ollama-style) — every turn is served by this tier, carrying the persona system prompt (persona name "Vesta" in config/tests; "Calcifer" survives only in stale `CLAUDE.md` text — the persona prompt says "You are Vesta" and the only committed wake model is `models/wake/vesta.onnx`; see `domain.md`'s open question on wake-word naming). It exposes exactly one tool, `consult_brain(query)`, gated per-turn on `Router.brain_available()`.
 - **Remote "brain"** (tier `"tool"`, `hearth/brain/remote.py` → `RemoteBackend`, OpenAI-compatible, OpenRouter by default) — `consult_brain` (`hearth/tools/consult.py::BrainConsult`) runs a *nested* ReAct loop on this tier, kept in its lane by `persona.brain_guard_prompt` (injected as the first system message — `test_brain_guard.py`). It reaches real data tools — currently Wikipedia (`hearth/tools/wikipedia.py`) — via `ToolRegistry.dispatch`, and returns findings as an observation the orchestrator folds back into its own voice.
-- Both call sites — the top-level orchestrator turn in `Loop.run_turn` and the nested consult in `BrainConsult.__call__` — share **one** ReAct engine: `run_react_rounds()` in `hearth/loop.py` (Thought→Action→Observation, round-capped by `agent.max_tool_rounds` / `agent.max_consult_rounds`). Do not duplicate this logic.
+- Both call sites — the top-level orchestrator turn in `Loop.run_turn` and the nested consult in `BrainConsult.__call__` — share **one** ReAct engine: `run_react_rounds()` in `hearth/loop.py` (Thought→Action→Observation, the orchestrator turn is round-capped by `agent.max_consult_rounds` (`loop.py:343`), the nested consult by `agent.max_tool_rounds` (`consult.py:121`)). Do not duplicate this logic.
 - `Router.select(tier_override=None)` deterministically resolves a tier to a `Brain` (protocol in `hearth/brain/base.py`); `tier_override="tool"` is how `BrainConsult` reaches the remote tier.
 - Backend failures normalize to `BrainError(reason, detail)` (`hearth/brain/errors.py`) — `reason` is client-safe, `detail` is internal-only and never includes API keys. Both call sites catch `BrainError` and degrade to a plain-text observation rather than crashing the turn.
 

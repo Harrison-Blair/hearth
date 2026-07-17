@@ -137,8 +137,11 @@ The commit history and dev agents follow its taxonomy — match it when committi
 - **test-first**: tests are written and shown failing before the implementation
   (`FTHR-xxx: test-first — … tests`), matching the repo's test-verification rule.
 - **molt evidence** — the artifact recording AC verification for a feather.
-- `.fledge/` and `.fledgeignore` (gitignore syntax) are fledge's working state /
-  context-scan exclusions; both are ignored/regenerable, not source.
+- `.fledge/pluma/` (plumage/feather specs), `.fledge/nest/` (context docs, except
+  `nest/raw/`), and `.fledge/molt/` (AC evidence) are **tracked, hand-authored source** —
+  do not delete or regenerate them. The rest of `.fledge/` (ledger, broods, roster,
+  scratch, `scaffold.json`) is machine-local working state, gitignored. `.fledgeignore`
+  (gitignore syntax) is fledge's context-scan exclusion list, also tracked.
 
 The `dev-team` skill (PM → Engineer → Reviewer) mirrors this loop: a spec with
 testable ACs, test-first implementation, then an independent review that verifies

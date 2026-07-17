@@ -70,7 +70,7 @@ SQLite table `events`: `id` (autoincrement PK), `session_id`, `turn_id`, `ts_utc
   }
 }
 ```
-Also: `training/work/<model>.yaml` (effective training config after CLI overrides, kept for reproducibility), `training/output/<model>/<model>.onnx` (exported classifier, copied to `models/wake/`), `training/output/<model>/<model>_eval.json` (recall/fpph/threshold/gate_passed, parsed by `manifest.upsert`). Currently `models/wake/vesta.onnx` (960,600 bytes) is the only artifact checked into the repo; nothing in `hearth/` loads it yet.
+Also: `training/work/<model>.yaml` (effective training config after CLI overrides, kept for reproducibility), `training/output/<model>/<model>.onnx` (exported classifier, copied to `models/wake/`), `training/output/<model>/<model>_eval.json` (`optimal_recall`/`optimal_fpph`/`optimal_threshold`, parsed by `manifest.upsert`, which derives `gate_passed` as `optimal_fpph <= target_fpph` — the gate flag is a manifest field, not an eval-file field). Currently `models/wake/vesta.onnx` (960,600 bytes) is the only artifact checked into the repo; nothing in `hearth/` loads it yet.
 
 ## Open Questions
 
