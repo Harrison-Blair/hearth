@@ -2,7 +2,7 @@
 id: FTHR-031
 title: Offline transcription via faster-whisper
 plumage: PLM-008
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-028]
 authored: 2026-07-17T15:42:46Z
