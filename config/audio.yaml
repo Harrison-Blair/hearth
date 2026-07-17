@@ -15,7 +15,9 @@ endpoint:
   max_utterance_ms: 12000
 
 stt:
-  model: base
+  model: Systran/faster-distil-whisper-medium.en
+  compute_type: int8
+  beam_size: 5
   language: en
 
 # --- speaking (FTHR-035) ---

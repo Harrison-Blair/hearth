@@ -22,9 +22,12 @@ endpoint:
   silence_ms: 800        # trailing silence that ends an utterance
   max_utterance_ms: 12000  # hard cap on a single utterance
 
-# Transcription model + params (consumed by FTHR-031).
+# Transcription model + params (consumed by FTHR-031). Defaults are the
+# stenographer-proven config (FC-6); the Pi may tune to a lighter model.
 stt:
-  model: base
+  model: Systran/faster-distil-whisper-medium.en  # ~800MB, downloaded on first use
+  compute_type: int8       # faster-whisper compute type
+  beam_size: 5             # decoding beam width
   language: en
 
 # --- speaking (FTHR-035) ---
