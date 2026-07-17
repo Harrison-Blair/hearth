@@ -47,10 +47,19 @@ reference (the proven defaults): the user's stenographer project's ASR config
   FTHR-028 did not wire it; if so, **one line, noted at the gate** (same bounded carve-out as
   FTHR-029/030).
 
-**Files this feather must NOT touch:** `hearth/audio/config.py` / the audio config **schema**
-(FTHR-028 owns it — read the STT keys, define none), `surface.py` / `stages.py` (implement the
+**Files this feather must NOT touch:** `surface.py` / `stages.py` (implement the
 Protocol in `transcribe.py`, don't edit the seam), the other stage modules (FTHR-029/030),
 `training/manifest.py` (FTHR-032). Staying in `transcribe.py` + its test holds wave 2 disjoint.
+
+> **Orchestrator amendment (2026-07-17, PLM-008 resume):** the AC-7 schema-insufficiency escape
+> hatch fired. FTHR-028's `STTConfig` carried only `model` (default `"base"`) and `language`, but
+> FC-6/AC-2 require `compute_type` and `beam_size` to be configuration too, with the stenographer
+> defaults. Per user decision (option A), this feather is authorized to make the **minimal**
+> `STTConfig` schema addition in `hearth/audio/config.py`: add `compute_type` (default `"int8"`)
+> and `beam_size` (default `5`), and correct the `model` default to
+> `"Systran/faster-distil-whisper-medium.en"`. That single class is the only permitted edit to
+> `config.py` — do not restructure the file or touch any other config section. AC-7/AC-8 below are
+> amended to match.
 
 ## Approach
 
@@ -116,29 +125,31 @@ run as "config reaches the library and the transcript flows," never as "transcri
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
       Guard tests marked "*Fails before:* n/a" are exempt from the fail-first requirement;
       instead they were shown failing when the guarded property is deliberately violated, then
       pass unmodified.
-- [ ] AC-2: The transcriber turns a captured utterance into text via faster-whisper, with the
+- [x] AC-2: The transcriber turns a captured utterance into text via faster-whisper, with the
       model and parameters (`Systran/faster-distil-whisper-medium.en`, `int8`, beam 5, English as
       defaults) taken from the audio config; a test asserts those values reach the library
       (satisfies PLM-008 FC-6).
-- [ ] AC-3: The resulting transcript flows onward for submission as the engine turn; a test proves
+- [x] AC-3: The resulting transcript flows onward for submission as the engine turn; a test proves
       the returned text is what the surface submits.
-- [ ] AC-4: **The test strategy's boundary is explicit in the feather and its evidence: CI mocks
+- [x] AC-4: **The test strategy's boundary is explicit in the feather and its evidence: CI mocks
       the faster-whisper library, proving config plumbing reaches it and the transcript flows —
       it does NOT prove transcription accuracy, which is FTHR-033's manual smoke.** No test in this
       feather implies the model transcribes correctly, and molt evidence records a green run as
       wiring-proven, not accuracy-proven (honors decomposition Q4=A).
-- [ ] AC-5: No real faster-whisper model loads or downloads in CI; a test guards the hermetic
+- [x] AC-5: No real faster-whisper model loads or downloads in CI; a test guards the hermetic
       property so an accidental eager instantiation is caught.
-- [ ] AC-6: The transcriber holds **no model-lifecycle policy** (no lazy loading, idle-unload, or
+- [x] AC-6: The transcriber holds **no model-lifecycle policy** (no lazy loading, idle-unload, or
       residency) — that was explicitly excluded when PLM-008 was scoped; a test pins its absence.
-- [ ] AC-7: This feather **reads** STT config keys and defines no schema; implements FTHR-028's
-      `Transcriber` seam as given; any schema/seam insufficiency is raised against FTHR-028,
-      keeping this diff disjoint from FTHR-032 and unchanged in `surface.py`/`stages.py`.
-- [ ] AC-8: Only `hearth/audio/transcribe.py` and `tests/test_audio_transcribe.py` are
-      added/changed (plus at most a single noted `pyproject.toml` dependency line), keeping wave 2
-      disjoint from FTHR-029/030/032.
-- [ ] AC-9: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-7: This feather implements FTHR-028's `Transcriber` seam as given and leaves
+      `surface.py`/`stages.py` unchanged. Per the orchestrator amendment above, it makes the
+      **minimal** `STTConfig` schema addition in `hearth/audio/config.py` (add `compute_type` and
+      `beam_size`, correct the `model` default) — that single class only, no other config section
+      or file restructured — so FC-6's four configurable params are real configuration.
+- [x] AC-8: Only `hearth/audio/transcribe.py`, `tests/test_audio_transcribe.py`, and the
+      minimal `STTConfig` addition in `hearth/audio/config.py` are added/changed (plus at most a
+      single noted `pyproject.toml` dependency line), keeping wave 2 disjoint from FTHR-029/030/032.
+- [x] AC-9: `ruff check .` is clean and the full existing test suite passes.

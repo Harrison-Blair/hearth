@@ -47,9 +47,13 @@ class EndpointConfig(BaseModel):
 
 
 class STTConfig(BaseModel):
-    """Transcription model + params consumed by FTHR-031's transcriber."""
+    """Transcription model + params consumed by FTHR-031's transcriber. The four
+    knobs are the stenographer-proven defaults (FC-6), tunable on the Pi without
+    a code edit (the Pi may need a lighter model)."""
 
-    model: str = "base"
+    model: str = "Systran/faster-distil-whisper-medium.en"
+    compute_type: str = "int8"
+    beam_size: int = 5
     language: str = "en"
 
 
