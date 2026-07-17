@@ -64,6 +64,17 @@ wrong, that is a **finding against the owning feather** (FTHR-028/029/030/031), 
 into the integration feather. An integration test that has to edit a stage to pass is reporting a
 real defect — surface it.
 
+> **Known finding against FTHR-028 (recorded 2026-07-17 during PLM-008 resume, by fledge-brooder-emperor
+> while implementing FTHR-030).** `hearth/audio/source.py::LiveAudioSource` defaults `blocksize=512`
+> (32 ms @ 16 kHz). `webrtcvad` accepts only 10/20/30 ms frames — 160/320/480 samples at 16 kHz — and
+> **raises on 512**, so real-hardware capture routed through the VAD endpointer (FTHR-030) will error
+> at the live smoke. The unit stages pass because they use valid frame sizes; the defect is invisible
+> until real capture. **Decision needed at this feather's dispatch:** where the one-line source-seam
+> fix lands — FTHR-033 will not modify `hearth/audio/**` per the rule above, so either (a) a small
+> corrective feather against FTHR-028 fixes `LiveAudioSource`'s frame size to a VAD-valid value and
+> merges before this integration, or (b) this feather is granted a narrow, explicit exception to make
+> that single fix. Do not let the live-mic smoke (AC-15) be signed off without it.
+
 ## Approach
 
 **1. The assembled hermetic test (FC-11/AC-11).** Wire the **real** wake, endpoint, and transcribe
