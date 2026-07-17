@@ -47,6 +47,7 @@ all = ["hearth[tts,wake,stt,vad,llm,nlu,scheduling,search,gcal]"]
 [project.scripts]
 hearth = "hearth.app:main"
 hearth-chat = "hearth.veneers.chat.__main__:main"
+hearth-audio = "hearth.audio.surface:main"
 
 [build-system]
 requires = ["setuptools>=61"]
