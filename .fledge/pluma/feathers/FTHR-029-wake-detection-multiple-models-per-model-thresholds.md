@@ -115,24 +115,24 @@ model loads," not "it reliably wakes on the phrase."
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: The active wake-model set is driven by the audio config; a test proves more than one
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: The active wake-model set is driven by the audio config; a test proves more than one
       model can be active at once with any firing, and that the detector works correctly with
       exactly one model configured — by the **same code path**, no single-model special case
       (satisfies PLM-008 FC-2).
-- [ ] AC-3: Each model gates on **its own** threshold from its config entry; a test proves no
+- [x] AC-3: Each model gates on **its own** threshold from its config entry; a test proves no
       global/shared/averaged threshold governs detection (satisfies PLM-008 FC-3).
-- [ ] AC-4: The real committed `vesta.onnx` loads and scores via the `wake` extra in a hermetic
+- [x] AC-4: The real committed `vesta.onnx` loads and scores via the `wake` extra in a hermetic
       test with no download (satisfies FC-2 for the model that exists today).
-- [ ] AC-5: This feather **reads** the wake-model schema and defines none of it; if the schema is
+- [x] AC-5: This feather **reads** the wake-model schema and defines none of it; if the schema is
       insufficient it is raised as a finding against FTHR-028, not extended here — so no schema
       change lands in this feather's diff, keeping it disjoint from FTHR-032 (satisfies the
       FTHR-028 AC-8 hoist from the reader side).
-- [ ] AC-6: This feather implements FTHR-028's `WakeDetector` seam as given and does not modify
+- [x] AC-6: This feather implements FTHR-028's `WakeDetector` seam as given and does not modify
       `surface.py` or `stages.py`; any seam problem is raised against FTHR-028.
-- [ ] AC-7: Molt evidence states that a green suite proves gating and model-load, **not** wake
+- [x] AC-7: Molt evidence states that a green suite proves gating and model-load, **not** wake
       accuracy on real speech (which is FTHR-033 manual smoke).
-- [ ] AC-8: Only `hearth/audio/wake.py` and `tests/test_audio_wake.py` are added/changed (plus at
+- [x] AC-8: Only `hearth/audio/wake.py` and `tests/test_audio_wake.py` are added/changed (plus at
       most a single `pyproject.toml` dependency line, noted in the gate if used), keeping wave 2
       disjoint from FTHR-030/031/032.
-- [ ] AC-9: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-9: `ruff check .` is clean and the full existing test suite passes.
