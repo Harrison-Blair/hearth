@@ -2,7 +2,7 @@
 id: FTHR-036
 title: Text-to-speech rendering via piper
 plumage: PLM-009
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-035]
 authored: 2026-07-17T16:06:41Z
