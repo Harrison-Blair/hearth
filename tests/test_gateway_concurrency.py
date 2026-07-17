@@ -73,8 +73,8 @@ class _BarrierLoop:
         self._arrived = 0
         self._all_here = asyncio.Event()
 
-    async def run_turn(self, session_id, turn_id, transcript, emit=None):
-        self._log.append(session_id, turn_id, "user_input", "user", {"text": transcript})
+    async def run_turn(self, session_id, turn_id, transcript, surface, emit=None):
+        self._log.append(session_id, turn_id, "user_input", surface, {"text": transcript})
         self._arrived += 1
         if self._arrived >= self._parties:
             self._all_here.set()
@@ -102,7 +102,7 @@ async def test_two_veneers_connected_concurrently_are_both_served(tmp_path):
             # Both connections are open here; neither turn can complete until
             # the other is also being served.
             msgs_a, msgs_b = await asyncio.wait_for(
-                asyncio.gather(send_turn(ws_a, "from A"), send_turn(ws_b, "from B")),
+                asyncio.gather(send_turn(ws_a, "from A", "chat"), send_turn(ws_b, "from B", "audio")),
                 timeout=TIMEOUT_S,
             )
     finally:
@@ -186,8 +186,8 @@ async def test_concurrent_veneers_hold_isolated_conversations(tmp_path, llm_conf
             websockets.connect(url) as ws_a,
             websockets.connect(url) as ws_b,
         ):
-            msgs_a = await send_turn(ws_a, alpha)
-            msgs_b = await send_turn(ws_b, bravo)
+            msgs_a = await send_turn(ws_a, alpha, "chat")
+            msgs_b = await send_turn(ws_b, bravo, "audio")
     finally:
         await _close(server)
         await client.aclose()
@@ -225,8 +225,8 @@ class _GatedLoop:
         self._log = log
         self._b_done = asyncio.Event()
 
-    async def run_turn(self, session_id, turn_id, transcript, emit=None):
-        self._log.append(session_id, turn_id, "user_input", "user", {"text": transcript})
+    async def run_turn(self, session_id, turn_id, transcript, surface, emit=None):
+        self._log.append(session_id, turn_id, "user_input", surface, {"text": transcript})
         if transcript.startswith("A"):
             await self._b_done.wait()  # gated on B's completion
             answer = "A completed after B"
@@ -253,7 +253,7 @@ async def test_engine_does_not_serialize_turns_across_veneers(tmp_path):
             websockets.connect(url) as ws_b,
         ):
             msgs_a, msgs_b = await asyncio.wait_for(
-                asyncio.gather(send_turn(ws_a, "A gated on B"), send_turn(ws_b, "B first")),
+                asyncio.gather(send_turn(ws_a, "A gated on B", "chat"), send_turn(ws_b, "B first", "audio")),
                 timeout=TIMEOUT_S,
             )
     finally:
