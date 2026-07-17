@@ -2,7 +2,7 @@
 id: FTHR-028
 title: "Audio surface spine: duplex capture loop and stage seams"
 plumage: PLM-008
-status: pipping
+status: fledged
 priority: P1
 depends_on: []
 authored: 2026-07-17T15:34:19Z
