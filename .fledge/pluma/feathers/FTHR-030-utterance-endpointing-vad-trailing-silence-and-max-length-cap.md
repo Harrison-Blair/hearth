@@ -120,27 +120,27 @@ correct," not "the timings are well-tuned for real speech."
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: Utterance capture ends after a **configurable trailing-silence** period; a test proves
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: Utterance capture ends after a **configurable trailing-silence** period; a test proves
       it ends at the configured duration and that mid-utterance pauses shorter than it do not end
       the turn (satisfies PLM-008 FC-5).
-- [ ] AC-3: A **configurable maximum utterance length** terminates capture when silence never
+- [x] AC-3: A **configurable maximum utterance length** terminates capture when silence never
       arrives; a separate test covers this bound firing independently of the silence path
       (satisfies PLM-008 FC-5).
-- [ ] AC-4: Real `webrtcvad` classifies frames at the configured aggressiveness in a hermetic test
+- [x] AC-4: Real `webrtcvad` classifies frames at the configured aggressiveness in a hermetic test
       with no download (satisfies FC-5's speech-detection basis).
-- [ ] AC-5: VAD aggressiveness, trailing-silence duration, and max length are all read from the
+- [x] AC-5: VAD aggressiveness, trailing-silence duration, and max length are all read from the
       audio config with no hardcoded timings; a test proves each knob drives behavior.
-- [ ] AC-6: This feather reads endpoint config keys and, per the orchestrator amendment above,
+- [x] AC-6: This feather reads endpoint config keys and, per the orchestrator amendment above,
       makes the **minimal** `EndpointConfig` schema addition in `hearth/audio/config.py` (add
       `aggressiveness: int = 2`) — that single class only, no other config section or file
       restructured — so aggressiveness is real configuration; the diff stays disjoint from FTHR-032.
-- [ ] AC-7: This feather implements FTHR-028's `Endpointer` seam as given and does not modify
+- [x] AC-7: This feather implements FTHR-028's `Endpointer` seam as given and does not modify
       `surface.py` or `stages.py`; any seam problem is raised against FTHR-028.
-- [ ] AC-8: Molt evidence states that a green suite proves the endpointing **policy**, not that the
+- [x] AC-8: Molt evidence states that a green suite proves the endpointing **policy**, not that the
       timing values are well-tuned for real speech (which is FTHR-033 manual smoke / Pi tuning).
-- [ ] AC-9: Only `hearth/audio/endpoint.py`, `tests/test_audio_endpoint.py`, and the minimal
+- [x] AC-9: Only `hearth/audio/endpoint.py`, `tests/test_audio_endpoint.py`, and the minimal
       `EndpointConfig` addition in `hearth/audio/config.py` are added/changed (plus at most a single
       noted `pyproject.toml` dependency line), keeping wave 2 disjoint from FTHR-029/031/032; the
       `vad` extra's `setuptools<81` pin is undisturbed.
-- [ ] AC-10: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-10: `ruff check .` is clean and the full existing test suite passes.
