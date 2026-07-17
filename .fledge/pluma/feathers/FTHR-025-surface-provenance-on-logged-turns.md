@@ -131,14 +131,14 @@ must contain no comparison against a surface value — and record that as molt e
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: Each logged turn records its originating surface as the `user_input` provenance, and
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: Each logged turn records its originating surface as the `user_input` provenance, and
       a test asserts turns from different surfaces are distinguishable in the log (satisfies
       PLM-007 FC-8, AC-8).
-- [ ] AC-3: `run_turn` takes the surface as a **required** parameter with no default, so a call
+- [x] AC-3: `run_turn` takes the surface as a **required** parameter with no default, so a call
       site that omits it fails loudly rather than silently logging the old constant; a test pins
       this.
-- [ ] AC-4: **The engine does not branch on the surface value.** It passes and stores it and
+- [x] AC-4: **The engine does not branch on the surface value.** It passes and stores it and
       does nothing else with it: no comparison, no switch, no validation against a known list, no
       enum of surfaces anywhere in the engine. A test parameterized over arbitrary surface
       strings asserts identical behavior — same answer, same backend messages, same emitted
@@ -146,16 +146,16 @@ must contain no comparison against a surface value — and record that as molt e
       no comparison against a surface value, recorded as molt evidence. **A green suite alone
       does not satisfy this criterion.** (Guards PLM-007 FC-1: an opaque string is not a
       dependency; a branch is.)
-- [ ] AC-5: A surface declares its own identity in one place, so a new surface can name itself
+- [x] AC-5: A surface declares its own identity in one place, so a new surface can name itself
       without any engine or contract change; `chat` declares `chat`.
-- [ ] AC-6: A frame omitting the surface is rejected via the **existing** malformed-frame path —
+- [x] AC-6: A frame omitting the surface is rejected via the **existing** malformed-frame path —
       not echoed, connection alive — with no second rejection path added and no wire-level
       default.
-- [ ] AC-7: `hearth/memory/log.py` is unchanged: the existing `provenance` column and `append()`
+- [x] AC-7: `hearth/memory/log.py` is unchanged: the existing `provenance` column and `append()`
       signature carry this feature, and `EventLog` remains append-only.
-- [ ] AC-8: The engine's own provenance values (`"loop"` for turn errors, the gateway's for
+- [x] AC-8: The engine's own provenance values (`"loop"` for turn errors, the gateway's for
       malformed frames) are unchanged — those are the engine speaking about itself, not a
       surface.
-- [ ] AC-9: `tests/test_gateway_concurrency.py` and `tests/conftest.py` are untouched by this
+- [x] AC-9: `tests/test_gateway_concurrency.py` and `tests/conftest.py` are untouched by this
       feather, leaving FTHR-026 free to run concurrently.
-- [ ] AC-10: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-10: `ruff check .` is clean and the full existing test suite passes.
