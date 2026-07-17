@@ -1,0 +1,15 @@
+# chat veneer configuration reference. The chat surface is a separate process
+# from the engine; this is the whole of its config. Values may be overridden by
+# HEARTH_* env vars (nested with a double underscore, e.g. HEARTH_ENGINE__PORT).
+#
+# hearth-chat looks for its active config/chat.yaml at: $HEARTH_CONFIG (if set),
+# then next to the package (a source checkout / the frozen bundle), then
+# ./config/chat.yaml in the working directory. Copy this file to config/chat.yaml
+# to create the active config.
+
+engine:
+  # Which engine to reach. The engine advertises its bind address as the
+  # `gateway:` section of config/engine.yaml; a veneer names the engine it
+  # connects to here. Keep these in agreement (default: the local engine).
+  host: "127.0.0.1"
+  port: 8765

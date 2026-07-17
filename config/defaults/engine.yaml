@@ -38,13 +38,9 @@ llm:
   timeout: 60.0         # per-request timeout, seconds
   max_retries: 2        # retries on transient (429/5xx/transport) failures
 
-veneer:
-  host: "127.0.0.1"    # bind address for the local control surface
-  port: 8765
-
 gateway:
-  host: "127.0.0.1"    # bind address for the chat gateway (see FTHR-024); unused by the engine
-  port: 8765
+  host: "127.0.0.1"    # bind address for the engine's WebSocket control surface
+  port: 8765           # veneers (e.g. hearth-chat) name this engine in their own config/chat.yaml
 
 tool:
   wikipedia_enabled: true    # register the Wikipedia lookup tool

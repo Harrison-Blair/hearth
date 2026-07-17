@@ -91,11 +91,6 @@ class LLMConfig(BaseModel):
         return self.backends[backend_name]
 
 
-class VeneerConfig(BaseModel):
-    host: str = "127.0.0.1"
-    port: int = 8765
-
-
 class GatewayConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8765
@@ -152,7 +147,6 @@ class Settings(BaseSettings):
     )
 
     llm: LLMConfig = LLMConfig()
-    veneer: VeneerConfig = VeneerConfig()
     gateway: GatewayConfig = GatewayConfig()
     tool: ToolConfig = ToolConfig()
     agent: AgentConfig = AgentConfig()

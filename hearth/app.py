@@ -71,11 +71,11 @@ async def _run_daemon() -> int:
         gateway = Gateway(loop, log, settings)
         logger.info(
             "gateway serving host=%s port=%s",
-            settings.veneer.host,
-            settings.veneer.port,
+            settings.gateway.host,
+            settings.gateway.port,
             extra={"category": "server"},
         )
-        await gateway.serve(settings.veneer.host, settings.veneer.port)
+        await gateway.serve(settings.gateway.host, settings.gateway.port)
     finally:
         for client in clients.values():
             await client.aclose()

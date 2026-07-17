@@ -66,7 +66,7 @@ cp .env.example .env
 
 # 4. Run the daemon, then talk to it from a second terminal
 hearth run                          # terminal 1
-python -m hearth.veneer.client      # terminal 2
+hearth-chat                         # terminal 2
 ```
 
 In the client, type a plain question like `what's 2 plus 2`, then one that needs a
@@ -187,7 +187,7 @@ Not yet. Today it's a text spine you type at. Wake word (**Vesta** / **Prometheu
 STT, and TTS are roadmap; `training/` and `models/wake/` are the wake-word groundwork.
 
 **How do I talk to it?**
-Start the daemon with `hearth run`, then run `python -m hearth.veneer.client`
+Start the daemon with `hearth run`, then run `hearth-chat`
 against it.
 
 **Where's my data?**
