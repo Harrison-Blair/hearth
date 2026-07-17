@@ -116,24 +116,24 @@ wired correctly."
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: A concrete piper-backed `Renderer` **implements FTHR-035's `Renderer` Protocol** (it
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: A concrete piper-backed `Renderer` **implements FTHR-035's `Renderer` Protocol** (it
       injects into that seam; it does not define a new one) and turns answer text into audio frames
       (satisfies PLM-009 FC-1, real-render half).
-- [ ] AC-3: The **configured voice and synthesis parameters reach the piper call** — an
+- [x] AC-3: The **configured voice and synthesis parameters reach the piper call** — an
       anti-hollow-mock test asserts changing the configured voice changes what piper is asked to do,
       so the test fails if config is ignored or the wiring is stubbed away.
-- [ ] AC-4: The renderer's output frames satisfy FTHR-035's `Player`-seam contract
+- [x] AC-4: The renderer's output frames satisfy FTHR-035's `Player`-seam contract
       (format/sample-rate), so an inter-seam format disagreement fails here rather than at FTHR-039's
       composition.
-- [ ] AC-5: Rendering is **hermetic** — CI triggers no voice-model download and needs no audio
+- [x] AC-5: Rendering is **hermetic** — CI triggers no voice-model download and needs no audio
       device (piper mocked at its library boundary, mirroring FTHR-031's Q4=A); a test guards the
       property (satisfies PLM-009 FC-11 for the render stage).
-- [ ] AC-6: This feather contains **no device playback** (FTHR-038), **no voice acquisition/first-run
+- [x] AC-6: This feather contains **no device playback** (FTHR-038), **no voice acquisition/first-run
       error** (FTHR-037), and **no barge-in**; any `Renderer`-seam insufficiency was raised as a
       finding against FTHR-035, not worked around here.
-- [ ] AC-7: Molt evidence records that CI proves **wiring, not audio quality/intelligibility/
+- [x] AC-7: Molt evidence records that CI proves **wiring, not audio quality/intelligibility/
       latency** — those remain deferred to FTHR-039's manual smoke; a green suite here is "TTS wired
       correctly," not "TTS sounds right."
-- [ ] AC-8: Any `pyproject.toml` dependency change is minimal, respects the existing pin comments,
+- [x] AC-8: Any `pyproject.toml` dependency change is minimal, respects the existing pin comments,
       and is noted at the gate; `ruff check .` is clean and the full existing test suite passes.
