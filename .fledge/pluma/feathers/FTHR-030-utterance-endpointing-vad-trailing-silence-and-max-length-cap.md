@@ -44,10 +44,19 @@ See `.fledge/nest/modules.md` → *veneer* (audio surface, as FTHR-028 leaves it
   FTHR-028 did not wire it; if so, **one line, noted at the gate** (the same bounded carve-out as
   FTHR-029 AC-8). Note `vad` pins `setuptools<81` — do not disturb that pin.
 
-**Files this feather must NOT touch:** `hearth/audio/config.py` / the audio config **schema**
-(FTHR-028 owns it — read the endpoint keys, define none), `surface.py` / `stages.py` (implement
+**Files this feather must NOT touch:** `surface.py` / `stages.py` (implement
 the Protocol in `endpoint.py`, don't edit the seam), the other stage modules (FTHR-029/031),
 `training/manifest.py` (FTHR-032). Staying in `endpoint.py` + its test holds wave 2 disjoint.
+
+> **Orchestrator amendment (2026-07-17, PLM-008 resume):** the AC-6 schema-insufficiency escape
+> hatch fired. FTHR-028's `EndpointConfig` carried only `silence_ms` and `max_utterance_ms`, but
+> AC-4/AC-5 require VAD **aggressiveness** to be configuration (the spec's own Context and
+> `default-config.yaml` document it as an intended knob). Per user decision (same option-A
+> resolution applied to FTHR-031's STT gap), this feather is authorized to make the **minimal**
+> `EndpointConfig` schema addition in `hearth/audio/config.py`: add `aggressiveness: int = 2`
+> (webrtcvad range 0–3). That single class is the only permitted edit to `config.py` — do not
+> restructure the file or touch any other config section (siblings FTHR-031 and FTHR-035 edit
+> other classes in the same file). AC-6/AC-9 below are amended to match.
 
 ## Approach
 
@@ -122,13 +131,16 @@ correct," not "the timings are well-tuned for real speech."
       with no download (satisfies FC-5's speech-detection basis).
 - [ ] AC-5: VAD aggressiveness, trailing-silence duration, and max length are all read from the
       audio config with no hardcoded timings; a test proves each knob drives behavior.
-- [ ] AC-6: This feather **reads** endpoint config keys and defines **no** config schema; any
-      schema insufficiency is raised against FTHR-028, keeping this diff disjoint from FTHR-032.
+- [ ] AC-6: This feather reads endpoint config keys and, per the orchestrator amendment above,
+      makes the **minimal** `EndpointConfig` schema addition in `hearth/audio/config.py` (add
+      `aggressiveness: int = 2`) — that single class only, no other config section or file
+      restructured — so aggressiveness is real configuration; the diff stays disjoint from FTHR-032.
 - [ ] AC-7: This feather implements FTHR-028's `Endpointer` seam as given and does not modify
       `surface.py` or `stages.py`; any seam problem is raised against FTHR-028.
 - [ ] AC-8: Molt evidence states that a green suite proves the endpointing **policy**, not that the
       timing values are well-tuned for real speech (which is FTHR-033 manual smoke / Pi tuning).
-- [ ] AC-9: Only `hearth/audio/endpoint.py` and `tests/test_audio_endpoint.py` are added/changed
-      (plus at most a single noted `pyproject.toml` dependency line), keeping wave 2 disjoint from
-      FTHR-029/031/032; the `vad` extra's `setuptools<81` pin is undisturbed.
+- [ ] AC-9: Only `hearth/audio/endpoint.py`, `tests/test_audio_endpoint.py`, and the minimal
+      `EndpointConfig` addition in `hearth/audio/config.py` are added/changed (plus at most a single
+      noted `pyproject.toml` dependency line), keeping wave 2 disjoint from FTHR-029/031/032; the
+      `vad` extra's `setuptools<81` pin is undisturbed.
 - [ ] AC-10: `ruff check .` is clean and the full existing test suite passes.
