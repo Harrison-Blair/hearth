@@ -129,34 +129,34 @@ What *can* be mechanically verified, and must be:
 
 ## Acceptance Criteria
 
-- [ ] AC-1: Documentation describes the engine, the `chat` veneer, how each is run
+- [x] AC-1: Documentation describes the engine, the `chat` veneer, how each is run
       (`hearth run`, `hearth-chat`) and configured (`config/engine.yaml`, `config/chat.yaml` via
       the shared facility), and the settled vocabulary where "veneer" means only a user-facing
       program; no documentation describes the superseded single-surface arrangement (satisfies
       PLM-007 FC-15, AC-14).
-- [ ] AC-2: A `grep -rniI veneer` over all documentation is recorded as molt evidence, with every
+- [x] AC-2: A `grep -rniI veneer` over all documentation is recorded as molt evidence, with every
       remaining hit deliberate and correct under the settled vocabulary. No hit describes the
       engine's channel as a veneer.
-- [ ] AC-3: **Every command in `MANUAL_SMOKE.md` was executed as written and works** — in
+- [x] AC-3: **Every command in `MANUAL_SMOKE.md` was executed as written and works** — in
       particular the step that starts the chat veneer, which named a module FTHR-024 deleted. The
       commands run and their output are recorded as molt evidence. A procedure that has not been
       followed is not known to be correct, and this document exists to be followed verbatim.
-- [ ] AC-4: `CLAUDE.md`'s secrets rule survives intact — `.env` only, never the YAML (FTHR-015) —
+- [x] AC-4: `CLAUDE.md`'s secrets rule survives intact — `.env` only, never the YAML (FTHR-015) —
       with only the config filename it references updated. The rule is not weakened, softened, or
       dropped in the rewrite.
-- [ ] AC-5: `CLAUDE.md`'s config-section list matches `Settings` as it actually is after
+- [x] AC-5: `CLAUDE.md`'s config-section list matches `Settings` as it actually is after
       FTHR-024; it no longer names a `veneer` section.
-- [ ] AC-6: The architecture description states that veneers are separate processes reaching the
+- [x] AC-6: The architecture description states that veneers are separate processes reaching the
       engine only over the wire, that multiple may run concurrently with isolated conversations,
       and that turns are logged with their originating surface.
-- [ ] AC-7: `CLAUDE.md:81` and `:88` name the persona as **Vesta**, matching PLM-005 (fledged)
+- [x] AC-7: `CLAUDE.md:81` and `:88` name the persona as **Vesta**, matching PLM-005 (fledged)
       and `tests/test_config.py:149`. This is a narrow, named exception, taken because the lines
       are orphaned — no plumage owns them — and it extends no further than those two lines.
-- [ ] AC-8: The known-false **wake-word** lines listed in Approach (`CLAUDE.md:8-9`, `:18`,
+- [x] AC-8: The known-false **wake-word** lines listed in Approach (`CLAUDE.md:8-9`, `:18`,
       `:124`, `README.md:22-24`) are **untouched** and remain owned by PLM-008 FC-14/AC-14;
       nothing in this feather's diff addresses them. (They are left precisely because something
       specific *will* correct them — the asymmetry with AC-7 is deliberate, not an inconsistency
       to tidy.)
-- [ ] AC-9: Nothing under `.fledge/` was modified — fledged specs and molt evidence are
+- [x] AC-9: Nothing under `.fledge/` was modified — fledged specs and molt evidence are
       historical records.
-- [ ] AC-10: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-10: `ruff check .` is clean and the full existing test suite passes.

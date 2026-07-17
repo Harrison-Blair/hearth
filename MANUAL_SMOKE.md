@@ -1,7 +1,7 @@
-# Manual smoke procedure: hearth spine (veneer + loop + router + tools)
+# Manual smoke procedure: hearth spine (gateway + loop + router + tools)
 
 This is a **manual** check, not a gating automated test (the automated,
-hermetic proof lives in `tests/test_e2e_veneer.py`). It exists because this
+hermetic proof lives in `tests/test_e2e_gateway.py`). It exists because this
 Phase 0 development environment has no access to a live Ollama server, a live
 OpenRouter API key, or the live Wikipedia API — someone with those available
 needs to run this by hand before trusting the spine against real services.
@@ -23,7 +23,7 @@ source .venv/bin/activate
    (If Ollama is already running as a system/user service, the `curl` check
    skips the manual `serve` — running a second instance fails with
    `bind: address already in use`.)
-2. Edit `config.yaml` so the tool tier can't reach out anywhere: set
+2. Edit `config/engine.yaml` so the tool tier can't reach out anywhere: set
    `llm.tiers.tool: local` (or `llm.backends.remote.enabled: false` — either
    forces the tool-use turn to resolve to the local backend).
 3. Start the daemon in one terminal:
@@ -48,9 +48,9 @@ source .venv/bin/activate
    ```
    HEARTH_LLM__OPENROUTER_API_KEY=sk-...
    ```
-2. Set `config.yaml` so the tool tier routes to the remote backend:
+2. Set `config/engine.yaml` so the tool tier routes to the remote backend:
    `llm.tiers.tool: remote` and `llm.backends.remote.enabled: true` (the
-   checked-in `config.yaml` already defaults to this).
+   checked-in `config/engine.yaml` already defaults to this).
 3. Restart the daemon (`hearth run`) so it picks up the new `.env`/config.
 4. Repeat step 6 above (a Wikipedia-triggering question) through
    `hearth-chat`. Expect the same shape of response:

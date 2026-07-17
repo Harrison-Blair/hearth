@@ -12,7 +12,7 @@ progress, not wired into the runtime yet.
 
 | Working today | Roadmap (not yet in the runtime) |
 | --- | --- |
-| `hearth` daemon + WebSocket "veneer" control surface | Audio capture → wake word → STT → TTS voice pipeline |
+| `hearth` engine (WebSocket **gateway**) + `hearth-chat` **veneer** | Audio capture → wake word → STT → TTS voice pipeline |
 | Two-tier LLM: local persona (Vesta) + remote "brain" | Raspberry Pi 5 target (config-driven device/model/threshold) |
 | Wikipedia tool via a nested ReAct loop | Scheduling, calendar, weather, web search extras |
 | sqlite event log + per-session transcripts | Wake-word detector consuming `models/wake/vesta.onnx` / `models/wake/prometheus.onnx` |
@@ -39,13 +39,16 @@ Which model serves which role is entirely config-driven (`llm.tiers`), so you ca
 run fully local, fully remote, or split. Turns and routing decisions are recorded
 to a sqlite event log, with optional per-session transcripts.
 
-You interact with the daemon through the **veneer** — an asyncio WebSocket control
-surface bound to localhost — using the bundled client.
+You talk to the engine through a **veneer** — a separate client program that reaches
+the engine only over the wire. The engine exposes an asyncio WebSocket **gateway**
+bound to localhost; the bundled `hearth-chat` veneer connects to it. Multiple veneers
+can run at once, each with its own isolated conversation, and every turn is logged
+with the surface it came from.
 
 ```
-client ⇄ veneer → persona (local LLM) ──consult_brain──▶ brain (remote LLM) → wikipedia
-                     │                                                            │
-                     └────────────── answer in Vesta's voice ◀────────────────┘
+hearth-chat (veneer) ⇄ gateway → persona (local LLM) ──consult_brain──▶ brain (remote LLM) → wikipedia
+                          │                                                                     │
+                          └──────────────────── answer in Vesta's voice ◀────────────────────┘
 ```
 
 ## Quickstart
@@ -62,7 +65,7 @@ ollama pull qwen3:14b
 # 3. Remote tier (optional): add an OpenRouter key for consult_brain
 cp .env.example .env
 #   then edit .env and set HEARTH_LLM__OPENROUTER_API_KEY=sk-...
-#   OR skip the key entirely and set  llm.tiers.tool: local  in config.yaml
+#   OR skip the key entirely and set  llm.tiers.tool: local  in config/engine.yaml
 
 # 4. Run the daemon, then talk to it from a second terminal
 hearth run                          # terminal 1
@@ -121,15 +124,19 @@ touching deps.
 
 ## Configuration
 
-Two files, both loaded via `pydantic-settings`:
+Config lives under `config/`, split per component and loaded via `pydantic-settings`
+through one shared facility (`hearth/config.py::resolve_config_path`):
 
-- **`config.yaml`** — the active config the daemon loads.
-- **`default-config.yaml`** — a reference copy with the same schema and a comment on
-  every field. Read it to learn what a knob does.
+- **`config/engine.yaml`** — the active config the `hearth run` engine loads.
+- **`config/chat.yaml`** — the active config for the `hearth-chat` veneer (just the
+  engine `host`/`port` it connects to).
+- **`config/defaults/engine.yaml`** and **`config/defaults/chat.yaml`** — reference
+  copies with the same schema and a comment on every field. Copy a defaults file to
+  its active path to create the config, and read it to learn what a knob does.
 
 **Secrets rule:** API keys live in **`.env` only** (never in the YAML). Copy
 `.env.example` → `.env` and fill in the keys you use. Non-secret tunables (models,
-hosts, thresholds) stay in `config.yaml`.
+hosts, thresholds) stay in `config/engine.yaml`.
 
 **Env overrides** use the `HEARTH_` prefix with `__` between nested keys:
 
@@ -138,12 +145,12 @@ HEARTH_LLM__OPENROUTER_API_KEY=sk-...   # the API key (in .env)
 HEARTH_LOGGING__LEVEL=DEBUG             # any config field
 ```
 
-Config sections (as in the active `config.yaml`):
+Engine config sections (as in the active `config/engine.yaml`):
 
 | Section | What it controls |
 | --- | --- |
 | `llm` | Named backends (`local`, `remote`), `tiers` (which backend serves `default` vs `tool`), `timeout`, `max_retries` |
-| `veneer` | `host` / `port` of the localhost control surface (default `127.0.0.1:8765`) |
+| `gateway` | `host` / `port` of the engine's localhost WebSocket control surface (default `127.0.0.1:8765`) |
 | `tool` | Wikipedia lookup — language, endpoint, result count, char cap, timeout |
 | `agent` | Orchestrator limits — `max_tool_rounds`, `turn_timeout_s`, `tool_mode`, consult rounds/timeout |
 | `persona` | Vesta's `system_prompt` and the `brain_guard_prompt` for consult requests |
@@ -160,11 +167,11 @@ lookups locally or via OpenRouter) and **`llm.backends.*.model`** (swap models).
 pip install -e '.[dev]'
 
 pytest                              # asyncio_mode=auto — async tests need no decorator
-pytest tests/test_e2e_veneer.py     # hermetic end-to-end proof of the spine
+pytest tests/test_e2e_gateway.py    # hermetic end-to-end proof of the spine
 ruff check .                        # line-length 100
 ```
 
-`tests/test_e2e_veneer.py` is the hermetic e2e; `MANUAL_SMOKE.md` is the manual
+`tests/test_e2e_gateway.py` is the hermetic e2e; `MANUAL_SMOKE.md` is the manual
 check against real Ollama/OpenRouter/Wikipedia.
 
 **Build / release** — `make release` runs `packaging/build.sh` to produce a
@@ -180,7 +187,7 @@ criteria). The wake-word training pipeline is entirely separate — see
 
 **Why do I need both Ollama and an OpenRouter key?**
 Two tiers: Ollama runs Vesta locally; OpenRouter serves the `consult_brain`
-lookups. To run fully local (no key), set `llm.tiers.tool: local` in `config.yaml`.
+lookups. To run fully local (no key), set `llm.tiers.tool: local` in `config/engine.yaml`.
 
 **Is this a voice assistant?**
 Not yet. Today it's a text spine you type at. Wake word (**Vesta** / **Prometheus**),
