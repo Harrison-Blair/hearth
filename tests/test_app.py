@@ -41,7 +41,7 @@ async def test_run_daemon_wires_wikipedia_tool_brain_side(monkeypatch, tmp_path)
     (FTHR-009; wikipedia moved off the top-level orchestrator)."""
     captured = {}
 
-    class _FakeVeneer:
+    class _FakeGateway:
         def __init__(self, loop, log, config) -> None:
             captured["loop"] = loop
 
@@ -49,7 +49,7 @@ async def test_run_daemon_wires_wikipedia_tool_brain_side(monkeypatch, tmp_path)
             return None
 
     monkeypatch.chdir(tmp_path)  # keep the sqlite db out of the worktree
-    monkeypatch.setattr("hearth.veneer.server.Veneer", _FakeVeneer)
+    monkeypatch.setattr("hearth.gateway.server.Gateway", _FakeGateway)
 
     exit_code = await _run_daemon()
 
@@ -59,12 +59,12 @@ async def test_run_daemon_wires_wikipedia_tool_brain_side(monkeypatch, tmp_path)
 
 
 async def test_run_daemon_logs_server_lifecycle_lines(monkeypatch, tmp_path, caplog):
-    """_run_daemon must emit "daemon starting" and "veneer serving" INFO
+    """_run_daemon must emit "daemon starting" and "gateway serving" INFO
     lines tagged extra={"category": "server"} so FTHR-016's console
     formatter can color the daemon's lifecycle distinctly -- today app.py
     has no logger at all, so no such records exist."""
 
-    class _FakeVeneer:
+    class _FakeGateway:
         def __init__(self, loop, log, config) -> None:
             pass
 
@@ -72,7 +72,7 @@ async def test_run_daemon_logs_server_lifecycle_lines(monkeypatch, tmp_path, cap
             return None
 
     monkeypatch.chdir(tmp_path)  # keep the sqlite db out of the worktree
-    monkeypatch.setattr("hearth.veneer.server.Veneer", _FakeVeneer)
+    monkeypatch.setattr("hearth.gateway.server.Gateway", _FakeGateway)
 
     with caplog.at_level(logging.INFO):
         exit_code = await _run_daemon()

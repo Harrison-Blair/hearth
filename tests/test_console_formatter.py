@@ -108,7 +108,7 @@ def test_unknown_category_falls_back_to_level_only():
 
 def test_connection_category_gets_registered_coloring(monkeypatch):
     """FTHR-018: the "connection" category (registered by
-    `hearth/veneer/server.py`'s connect/disconnect/malformed-frame log
+    `hearth/gateway/server.py`'s connect/disconnect/malformed-frame log
     calls) renders distinctly from an uncategorized line and never reuses
     the reserved ERROR/CRITICAL color."""
     from hearth.logging_setup import _CATEGORY_COLORS, ColorFormatter

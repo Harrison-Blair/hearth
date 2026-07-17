@@ -1,4 +1,4 @@
-"""Veneer wire protocol: inbound `Request`, outbound message builders.
+"""Gateway wire protocol: inbound `Request`, outbound message builders.
 
 `serialize` is a structural whitelist: it copies only `phase`/`label` off a
 `ToolActivity`, so tool query/arguments/observation/result content cannot

@@ -1,7 +1,7 @@
-"""Intermediate event types for the loop -> veneer emit path.
+"""Intermediate event types for the loop -> gateway emit path.
 
 Defined here so the boundary is frozen even though nothing emits through it
-until FTHR-006 (tool rounds); FTHR-003's veneer supplies a sink that
+until FTHR-006 (tool rounds); FTHR-003's gateway supplies a sink that
 serializes it to the wire.
 """
 from __future__ import annotations

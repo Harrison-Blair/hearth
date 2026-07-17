@@ -1,10 +1,10 @@
-"""Assembled end-to-end integration test: real Veneer + Loop + Router +
+"""Assembled end-to-end integration test: real Gateway + Loop + Router +
 BrainConsult + ToolRegistry + EventLog, driven over a real WebSocket
 connection.
 
 Hermetic: the only stubbed boundaries are the LLM backends' HTTP calls and
 the Wikipedia REST call, both via `httpx.MockTransport` (same pattern as the
-unit tests). Everything else -- `Veneer.serve`, the `websockets` client
+unit tests). Everything else -- `Gateway.serve`, the `websockets` client
 connection, `Loop.run_turn`, `Router.select`, `BrainConsult.__call__`,
 `ToolRegistry.dispatch`, `EventLog` -- is the real production class. This is
 what proves the pieces already unit-tested in isolation (FTHR-001..009)
@@ -36,7 +36,7 @@ from hearth.memory.log import EventLog
 from hearth.tools.consult import BrainConsult
 from hearth.tools.registry import ToolRegistry
 from hearth.veneer.client import send_turn
-from hearth.veneer.server import Veneer
+from hearth.gateway.server import Gateway
 
 WIKI_BODY = {
     "pages": [
@@ -170,9 +170,9 @@ def _wiki_client() -> httpx.AsyncClient:
 
 
 async def _assemble(llm_config: LLMConfig, tmp_path, llm_handler):
-    """Build the real Veneer/Loop/Router/BrainConsult/ToolRegistry/EventLog
-    stack, start `Veneer.serve` in the background, and return
-    (veneer_task, port, log, llm_clients, wiki_client) for the test to drive
+    """Build the real Gateway/Loop/Router/BrainConsult/ToolRegistry/EventLog
+    stack, start `Gateway.serve` in the background, and return
+    (gateway_task, port, log, llm_clients, wiki_client) for the test to drive
     and tear down."""
     # Mirrors `hearth.app`'s daemon wiring: one client per backend, each
     # bound to that backend's own base_url.
@@ -192,9 +192,9 @@ async def _assemble(llm_config: LLMConfig, tmp_path, llm_handler):
     config = _Config(llm_config, _tool_config())
     consult = BrainConsult(router, wiki_registry, log, config)
     loop = Loop(router, log, config, consult=consult)
-    veneer = Veneer(loop, log, config=None)
+    gateway = Gateway(loop, log, config=None)
 
-    server = await websockets.serve(veneer._handle_connection, "127.0.0.1", 0)
+    server = await websockets.serve(gateway._handle_connection, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     return server, port, log, llm_clients, wiki_client
 
@@ -437,7 +437,7 @@ async def test_e2e_remote_disabled_stays_local_chat_only(tmp_path):
 
 
 class _SlowFakeLoop:
-    """A minimal `Loop` double (same shape as test_veneer.py's `_FakeLoop`)
+    """A minimal `Loop` double (same shape as test_gateway.py's `_FakeLoop`)
     that delays before returning, giving a client time to disconnect mid-turn
     so the server's reply `send()` hits a closed socket."""
 
@@ -456,9 +456,9 @@ async def test_serve_continues_after_one_connection_disconnects(tmp_path):
     than taking the server down -- a later connection still completes a
     normal turn against the same running server."""
     log = EventLog(str(tmp_path / "events.db"))
-    veneer = Veneer(_SlowFakeLoop(log), log, config=None)
+    gateway = Gateway(_SlowFakeLoop(log), log, config=None)
 
-    server = await websockets.serve(veneer._handle_connection, "127.0.0.1", 0)
+    server = await websockets.serve(gateway._handle_connection, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
 
     try:

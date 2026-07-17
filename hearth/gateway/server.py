@@ -1,4 +1,4 @@
-"""Veneer: localhost WebSocket server driving `Loop.run_turn` per inbound turn.
+"""Gateway: localhost WebSocket server driving `Loop.run_turn` per inbound turn.
 
 A generic forwarder of the typed `hearth.events` union -- it never sees tool
 query/arguments/observation/result content (see `protocol.serialize`).
@@ -13,7 +13,7 @@ import uuid
 import websockets
 
 from hearth.brain.errors import BrainError
-from hearth.veneer.protocol import (
+from hearth.gateway.protocol import (
     answer_message,
     curate_error,
     done_message,
@@ -25,7 +25,7 @@ from hearth.veneer.protocol import (
 logger = logging.getLogger(__name__)
 
 
-class Veneer:
+class Gateway:
     def __init__(self, loop, log, config) -> None:
         self._loop = loop
         self._log = log
@@ -34,7 +34,7 @@ class Veneer:
     async def serve(self, host: str | None = None, port: int | None = None) -> None:
         host = host if host is not None else self._config.veneer.host
         port = port if port is not None else self._config.veneer.port
-        # No proactive keepalive: the veneer is a long-lived localhost control
+        # No proactive keepalive: the gateway is a long-lived localhost control
         # channel that legitimately idles between turns, and the default 20s
         # ping timeout false-closes those idle connections. A genuinely dead
         # peer still surfaces when the next per-turn send() raises
