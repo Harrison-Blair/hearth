@@ -1,0 +1,23 @@
+# Active config for the audio surface (hearth-audio). See
+# config/defaults/audio.yaml for the annotated reference.
+engine:
+  host: 127.0.0.1
+  port: 8765
+
+input_device: null
+
+wake_models:
+  - path: models/wake/vesta.onnx
+    threshold: 0.5
+
+endpoint:
+  silence_ms: 800
+  max_utterance_ms: 12000
+
+stt:
+  model: base
+  language: en
+
+retry:
+  max_attempts: 30
+  base_delay_s: 1.0
