@@ -2,7 +2,7 @@
 id: FTHR-022
 title: Shared config facility and per-component config directory
 plumage: PLM-007
-status: pipping
+status: fledged
 priority: P0
 depends_on: []
 authored: 2026-07-17T08:03:06Z
