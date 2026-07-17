@@ -132,31 +132,31 @@ can: nothing about a passing run tells you which of the two you have.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The three tests below pass against unchanged production code.
-- [ ] AC-2: **Each test was verified by breaking the property it proves** — serialize `run_turn`
+- [x] AC-1: The three tests below pass against unchanged production code.
+- [x] AC-2: **Each test was verified by breaking the property it proves** — serialize `run_turn`
       under a global lock; force a shared `session_id`; stall the second connection — the test
       was observed **failing for the right reason** in each case, and the code was restored. The
       break, the observed failure, and the restore are recorded as molt evidence **per test**.
       This replaces the usual observe-failing-first step, which is impossible for tests of
       existing behavior, and is the user's standing rule for this case. **Without this evidence
       the feather is not done**, regardless of a green suite.
-- [ ] AC-3: A test demonstrates two veneers connected **simultaneously** — both connections open
+- [x] AC-3: A test demonstrates two veneers connected **simultaneously** — both connections open
       at once, neither closed before the other opens — each served (satisfies PLM-007 FC-5,
       AC-5). Sequential connect/turn/close pairs do not satisfy this criterion.
-- [ ] AC-4: A test demonstrates a turn on one concurrently-connected veneer not appearing in
+- [x] AC-4: A test demonstrates a turn on one concurrently-connected veneer not appearing in
       another's conversation, asserted on **the messages the backend receives** rather than on
       session identifiers alone (satisfies PLM-007 FC-6, AC-6).
-- [ ] AC-5: A test demonstrates concurrent turns from two surfaces each being served with no
+- [x] AC-5: A test demonstrates concurrent turns from two surfaces each being served with no
       engine-side serialization, structured so that a serializing engine **deadlocks and times
       out** rather than passing — turn A gated on turn B's completion, with a bounded timeout
       (satisfies PLM-007 FC-7, AC-7).
-- [ ] AC-6: The proof uses a test-local fake veneer; no production code is added, changed, or
+- [x] AC-6: The proof uses a test-local fake veneer; no production code is added, changed, or
       shipped for it — in particular no second real surface and no production concurrency
       machinery.
-- [ ] AC-7: `tests/test_gateway_concurrency.py` is the only file added or changed.
+- [x] AC-7: `tests/test_gateway_concurrency.py` is the only file added or changed.
       `tests/conftest.py`, `hearth/loop.py`, `hearth/gateway/**`, and `hearth/veneers/**` are
       untouched, leaving FTHR-025 free to run concurrently.
-- [ ] AC-8: If any property failed, it was raised as a finding rather than fixed here or worked
+- [x] AC-8: If any property failed, it was raised as a finding rather than fixed here or worked
       around by adjusting the test. (A failure means the single-surface arrangement was hiding a
       real defect that the audio plumages would inherit.)
-- [ ] AC-9: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-9: `ruff check .` is clean and the full existing test suite passes.
