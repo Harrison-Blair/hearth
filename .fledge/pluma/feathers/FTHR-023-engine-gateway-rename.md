@@ -132,22 +132,22 @@ both require kept as-is. Any hit outside those five categories is this feather's
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: No engine-side component is named "veneer": `hearth/veneer/{server,protocol}.py` are
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: No engine-side component is named "veneer": `hearth/veneer/{server,protocol}.py` are
       gone, `hearth/gateway/{server,protocol}.py` provide them, and the class is `Gateway`; a
       test asserts this (satisfies PLM-007 FC-2).
-- [ ] AC-3: Both modules and all three renamed test modules were moved with `git mv`, so history
+- [x] AC-3: Both modules and all three renamed test modules were moved with `git mv`, so history
       follows the files.
-- [ ] AC-4: Behavior is unchanged: the full existing test suite passes with no test's *intent*
+- [x] AC-4: Behavior is unchanged: the full existing test suite passes with no test's *intent*
       altered — only names, imports, and the one log string moved. No change to the wire format,
       the safety whitelist in `protocol.serialize`, session handling, or `ping_interval=None`.
-- [ ] AC-5: A `grep -rniI veneer` over the repo is recorded as molt evidence, with every
+- [x] AC-5: A `grep -rniI veneer` over the repo is recorded as molt evidence, with every
       remaining hit accounted for as belonging to `client.py`, the `veneer:` config section,
       `pyproject.toml:14`, user-facing docs — each owned by a named later feather — or the
       preserved malformed-frame provenance literal (kept per AC-4 / FTHR-025). No unaccounted
       hit remains.
-- [ ] AC-6: `hearth/logging_setup.py:52` and `tests/test_console_formatter.py:111` no longer
+- [x] AC-6: `hearth/logging_setup.py:52` and `tests/test_console_formatter.py:111` no longer
       name a path that does not exist.
-- [ ] AC-7: `hearth/config.py`, `config/**`, `packaging/build.sh`, and `tests/test_config.py`
+- [x] AC-7: `hearth/config.py`, `config/**`, `packaging/build.sh`, and `tests/test_config.py`
       are untouched by this feather, leaving FTHR-022 free to run concurrently.
-- [ ] AC-8: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-8: `ruff check .` is clean and the full existing test suite passes.

@@ -11,7 +11,8 @@ import asyncio
 import threading
 import time
 
-from hearth.veneer import client, server
+from hearth.gateway import server
+from hearth.veneer import client
 
 
 async def test_read_line_does_not_block_event_loop(monkeypatch):
@@ -47,7 +48,7 @@ async def test_read_line_does_not_block_event_loop(monkeypatch):
 
 
 async def test_serve_disables_keepalive(monkeypatch):
-    """`Veneer.serve` must pass ping_interval=None so an idle localhost
+    """`Gateway.serve` must pass ping_interval=None so an idle localhost
     control connection isn't false-closed by the library's default 20s ping
     timeout."""
     captured = {}
@@ -65,8 +66,8 @@ async def test_serve_disables_keepalive(monkeypatch):
 
     monkeypatch.setattr(server.websockets, "serve", fake_serve)
 
-    veneer = server.Veneer(loop=None, log=None, config=None)
-    serve_task = asyncio.create_task(veneer.serve(host="127.0.0.1", port=0))
+    gateway = server.Gateway(loop=None, log=None, config=None)
+    serve_task = asyncio.create_task(gateway.serve(host="127.0.0.1", port=0))
     # Let serve() reach the `await asyncio.Future()` after opening the server.
     await asyncio.sleep(0.05)
     serve_task.cancel()

@@ -1,9 +1,9 @@
-"""Veneer error-surfacing and WebSocket-robustness contract.
+"""Gateway error-surfacing and WebSocket-robustness contract.
 
 Covers `curate_error` (protocol-level policy: what reaches the client for a
-`BrainError` vs. any other exception) and `Veneer._handle_connection`'s
+`BrainError` vs. any other exception) and `Gateway._handle_connection`'s
 handling of both curated errors and a mid-turn `websockets.ConnectionClosed`.
-Uses the same in-memory fake `Loop`/websocket doubles as `test_veneer.py` --
+Uses the same in-memory fake `Loop`/websocket doubles as `test_gateway.py` --
 no real sockets for the unit-level cases.
 """
 from __future__ import annotations
@@ -14,12 +14,12 @@ import websockets
 
 from hearth.brain.errors import BrainError
 from hearth.memory.log import EventLog
-from hearth.veneer.protocol import curate_error
-from hearth.veneer.server import Veneer
+from hearth.gateway.protocol import curate_error
+from hearth.gateway.server import Gateway
 
 
 class _FakeLoop:
-    """Same shape as test_veneer.py's fake: scripted answer or raised error."""
+    """Same shape as test_gateway.py's fake: scripted answer or raised error."""
 
     def __init__(self, log, answer="hi there", raise_exc=None):
         self._log = log
@@ -82,12 +82,12 @@ async def test_brain_error_reaches_client_as_curated_reason(tmp_path):
     log = EventLog(str(tmp_path / "events.db"))
     exc = BrainError("backend unreachable", detail="leaked internal detail")
     loop = _FakeLoop(log, raise_exc=exc)
-    veneer = Veneer(loop, log, config=None)
+    gateway = Gateway(loop, log, config=None)
 
     raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
     ws = _FakeWebSocket([raw])
 
-    await veneer._handle_connection(ws)
+    await gateway._handle_connection(ws)
 
     assert len(ws.sent) == 1
     message = json.loads(ws.sent[0])
@@ -107,12 +107,12 @@ async def test_generic_exception_reaches_client_as_generic_message(tmp_path):
     log = EventLog(str(tmp_path / "events.db"))
     exc = RuntimeError("boom: leaked internal detail")
     loop = _FakeLoop(log, raise_exc=exc)
-    veneer = Veneer(loop, log, config=None)
+    gateway = Gateway(loop, log, config=None)
 
     raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
     ws = _FakeWebSocket([raw])
 
-    await veneer._handle_connection(ws)
+    await gateway._handle_connection(ws)
 
     assert len(ws.sent) == 1
     message = json.loads(ws.sent[0])
@@ -134,13 +134,13 @@ async def test_connection_closed_mid_turn_handled_cleanly(caplog):
             pass
 
     loop = _FakeLoop(_EventLogStub())
-    veneer = Veneer(loop, _EventLogStub(), config=None)
+    gateway = Gateway(loop, _EventLogStub(), config=None)
 
     raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
     ws = _FakeWebSocket([raw], close_on_send=True)
 
     with caplog.at_level(logging.INFO):
-        await veneer._handle_connection(ws)  # must not raise
+        await gateway._handle_connection(ws)  # must not raise
 
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
     assert any("ConnectionClosed" in record.message or "disconnect" in record.message.lower()
@@ -161,13 +161,13 @@ async def test_connection_accepted_is_logged(caplog):
             logging.getLogger("test.turn").info("turn started")
             return "ok"
 
-    veneer = Veneer(_OrderCheckingLoop(), _EventLogStub(), config=None)
+    gateway = Gateway(_OrderCheckingLoop(), _EventLogStub(), config=None)
 
     raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
     ws = _FakeWebSocket([raw])
 
     with caplog.at_level(logging.INFO):
-        await veneer._handle_connection(ws)
+        await gateway._handle_connection(ws)
 
     messages = [record.getMessage() for record in caplog.records]
     connect_idx = next((i for i, m in enumerate(messages) if "connected" in m.lower()), None)
@@ -191,13 +191,13 @@ async def test_disconnect_and_malformed_frame_carry_category_tag(caplog):
             pass
 
     loop = _FakeLoop(_EventLogStub())
-    veneer = Veneer(loop, _EventLogStub(), config=None)
+    gateway = Gateway(loop, _EventLogStub(), config=None)
 
     raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
     ws = _FakeWebSocket([raw], close_on_send=True)
 
     with caplog.at_level(logging.INFO):
-        await veneer._handle_connection(ws)
+        await gateway._handle_connection(ws)
 
     disconnect_records = [r for r in caplog.records if "disconnect" in r.getMessage().lower()]
     assert disconnect_records
@@ -207,7 +207,7 @@ async def test_disconnect_and_malformed_frame_carry_category_tag(caplog):
     ws2 = _FakeWebSocket(["{not json"])
 
     with caplog.at_level(logging.WARNING):
-        await veneer._handle_connection(ws2)
+        await gateway._handle_connection(ws2)
 
     malformed_records = [r for r in caplog.records if "malformed" in r.getMessage().lower()]
     assert malformed_records

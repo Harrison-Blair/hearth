@@ -1,6 +1,6 @@
-"""Veneer WebSocket contract: server drives Loop.run_turn over the wire.
+"""Gateway WebSocket contract: server drives Loop.run_turn over the wire.
 
-Uses an in-process `Veneer` (loopback on 127.0.0.1, ephemeral port) with a
+Uses an in-process `Gateway` (loopback on 127.0.0.1, ephemeral port) with a
 fake `Loop` so these tests don't depend on FTHR-002's real backend wiring.
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ import websockets
 from hearth.events import ToolActivity
 from hearth.memory.log import EventLog
 from hearth.veneer.client import send_turn
-from hearth.veneer.server import Veneer
+from hearth.gateway.server import Gateway
 
 
 class _FakeLoop:
@@ -33,10 +33,10 @@ class _FakeLoop:
         return self._answer
 
 
-async def _serve(veneer):
-    """Start a loopback server for `veneer` on an ephemeral port; return the
+async def _serve(gateway):
+    """Start a loopback server for `gateway` on an ephemeral port; return the
     running `websockets` server (async context manager) and its port."""
-    server = await websockets.serve(veneer._handle_connection, "127.0.0.1", 0)
+    server = await websockets.serve(gateway._handle_connection, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     return server, port
 
@@ -46,11 +46,11 @@ def _event_types(log):
     return [row[0] for row in rows]
 
 
-async def test_veneer_roundtrip(tmp_path):
+async def test_gateway_roundtrip(tmp_path):
     log = EventLog(str(tmp_path / "events.db"))
     loop = _FakeLoop(log, answer="answer text")
-    veneer = Veneer(loop, log, config=None)
-    server, port = await _serve(veneer)
+    gateway = Gateway(loop, log, config=None)
+    server, port = await _serve(gateway)
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
@@ -67,6 +67,28 @@ async def test_veneer_roundtrip(tmp_path):
     assert _event_types(log) == ["user_input", "final_answer"]
 
 
+def test_no_engine_side_component_named_veneer():
+    """AC-2: no engine-side component is named "veneer". The server and
+    protocol modules moved to `hearth.gateway`, so `hearth/veneer/server.py`
+    and `hearth/veneer/protocol.py` no longer exist and the class is
+    `Gateway`. Scoped so it does not trip on `hearth/veneer/client.py`, which
+    legitimately remains until FTHR-024."""
+    import importlib
+    from pathlib import Path
+
+    import hearth
+
+    pkg_root = Path(hearth.__file__).parent
+    assert not (pkg_root / "veneer" / "server.py").exists()
+    assert not (pkg_root / "veneer" / "protocol.py").exists()
+
+    gateway_server = importlib.import_module("hearth.gateway.server")
+    gateway_protocol = importlib.import_module("hearth.gateway.protocol")
+    assert hasattr(gateway_server, "Gateway")
+    assert not hasattr(gateway_server, "Veneer")
+    assert hasattr(gateway_protocol, "serialize")
+
+
 async def test_no_tool_internals_cross_boundary(tmp_path):
     log = EventLog(str(tmp_path / "events.db"))
     loop = _FakeLoop(
@@ -74,8 +96,8 @@ async def test_no_tool_internals_cross_boundary(tmp_path):
         answer="done answer",
         activities=[("start", "searching"), ("end", "searching")],
     )
-    veneer = Veneer(loop, log, config=None)
-    server, port = await _serve(veneer)
+    gateway = Gateway(loop, log, config=None)
+    server, port = await _serve(gateway)
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
@@ -101,8 +123,8 @@ async def test_no_tool_internals_cross_boundary(tmp_path):
 async def test_loop_error_maps_to_error_message(tmp_path):
     log = EventLog(str(tmp_path / "events.db"))
     loop = _FakeLoop(log, raise_exc=RuntimeError("boom: leaked internal detail"))
-    veneer = Veneer(loop, log, config=None)
-    server, port = await _serve(veneer)
+    gateway = Gateway(loop, log, config=None)
+    server, port = await _serve(gateway)
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
@@ -127,8 +149,8 @@ async def test_malformed_frame_rejected_connection_survives(tmp_path):
 
     log = EventLog(str(tmp_path / "events.db"))
     loop = _FakeLoop(log, answer="still alive")
-    veneer = Veneer(loop, log, config=None)
-    server, port = await _serve(veneer)
+    gateway = Gateway(loop, log, config=None)
+    server, port = await _serve(gateway)
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:

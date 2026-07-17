@@ -49,7 +49,7 @@ _LEVEL_COLORS = {
 _CATEGORY_COLORS: dict[str, Callable[[str], str]] = {}
 
 # FTHR-018: connection-lifecycle lines (connect/disconnect/malformed-frame,
-# `hearth/veneer/server.py`) -- cyan, distinct from the reserved error color.
+# `hearth/gateway/server.py`) -- cyan, distinct from the reserved error color.
 _CATEGORY_COLORS["connection"] = lambda message: f"\x1b[36m{message}\x1b[0m"
 
 # FTHR-019: daemon lifecycle lines (app.py::_run_daemon) -- magenta, distinct

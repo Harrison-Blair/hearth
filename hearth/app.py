@@ -36,7 +36,7 @@ async def _run_daemon() -> int:
     from hearth.tools.consult import BrainConsult
     from hearth.tools.registry import ToolRegistry
     from hearth.transcript import Transcript
-    from hearth.veneer.server import Veneer
+    from hearth.gateway.server import Gateway
 
     # Load .env into os.environ so backends' resolve_api_key() (a plain
     # os.environ lookup by api_key_env name) can see the secrets. Per FTHR-015,
@@ -68,14 +68,14 @@ async def _run_daemon() -> int:
         wiki_registry = ToolRegistry(tool_config=settings.tool, client=tool_client)
         consult = BrainConsult(router, wiki_registry, log, settings, transcript=transcript)
         loop = Loop(router, log, settings, consult=consult, transcript=transcript)
-        veneer = Veneer(loop, log, settings)
+        gateway = Gateway(loop, log, settings)
         logger.info(
-            "veneer serving host=%s port=%s",
+            "gateway serving host=%s port=%s",
             settings.veneer.host,
             settings.veneer.port,
             extra={"category": "server"},
         )
-        await veneer.serve(settings.veneer.host, settings.veneer.port)
+        await gateway.serve(settings.veneer.host, settings.veneer.port)
     finally:
         for client in clients.values():
             await client.aclose()
