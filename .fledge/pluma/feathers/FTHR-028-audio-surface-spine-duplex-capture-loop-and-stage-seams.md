@@ -155,33 +155,33 @@ Say so in the molt evidence rather than letting a green spine read as "duplex wo
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: `hearth-audio` runs as its own veneer process, reaching the engine only over the wire
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: `hearth-audio` runs as its own veneer process, reaching the engine only over the wire
       via PLM-007's client contract, declaring surface `"audio"`; it holds no in-process reference
       to engine internals (satisfies PLM-008 FC-1).
-- [ ] AC-3: Wake, endpointing, and transcription are consumed through **injected interfaces**
+- [x] AC-3: Wake, endpointing, and transcription are consumed through **injected interfaces**
       defined in this feather; the spine runs against doubles with no real stage present, so
       FTHR-029/030/031 implement the seams without modifying the spine (satisfies FC-1's
       contract-first intent).
-- [ ] AC-4: **Capture is continuous and independent of turn state.** A test proves frames are
+- [x] AC-4: **Capture is continuous and independent of turn state.** A test proves frames are
       still consumed and a second wake still detected while a turn submission is outstanding, and
       it is structured so a sequential (submit-inside-capture) implementation **times out rather
       than passing** (satisfies PLM-008 FC-15, AC-16). This is the criterion the plumage turns on;
       if a sequential spine can pass it, the test is wrong.
-- [ ] AC-5: The input device is acquired **non-exclusively**; a test asserts the acquisition mode,
+- [x] AC-5: The input device is acquired **non-exclusively**; a test asserts the acquisition mode,
       and the code names it explicitly for a reviewer (satisfies PLM-008 FC-15, AC-17).
-- [ ] AC-6: The surface **retries with backoff** when the engine is unreachable rather than
+- [x] AC-6: The surface **retries with backoff** when the engine is unreachable rather than
       exiting, and proceeds once it is reachable; a test covers both (satisfies PLM-008 FC-10).
-- [ ] AC-7: The audio surface loads only `config/audio.yaml` via PLM-007's shared facility, with
+- [x] AC-7: The audio surface loads only `config/audio.yaml` via PLM-007's shared facility, with
       the engine's config absent; a test asserts independent load (satisfies PLM-008 FC-12).
-- [ ] AC-8: The audio config defines the **wake-model list schema** as ordered `{path, threshold}`
+- [x] AC-8: The audio config defines the **wake-model list schema** as ordered `{path, threshold}`
       entries with per-model thresholds and **no global threshold**; the schema is defined **only
       here**, annotated as shared surface for FTHR-029 (reader) and FTHR-032 (writer) (satisfies
       PLM-008 FC-3; enables FC-2/FC-4 without collision).
-- [ ] AC-9: Heard transcript and engine answer are presented through PLM-007's shared safety
+- [x] AC-9: Heard transcript and engine answer are presented through PLM-007's shared safety
       policy; a test shows no tool internals or error detail reach the surface (satisfies PLM-008
       FC-8, FC-9). No speech is produced (that is PLM-009).
-- [ ] AC-10: This feather adds **no real wake/VAD/STT implementation** and **no** change to
+- [x] AC-10: This feather adds **no real wake/VAD/STT implementation** and **no** change to
       `training/manifest.py` or docs, leaving FTHR-029/030/031/032/034 their files (disjointness
       for wave 2).
-- [ ] AC-11: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-11: `ruff check .` is clean and the full existing test suite passes.
