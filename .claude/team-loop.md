@@ -49,7 +49,7 @@ You are the **sole writer** of the shared team task list. Create one team task p
 `/resume` and `/rewind` do not restore teammates — after a resume, no teammate from the transcript exists, regardless of what your notes say. `implementation.md` §6 is the recovery procedure; on Claude Code specifically:
 
 1. Treat all remembered teammates as gone; clear the roster.
-2. Inventory reality: `git worktree list`, feather branches, `fledge broods` (owner, branch, pid-alive), `fledge vee`. Resume set = held lock + surviving worktree.
+2. Inventory reality: `git worktree list`, feather branches, `fledge broods` (owner, branch), `fledge vee`. Resume set = held lock + surviving worktree.
 3. Respawn a fresh brooder+skua **pair** (a new species is fine — one species for both) into the **existing** worktree and branch; the brooder's spawn prompt must say partial work may exist, and the skua's must note an earlier skua may have already checked some AC boxes on the branch.
 4. Reconcile the team task list against spec frontmatter.
 

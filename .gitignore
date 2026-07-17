@@ -62,3 +62,5 @@ training/.venv-train/
 
 # fledge scaffold stamp — machine-local dev-link state (devSource path)
 .fledge/scaffold.json
+# fledge — per-run intermediates, regenerable
+.fledge/ledger/
