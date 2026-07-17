@@ -26,8 +26,8 @@ class _FakeLoop:
         self._answer = answer
         self._raise_exc = raise_exc
 
-    async def run_turn(self, session_id, turn_id, transcript, emit=None):
-        self._log.append(session_id, turn_id, "user_input", "user", {"text": transcript})
+    async def run_turn(self, session_id, turn_id, transcript, surface, emit=None):
+        self._log.append(session_id, turn_id, "user_input", surface, {"text": transcript})
         if self._raise_exc is not None:
             raise self._raise_exc
         self._log.append(session_id, turn_id, "final_answer", "brain", {"text": self._answer})
@@ -84,7 +84,7 @@ async def test_brain_error_reaches_client_as_curated_reason(tmp_path):
     loop = _FakeLoop(log, raise_exc=exc)
     gateway = Gateway(loop, log, config=None)
 
-    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
+    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi", "surface": "chat"})
     ws = _FakeWebSocket([raw])
 
     await gateway._handle_connection(ws)
@@ -109,7 +109,7 @@ async def test_generic_exception_reaches_client_as_generic_message(tmp_path):
     loop = _FakeLoop(log, raise_exc=exc)
     gateway = Gateway(loop, log, config=None)
 
-    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
+    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi", "surface": "chat"})
     ws = _FakeWebSocket([raw])
 
     await gateway._handle_connection(ws)
@@ -136,7 +136,7 @@ async def test_connection_closed_mid_turn_handled_cleanly(caplog):
     loop = _FakeLoop(_EventLogStub())
     gateway = Gateway(loop, _EventLogStub(), config=None)
 
-    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
+    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi", "surface": "chat"})
     ws = _FakeWebSocket([raw], close_on_send=True)
 
     with caplog.at_level(logging.INFO):
@@ -157,13 +157,13 @@ async def test_connection_accepted_is_logged(caplog):
             pass
 
     class _OrderCheckingLoop:
-        async def run_turn(self, session_id, turn_id, transcript, emit=None):
+        async def run_turn(self, session_id, turn_id, transcript, surface, emit=None):
             logging.getLogger("test.turn").info("turn started")
             return "ok"
 
     gateway = Gateway(_OrderCheckingLoop(), _EventLogStub(), config=None)
 
-    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
+    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi", "surface": "chat"})
     ws = _FakeWebSocket([raw])
 
     with caplog.at_level(logging.INFO):
@@ -193,7 +193,7 @@ async def test_disconnect_and_malformed_frame_carry_category_tag(caplog):
     loop = _FakeLoop(_EventLogStub())
     gateway = Gateway(loop, _EventLogStub(), config=None)
 
-    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi"})
+    raw = json.dumps({"turn_id": "t1", "final_user_transcript": "hi", "surface": "chat"})
     ws = _FakeWebSocket([raw], close_on_send=True)
 
     with caplog.at_level(logging.INFO):
@@ -212,3 +212,42 @@ async def test_disconnect_and_malformed_frame_carry_category_tag(caplog):
     malformed_records = [r for r in caplog.records if "malformed" in r.getMessage().lower()]
     assert malformed_records
     assert all(getattr(r, "category", None) == "connection" for r in malformed_records)
+
+
+async def test_frame_without_surface_is_rejected_as_malformed(tmp_path):
+    """AC-6: a frame omitting `surface` takes the EXISTING malformed-frame path
+    -- a curated `malformed request` error, its content never echoed, and the
+    connection stays alive to serve a well-formed follow-up. No second
+    rejection path, no wire-level default."""
+    import json
+
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = _FakeLoop(log, answer="still alive")
+    gateway = Gateway(loop, log, config=None)
+
+    no_surface = json.dumps({"turn_id": "t1", "final_user_transcript": "secret content"})
+    well_formed = json.dumps(
+        {"turn_id": "t2", "final_user_transcript": "hello again", "surface": "chat"}
+    )
+    ws = _FakeWebSocket([no_surface, well_formed])
+
+    await gateway._handle_connection(ws)
+
+    replies = [json.loads(frame) for frame in ws.sent]
+
+    # First reply: the existing curated malformed-request error, no content echoed.
+    assert replies[0] == {"type": "error", "turn_id": "", "message": "malformed request"}
+    assert "secret content" not in ws.sent[0]
+
+    # Connection stayed alive: the well-formed follow-up was served normally.
+    assert [r["type"] for r in replies[1:]] == ["answer", "done"]
+    assert replies[1]["text"] == "still alive"
+
+    # Exactly one error event logged (the malformed frame), tagged as the
+    # existing veneer/malformed provenance -- no new rejection path.
+    error_rows = log._conn.execute(
+        "SELECT provenance, payload_json FROM events WHERE type = 'error'"
+    ).fetchall()
+    assert len(error_rows) == 1
+    assert error_rows[0][0] == "veneer"
+    assert "secret content" not in error_rows[0][1]

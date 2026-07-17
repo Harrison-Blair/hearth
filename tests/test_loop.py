@@ -236,6 +236,94 @@ async def test_failed_marker_carries_category_tag(tmp_path, llm_config, caplog):
     await client.aclose()
 
 
+async def test_run_turn_requires_surface(tmp_path, llm_config, canned_completion):
+    """AC-3: `surface` is a required parameter with no default -- a call site
+    that omits it fails loudly rather than silently logging the old constant."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=canned_completion(text="answer"))
+
+    router, client = _make_router(handler, llm_config)
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = Loop(router, log, _Config())
+
+    with pytest.raises(TypeError):
+        await loop.run_turn("s1", "t1", "hello")  # no surface
+
+    await client.aclose()
+
+
+async def _run_turn_capturing(surface, db_path, llm_config, canned_completion):
+    """Run one identical turn under `surface`, capturing every observable
+    outcome: the answer, the backend request bodies, the emitted events, and
+    the full logged event list. Used to prove the engine treats the surface
+    value opaquely (AC-4)."""
+    requests_seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(json.loads(request.content))
+        return httpx.Response(200, json=canned_completion(text="the answer"))
+
+    router, client = _make_router(handler, llm_config)
+    log = EventLog(str(db_path))
+    loop = Loop(router, log, _Config())
+
+    emitted = []
+
+    async def sink(event) -> None:
+        emitted.append(event)
+
+    answer = await loop.run_turn("s1", "t1", "hello", surface, emit=sink)
+    events = log.read_session("s1")
+    await client.aclose()
+    return answer, requests_seen, emitted, events
+
+
+# Deliberately unrelated, arbitrary surface strings -- including values no real
+# surface would ever send -- so the invariant holds for the GENERAL case, not
+# just for `chat`/`audio`. A branch on any specific surface name breaks this.
+@pytest.mark.parametrize(
+    "surface",
+    ["audio", "telegram", "kiosk-42", "ANYTHING_AT_ALL", "z9$_weird", "🎙️"],
+)
+async def test_engine_does_not_branch_on_surface_value(
+    tmp_path, llm_config, canned_completion, surface
+):
+    """AC-4 (the most important test here): the engine passes and stores the
+    surface and does nothing else with it. Run the same turn under a baseline
+    surface and under an arbitrary one; the ONLY permitted difference is the
+    recorded `user_input` provenance -- same answer, same backend messages,
+    same emitted events, same log events otherwise."""
+    baseline = await _run_turn_capturing(
+        "chat", tmp_path / "baseline.db", llm_config, canned_completion
+    )
+    other = await _run_turn_capturing(
+        surface, tmp_path / "other.db", llm_config, canned_completion
+    )
+
+    base_answer, base_requests, base_emitted, base_events = baseline
+    other_answer, other_requests, other_emitted, other_events = other
+
+    # Same answer, same messages sent to the backend, same emitted events.
+    assert base_answer == other_answer
+    assert base_requests == other_requests
+    assert base_emitted == other_emitted
+
+    # Same log events -- identical in every respect except the one provenance
+    # field on the user_input event.
+    assert [e.type for e in base_events] == [e.type for e in other_events]
+    saw_user_input = False
+    for be, oe in zip(base_events, other_events):
+        assert be.type == oe.type
+        assert be.payload == oe.payload
+        if be.type == "user_input":
+            saw_user_input = True
+            assert be.provenance == "chat"
+            assert oe.provenance == surface
+        else:
+            assert be.provenance == oe.provenance
+    assert saw_user_input
+
+
 async def test_persona_restyle_noop():
     from hearth.persona import restyle
 

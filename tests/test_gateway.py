@@ -23,8 +23,8 @@ class _FakeLoop:
         self._activities = activities or []
         self._raise_exc = raise_exc
 
-    async def run_turn(self, session_id, turn_id, transcript, emit=None):
-        self._log.append(session_id, turn_id, "user_input", "user", {"text": transcript})
+    async def run_turn(self, session_id, turn_id, transcript, surface, emit=None):
+        self._log.append(session_id, turn_id, "user_input", surface, {"text": transcript})
         if self._raise_exc is not None:
             raise self._raise_exc
         for phase, label in self._activities:
@@ -54,7 +54,7 @@ async def test_gateway_roundtrip(tmp_path):
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
-            messages = await send_turn(ws, "hello")
+            messages = await send_turn(ws, "hello", "chat")
     finally:
         server.close()
         await server.wait_closed()
@@ -65,6 +65,53 @@ async def test_gateway_roundtrip(tmp_path):
     assert messages[1] == {"type": "done", "turn_id": turn_id}
 
     assert _event_types(log) == ["user_input", "final_answer"]
+
+
+def _user_input_provenances(log):
+    rows = log._conn.execute(
+        "SELECT provenance FROM events WHERE type = 'user_input' ORDER BY id"
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+async def test_turn_logged_with_originating_surface(tmp_path):
+    """AC-2/FC-8: a turn submitted declaring a surface is logged with that
+    surface as the `user_input` provenance -- not the old `"user"` constant."""
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = _FakeLoop(log, answer="ok")
+    gateway = Gateway(loop, log, config=None)
+    server, port = await _serve(gateway)
+
+    try:
+        async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+            await send_turn(ws, "hello", "chat")
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert _user_input_provenances(log) == ["chat"]
+
+
+async def test_turns_from_different_surfaces_are_distinguishable(tmp_path):
+    """PLM-007 AC-8: two turns declaring different surfaces are distinguishable
+    in the log by their provenance -- the reason this feature exists."""
+    log = EventLog(str(tmp_path / "events.db"))
+    loop = _FakeLoop(log, answer="ok")
+    gateway = Gateway(loop, log, config=None)
+    server, port = await _serve(gateway)
+
+    try:
+        async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+            await send_turn(ws, "spoken", "audio")
+        async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+            await send_turn(ws, "typed", "chat")
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    provenances = _user_input_provenances(log)
+    assert provenances == ["audio", "chat"]
+    assert len(set(provenances)) == 2  # distinguishable
 
 
 def test_no_component_named_veneer():
@@ -100,7 +147,7 @@ async def test_no_tool_internals_cross_boundary(tmp_path):
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
-            messages = await send_turn(ws, "look something up")
+            messages = await send_turn(ws, "look something up", "chat")
     finally:
         server.close()
         await server.wait_closed()
@@ -162,7 +209,7 @@ async def test_malformed_frame_rejected_connection_survives(tmp_path):
             assert reply["type"] == "error"
             assert "not json" not in reply["message"]
 
-            messages = await send_turn(ws, "hello again")
+            messages = await send_turn(ws, "hello again", "chat")
     finally:
         server.close()
         await server.wait_closed()
