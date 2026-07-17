@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hearth.config import Settings
+from hearth.config import Settings, resolve_config_path
 
 YAML_CONTENT = """
 llm:
@@ -36,6 +36,9 @@ llm:
 veneer:
   host: 127.0.0.1
   port: 8765
+gateway:
+  host: 0.0.0.0
+  port: 9999
 storage:
   db_path: hearth.db
 conversation:
@@ -45,9 +48,11 @@ conversation:
 
 @pytest.fixture
 def config_yaml(tmp_path, monkeypatch):
-    path = tmp_path / "config.yaml"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    path = config_dir / "engine.yaml"
     path.write_text(YAML_CONTENT)
-    monkeypatch.setattr("hearth.config.CONFIG_YAML_PATH", path)
+    monkeypatch.setattr("hearth.config.CONFIG_DIR", config_dir)
     return path
 
 
@@ -125,8 +130,9 @@ def test_hearth_config_pointing_at_missing_file_raises(config_yaml, tmp_path, mo
 
 def test_cwd_config_used_when_packaged_default_missing(tmp_path, monkeypatch):
     _clear_hearth_env(monkeypatch)
-    monkeypatch.setattr("hearth.config.CONFIG_YAML_PATH", tmp_path / "absent.yaml")
-    (tmp_path / "config.yaml").write_text(YAML_CONTENT)
+    monkeypatch.setattr("hearth.config.CONFIG_DIR", tmp_path / "absent")
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "engine.yaml").write_text(YAML_CONTENT)
     monkeypatch.chdir(tmp_path)
     settings = Settings(_env_file=None)
     assert settings.storage.db_path == "hearth.db"
@@ -134,14 +140,45 @@ def test_cwd_config_used_when_packaged_default_missing(tmp_path, monkeypatch):
 
 def test_no_config_anywhere_fails_loud(tmp_path, monkeypatch):
     _clear_hearth_env(monkeypatch)
-    monkeypatch.setattr("hearth.config.CONFIG_YAML_PATH", tmp_path / "absent.yaml")
+    monkeypatch.setattr("hearth.config.CONFIG_DIR", tmp_path / "absent")
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(FileNotFoundError, match="default-config.yaml"):
+    with pytest.raises(FileNotFoundError, match="config/defaults/engine.yaml"):
         Settings(_env_file=None)
 
 
+@pytest.mark.parametrize("component", ["engine", "chat"])
+def test_resolver_targets_named_component_file(tmp_path, monkeypatch, component):
+    _clear_hearth_env(monkeypatch)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    target = config_dir / f"{component}.yaml"
+    target.write_text(YAML_CONTENT)
+    monkeypatch.setattr("hearth.config.CONFIG_DIR", config_dir, raising=False)
+    assert resolve_config_path(component) == target
+
+
+def test_missing_component_config_fails_loud(tmp_path, monkeypatch):
+    _clear_hearth_env(monkeypatch)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setattr("hearth.config.CONFIG_DIR", config_dir, raising=False)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(FileNotFoundError, match="chat.yaml"):
+        resolve_config_path("chat")
+
+
+def test_engine_config_exposes_gateway_section(tmp_path, monkeypatch):
+    _clear_hearth_env(monkeypatch)
+    cfg = tmp_path / "engine.yaml"
+    cfg.write_text(YAML_CONTENT)
+    monkeypatch.setenv("HEARTH_CONFIG", str(cfg))
+    settings = Settings(_env_file=None)
+    assert settings.gateway.host == "0.0.0.0"
+    assert settings.gateway.port == 9999
+
+
 def _load_default_persona_prompt():
-    default_config_path = Path(__file__).parent.parent / "default-config.yaml"
+    default_config_path = Path(__file__).parent.parent / "config" / "defaults" / "engine.yaml"
     data = yaml.safe_load(default_config_path.read_text())
     return data["persona"]["system_prompt"]
 

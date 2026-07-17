@@ -129,24 +129,24 @@ is present in a checkout whether or not `--add-data` is right.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: `config.yaml` has moved to `config/engine.yaml` and `default-config.yaml` to
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: `config.yaml` has moved to `config/engine.yaml` and `default-config.yaml` to
       `config/defaults/engine.yaml`, both via `git mv`; no config file remains at the repo root
       (satisfies PLM-007 FC-9 for the engine).
-- [ ] AC-3: Config loading is provided by one facility that takes the component as a parameter;
+- [x] AC-3: Config loading is provided by one facility that takes the component as a parameter;
       a test proves it resolves a named component's file for more than one component name, so
       the second caller (the chat veneer) needs no second loader (satisfies PLM-007 FC-10).
-- [ ] AC-4: The facility's resolution order and fail-loud behavior are unchanged in substance
+- [x] AC-4: The facility's resolution order and fail-loud behavior are unchanged in substance
       from today's documented order, and a test covers a missing component config raising a
       `FileNotFoundError` that names the paths searched (satisfies PLM-007 FC-10).
-- [ ] AC-5: `config/engine.yaml` and `config/defaults/engine.yaml` carry a `gateway:` section
+- [x] AC-5: `config/engine.yaml` and `config/defaults/engine.yaml` carry a `gateway:` section
       with `host` and `port`, loadable as `settings.gateway`; the existing `veneer:` section is
       still present and unchanged.
-- [ ] AC-6: `make release` builds and the resulting binary resolves its configuration when run
+- [x] AC-6: `make release` builds and the resulting binary resolves its configuration when run
       outside the source tree; the command and its output are recorded as molt evidence
       (satisfies PLM-007 FC-14). Evidence must show the **frozen binary** loading config — a
       passing test suite does not satisfy this criterion.
-- [ ] AC-7: No secret-bearing field was added to either YAML file (FTHR-015's rule).
-- [ ] AC-8: `hearth/app.py`, `hearth/veneer/**`, and `tests/test_veneer*.py` are untouched by
+- [x] AC-7: No secret-bearing field was added to either YAML file (FTHR-015's rule).
+- [x] AC-8: `hearth/app.py`, `hearth/veneer/**`, and `tests/test_veneer*.py` are untouched by
       this feather, leaving FTHR-023 free to run concurrently.
-- [ ] AC-9: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-9: `ruff check .` is clean and the full existing test suite passes.

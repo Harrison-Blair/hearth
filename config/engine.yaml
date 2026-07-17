@@ -26,6 +26,9 @@ llm:
 veneer:
   host: 127.0.0.1
   port: 8765
+gateway:
+  host: 127.0.0.1
+  port: 8765
 tool:
   wikipedia_enabled: true
   wikipedia_language: en

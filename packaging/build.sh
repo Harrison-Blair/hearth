@@ -18,14 +18,15 @@ else
     .build-venv/bin/pip install "." pyinstaller
 fi
 
-# --add-data lands config.yaml at the bundle root (sys._MEIPASS), which is
-# exactly where hearth.config's package-adjacent CONFIG_YAML_PATH resolves in
-# the frozen binary. --collect-submodules guards the function-level hearth.*
-# imports in app.py that static analysis would otherwise miss.
+# --add-data lands config/engine.yaml under config/ at the bundle root
+# (sys._MEIPASS/config/engine.yaml), which is exactly where hearth.config's
+# package-adjacent CONFIG_DIR resolves in the frozen binary.
+# --collect-submodules guards the function-level hearth.* imports in app.py
+# that static analysis would otherwise miss.
 .build-venv/bin/pyinstaller \
     --onefile \
     --name "hearth-$(uname -m)" \
-    --add-data "$(pwd)/config.yaml:." \
+    --add-data "$(pwd)/config/engine.yaml:config" \
     --collect-submodules hearth \
     --specpath build \
     --noconfirm \
