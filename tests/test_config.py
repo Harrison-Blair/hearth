@@ -33,9 +33,6 @@ llm:
     tool: remote
   timeout: 60.0
   max_retries: 2
-veneer:
-  host: 127.0.0.1
-  port: 8765
 gateway:
   host: 0.0.0.0
   port: 9999
@@ -69,7 +66,7 @@ def test_config_loads_yaml_base(config_yaml, monkeypatch):
     assert settings.llm.backends["remote"].model == "openrouter/free"
     assert settings.llm.tiers.default == "local"
     assert settings.storage.db_path == "hearth.db"
-    assert settings.veneer.port == 8765
+    assert settings.gateway.port == 9999
 
 
 def test_env_overrides_yaml(config_yaml, monkeypatch):
@@ -165,6 +162,18 @@ def test_missing_component_config_fails_loud(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(FileNotFoundError, match="chat.yaml"):
         resolve_config_path("chat")
+
+
+def test_veneer_config_section_is_gone(config_yaml, monkeypatch):
+    """FC-12, no shim: `Settings` has no `veneer` attribute and the dead
+    HEARTH_VENEER__* env influences nothing."""
+    _clear_hearth_env(monkeypatch)
+    monkeypatch.setenv("HEARTH_VENEER__PORT", "1")
+    settings = Settings(_env_file=None)
+    assert not hasattr(settings, "veneer")
+    assert "veneer" not in Settings.model_fields
+    # The gateway section is untouched by the dead env var.
+    assert settings.gateway.port == 9999
 
 
 def test_engine_config_exposes_gateway_section(tmp_path, monkeypatch):

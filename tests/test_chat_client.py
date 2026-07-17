@@ -1,8 +1,8 @@
-"""Regression tests for the veneer text client and server keepalive.
+"""Regression tests for the chat text client and gateway keepalive.
 
 Guards the fix for the "keepalive ping timeout" disconnect: the client must
 read stdin off the event loop so keepalive pongs keep flowing while the user
-idles at the prompt, and the server must not proactively kill an idle
+idles at the prompt, and the gateway must not proactively kill an idle
 localhost connection.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ import threading
 import time
 
 from hearth.gateway import server
-from hearth.veneer import client
+from hearth.veneers.chat import __main__ as client
 
 
 async def test_read_line_does_not_block_event_loop(monkeypatch):
