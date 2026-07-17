@@ -35,7 +35,7 @@ from hearth.loop import Loop
 from hearth.memory.log import EventLog
 from hearth.tools.consult import BrainConsult
 from hearth.tools.registry import ToolRegistry
-from hearth.veneer.client import send_turn
+from hearth.veneers.base import send_turn
 from hearth.gateway.server import Gateway
 
 WIKI_BODY = {

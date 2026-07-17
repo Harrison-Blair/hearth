@@ -1,30 +1,16 @@
-"""Trivial stdin/stdout text client for the veneer contract.
+"""The chat veneer: a trivial stdin/stdout text client over the wire.
 
-Small and dependency-light; `send_turn` is reused by the integration test.
+Runnable as the `hearth-chat` console script or `python -m hearth.veneers.chat`.
+Reaches the engine only through `hearth.veneers.base` (connect / send_turn) and
+reads only its own `config/chat.yaml` -- no engine internals.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
-import uuid
 
-import websockets
-
-
-async def send_turn(websocket, transcript: str) -> list[dict]:
-    """Send one turn and return every inbound wire message, ending with the
-    terminal `done`/`error`."""
-    turn_id = uuid.uuid4().hex
-    await websocket.send(json.dumps({"turn_id": turn_id, "final_user_transcript": transcript}))
-    messages = []
-    while True:
-        raw = await websocket.recv()
-        message = json.loads(raw)
-        messages.append(message)
-        if message["type"] in ("done", "error"):
-            break
-    return messages
+from hearth.veneers.base import EngineUnreachable, connect, send_turn
+from hearth.veneers.chat.config import ChatSettings
 
 
 def _print_message(message: dict) -> None:
@@ -43,8 +29,7 @@ async def _read_line() -> str:
 
 
 async def run_client(host: str, port: int) -> None:
-    uri = f"ws://{host}:{port}"
-    async with websockets.connect(uri) as websocket:
+    async with connect(host, port) as websocket:
         while True:
             print("> ", end="", flush=True)
             line = await _read_line()
@@ -57,12 +42,16 @@ async def run_client(host: str, port: int) -> None:
                 _print_message(message)
 
 
-def main() -> None:
-    from hearth.config import Settings
-
-    settings = Settings()
-    asyncio.run(run_client(settings.veneer.host, settings.veneer.port))
+def main() -> int:
+    settings = ChatSettings()
+    try:
+        asyncio.run(run_client(settings.engine.host, settings.engine.port))
+    except EngineUnreachable as exc:
+        # Fail fast at a terminal: a plain message, non-zero exit, no traceback.
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

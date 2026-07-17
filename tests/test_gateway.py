@@ -9,7 +9,7 @@ import websockets
 
 from hearth.events import ToolActivity
 from hearth.memory.log import EventLog
-from hearth.veneer.client import send_turn
+from hearth.veneers.base import send_turn
 from hearth.gateway.server import Gateway
 
 
@@ -67,20 +67,19 @@ async def test_gateway_roundtrip(tmp_path):
     assert _event_types(log) == ["user_input", "final_answer"]
 
 
-def test_no_engine_side_component_named_veneer():
-    """AC-2: no engine-side component is named "veneer". The server and
-    protocol modules moved to `hearth.gateway`, so `hearth/veneer/server.py`
-    and `hearth/veneer/protocol.py` no longer exist and the class is
-    `Gateway`. Scoped so it does not trip on `hearth/veneer/client.py`, which
-    legitimately remains until FTHR-024."""
+def test_no_component_named_veneer():
+    """AC-7: nothing under `hearth/` is named veneer except `hearth/veneers/`.
+    FTHR-023 scoped this to tolerate `hearth/veneer/client.py`; FTHR-024
+    deletes that package, so the whole `hearth/veneer/` directory is gone and
+    the client now lives under `hearth/veneers/chat/`."""
     import importlib
     from pathlib import Path
 
     import hearth
 
     pkg_root = Path(hearth.__file__).parent
-    assert not (pkg_root / "veneer" / "server.py").exists()
-    assert not (pkg_root / "veneer" / "protocol.py").exists()
+    assert not (pkg_root / "veneer").exists()
+    assert (pkg_root / "veneers").is_dir()
 
     gateway_server = importlib.import_module("hearth.gateway.server")
     gateway_protocol = importlib.import_module("hearth.gateway.protocol")

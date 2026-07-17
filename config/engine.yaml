@@ -23,9 +23,6 @@ llm:
     tool: remote
   timeout: 60.0
   max_retries: 2
-veneer:
-  host: 127.0.0.1
-  port: 8765
 gateway:
   host: 127.0.0.1
   port: 8765

@@ -32,8 +32,8 @@ class Gateway:
         self._config = config
 
     async def serve(self, host: str | None = None, port: int | None = None) -> None:
-        host = host if host is not None else self._config.veneer.host
-        port = port if port is not None else self._config.veneer.port
+        host = host if host is not None else self._config.gateway.host
+        port = port if port is not None else self._config.gateway.port
         # No proactive keepalive: the gateway is a long-lived localhost control
         # channel that legitimately idles between turns, and the default 20s
         # ping timeout false-closes those idle connections. A genuinely dead

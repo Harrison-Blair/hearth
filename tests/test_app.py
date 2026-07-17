@@ -82,3 +82,29 @@ async def test_run_daemon_logs_server_lifecycle_lines(monkeypatch, tmp_path, cap
     messages = [r.getMessage() for r in server_records]
     assert any("daemon starting" in m for m in messages)
     assert any("gateway serving" in m for m in messages)
+
+
+async def test_engine_binds_via_gateway_config(monkeypatch, tmp_path):
+    """_run_daemon must serve on settings.gateway.host/.port, not the deleted
+    settings.veneer. The dead HEARTH_VENEER__* env influences nothing."""
+    captured = {}
+
+    class _FakeGateway:
+        def __init__(self, loop, log, config) -> None:
+            pass
+
+        async def serve(self, host=None, port=None) -> None:
+            captured["host"] = host
+            captured["port"] = port
+
+    monkeypatch.chdir(tmp_path)  # keep the sqlite db out of the worktree
+    monkeypatch.setattr("hearth.gateway.server.Gateway", _FakeGateway)
+    monkeypatch.setenv("HEARTH_GATEWAY__HOST", "0.0.0.0")
+    monkeypatch.setenv("HEARTH_GATEWAY__PORT", "4321")
+    monkeypatch.setenv("HEARTH_VENEER__PORT", "9999")  # dead section: must be ignored
+
+    exit_code = await _run_daemon()
+
+    assert exit_code == 0
+    assert captured["host"] == "0.0.0.0"
+    assert captured["port"] == 4321

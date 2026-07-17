@@ -170,31 +170,31 @@ natural home there.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: A veneer is a separate process reaching the engine only over the wire: a test asserts
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: A veneer is a separate process reaching the engine only over the wire: a test asserts
       the `hearth.veneers` tree imports nothing from `hearth.brain`, `hearth.loop`,
       `hearth.memory`, or `hearth.gateway`, and the test is written over the package so any
       future surface is covered (satisfies PLM-007 FC-1, and AC-4's "applies to any surface").
-- [ ] AC-3: `chat` reproduces today's console behavior — `> ` prompt, turn submission, `…label`
+- [x] AC-3: `chat` reproduces today's console behavior — `> ` prompt, turn submission, `…label`
       tool activity, red `[hearth]` answer tag, `error: …` display, non-blocking stdin read.
-- [ ] AC-4: `hearth-chat` is verified as an **installed console script** against a **running
+- [x] AC-4: `hearth-chat` is verified as an **installed console script** against a **running
       engine**: a real turn answered, and — with the engine stopped — a plain message naming the
       engine's host/port, a non-zero exit, and no traceback. Commands and output recorded as molt
       evidence (satisfies PLM-007 FC-3, FC-13). **A passing test suite does not satisfy this
       criterion**; nothing in the suite exercises the entry point or the terminal.
-- [ ] AC-5: Chat reads only `config/chat.yaml`, via FTHR-022's shared facility, as its second
+- [x] AC-5: Chat reads only `config/chat.yaml`, via FTHR-022's shared facility, as its second
       caller; a test asserts chat loads with the engine's config absent (satisfies PLM-007 FC-9,
       FC-10). Chat does not import the engine's `Settings`.
-- [ ] AC-6: **The dual-section transitional state is ended.** `VeneerConfig`, `Settings.veneer`,
+- [x] AC-6: **The dual-section transitional state is ended.** `VeneerConfig`, `Settings.veneer`,
       and the `veneer:` section in both engine YAMLs are gone with no compatibility alias; the
       engine binds via `settings.gateway`; `hearth/veneer/` is deleted; a test asserts no
       `veneer` attribute on `Settings` and that `HEARTH_VENEER__*` influences nothing (satisfies
       PLM-007 FC-11, FC-12).
-- [ ] AC-7: Nothing under `hearth/` is named veneer except `hearth/veneers/`; FTHR-023's
+- [x] AC-7: Nothing under `hearth/` is named veneer except `hearth/veneers/`; FTHR-023's
       completeness test is tightened accordingly.
-- [ ] AC-8: `base.py` contains only contract surface `chat` demonstrably uses — no speculative
+- [x] AC-8: `base.py` contains only contract surface `chat` demonstrably uses — no speculative
       hooks for the unbuilt audio surfaces, and no retry (PLM-008 FC-10 owns retry, deliberately
       asymmetric).
-- [ ] AC-9: The `hearth/veneers` tree imports only stdlib, `websockets`, and the config facility,
+- [x] AC-9: The `hearth/veneers` tree imports only stdlib, `websockets`, and the config facility,
       preserving the property today's `client.py` already has.
-- [ ] AC-10: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-10: `ruff check .` is clean and the full existing test suite passes.
