@@ -1,0 +1,34 @@
+# Audio surface (hearth-audio) reference config. Copy to config/audio.yaml and
+# edit. Loaded via the shared config facility with component `audio`; holds only
+# this surface's settings and never the engine's. No secrets here (FTHR-015).
+
+# Which engine to reach (the hearth run daemon's gateway).
+engine:
+  host: 127.0.0.1
+  port: 8765
+
+# Input capture device (PortAudio name or index); null = system default.
+input_device: null
+
+# Ordered wake-model list. Per-model threshold, NO global threshold (FC-3).
+# Shared surface: read by FTHR-029 (loads/scores models), written by FTHR-032
+# (from the training registry). Defined only in hearth/audio/config.py.
+wake_models:
+  - path: models/wake/vesta.onnx
+    threshold: 0.5
+
+# Endpointing / VAD knobs (consumed by FTHR-030).
+endpoint:
+  silence_ms: 800        # trailing silence that ends an utterance
+  max_utterance_ms: 12000  # hard cap on a single utterance
+
+# Transcription model + params (consumed by FTHR-031).
+stt:
+  model: base
+  language: en
+
+# Connection retry/backoff for this unattended surface (FC-10): unlike chat's
+# fail-fast, the audio surface waits for the engine to come up.
+retry:
+  max_attempts: 30
+  base_delay_s: 1.0
