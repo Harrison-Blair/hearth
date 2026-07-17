@@ -42,6 +42,7 @@ class WakeModel(BaseModel):
 class EndpointConfig(BaseModel):
     """Endpointing / VAD knobs consumed by FTHR-030's endpointer."""
 
+    aggressiveness: int = 2  # webrtcvad range 0-3 (higher = filters more non-speech)
     silence_ms: int = 800
     max_utterance_ms: int = 12000
 
