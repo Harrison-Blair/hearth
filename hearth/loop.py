@@ -268,9 +268,14 @@ class Loop:
         session_id: str,
         turn_id: str,
         transcript: str,
+        surface: str,
         emit: EventSink = null_sink,
     ) -> str:
-        self._log.append(session_id, turn_id, "user_input", "user", {"text": transcript})
+        # `surface` is the originating surface's self-declared identity. It is
+        # recorded as the user_input provenance and nothing else -- the engine
+        # never compares, switches on, or validates it (FTHR-025 AC-4): an
+        # opaque string, not a dependency.
+        self._log.append(session_id, turn_id, "user_input", surface, {"text": transcript})
         self._append_transcript(session_id, f"user: {transcript}")
 
         # Reconstruct history from the log itself (no separate history store):

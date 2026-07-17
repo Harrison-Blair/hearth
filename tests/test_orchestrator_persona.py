@@ -82,7 +82,7 @@ async def test_system_prompt_is_first_message(tmp_path, llm_config):
     consult = BrainConsult(router, _FakeRegistry(), log, _Config())
     loop = Loop(router, log, _Config(), consult=consult)
 
-    await loop.run_turn("s1", "t1", "hello")
+    await loop.run_turn("s1", "t1", "hello", "chat")
 
     assert requests_seen[0]["messages"][0] == {"role": "system", "content": PERSONA_PROMPT}
 
@@ -106,7 +106,7 @@ async def test_who_are_you_answers_local_only(tmp_path, two_tier_llm_config):
     consult = BrainConsult(router, _FakeRegistry(), log, _Config())
     loop = Loop(router, log, _Config(), consult=consult)
 
-    answer = await loop.run_turn("s1", "t1", "who are you?")
+    answer = await loop.run_turn("s1", "t1", "who are you?", "chat")
 
     assert answer == "I'm Calcifer."
     assert router_fn.counts["local-llm.test"] == 1

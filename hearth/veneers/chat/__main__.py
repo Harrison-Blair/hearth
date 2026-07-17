@@ -38,7 +38,8 @@ async def run_client(host: str, port: int) -> None:
             line = line.strip()
             if not line:
                 continue
-            for message in await send_turn(websocket, line):
+            # The chat veneer declares its surface identity here, in one place.
+            for message in await send_turn(websocket, line, "chat"):
                 _print_message(message)
 
 

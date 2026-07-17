@@ -56,11 +56,21 @@ async def connect(host: str, port: int):
         await connection.close()
 
 
-async def send_turn(websocket, transcript: str) -> list[dict]:
+async def send_turn(websocket, transcript: str, surface: str) -> list[dict]:
     """Send one turn and return every inbound wire message, ending with the
-    terminal `done`/`error`."""
+    terminal `done`/`error`.
+
+    `surface` is the caller's self-declared identity (`chat`, `audio`, ...),
+    sent with every turn so the engine can attribute the logged turn to its
+    originating surface. It has no default: each surface names itself once at
+    its call site, so a new surface declares its identity without touching this
+    contract or the engine (FTHR-025 FC-8)."""
     turn_id = uuid.uuid4().hex
-    await websocket.send(json.dumps({"turn_id": turn_id, "final_user_transcript": transcript}))
+    await websocket.send(
+        json.dumps(
+            {"turn_id": turn_id, "final_user_transcript": transcript, "surface": surface}
+        )
+    )
     messages = []
     while True:
         raw = await websocket.recv()

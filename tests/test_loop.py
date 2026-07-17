@@ -55,7 +55,7 @@ async def test_loop_single_turn_logs_and_answers(tmp_path, llm_config, canned_co
     log = EventLog(str(tmp_path / "events.db"))
     loop = Loop(router, log, _Config())
 
-    answer = await loop.run_turn("s1", "t1", "hello")
+    answer = await loop.run_turn("s1", "t1", "hello", "chat")
 
     assert answer == "answer one"
     events = log.read_session("s1")
@@ -82,9 +82,9 @@ async def test_loop_multi_turn_reconstructs_history(tmp_path, llm_config, canned
     log = EventLog(str(tmp_path / "events.db"))
     loop = Loop(router, log, _Config(max_history_turns=1))
 
-    await loop.run_turn("s1", "t1", "first message")
-    await loop.run_turn("s1", "t2", "second message")
-    await loop.run_turn("s1", "t3", "third message")
+    await loop.run_turn("s1", "t1", "first message", "chat")
+    await loop.run_turn("s1", "t2", "second message", "chat")
+    await loop.run_turn("s1", "t3", "third message", "chat")
 
     # Second turn's request carries the persona system prompt as messages[0]
     # (FTHR-009), then the first exchange.
@@ -121,7 +121,7 @@ async def test_loop_logs_per_call_and_per_turn_metrics(
     log = EventLog(str(tmp_path / "events.db"))
     loop = Loop(router, log, _Config())
 
-    await loop.run_turn("s1", "t1", "hello")
+    await loop.run_turn("s1", "t1", "hello", "chat")
 
     messages = [record.getMessage() for record in caplog.records]
 
@@ -135,7 +135,7 @@ async def test_loop_logs_per_call_and_per_turn_metrics(
     assert summary_lines, messages
 
     caplog.clear()
-    await loop.run_turn("s1", "t2", "hello again")
+    await loop.run_turn("s1", "t2", "hello again", "chat")
     messages = [record.getMessage() for record in caplog.records]
     assert any("turn=2" in m for m in messages), messages
 
@@ -161,7 +161,7 @@ async def test_loop_logs_failed_marker_on_brain_error_never_leaks_detail(
     loop = Loop(router, log, _Config())
 
     with pytest.raises(BrainError) as excinfo:
-        await loop.run_turn("s1", "t1", "hello")
+        await loop.run_turn("s1", "t1", "hello", "chat")
 
     assert secret_body in excinfo.value.detail  # sanity: detail really carries it
 
@@ -199,7 +199,7 @@ async def test_metrics_calls_carry_category_tag(
     log = EventLog(str(tmp_path / "events.db"))
     loop = Loop(router, log, _Config())
 
-    await loop.run_turn("s1", "t1", "hello")
+    await loop.run_turn("s1", "t1", "hello", "chat")
 
     call_records = [
         r for r in caplog.records if "round=1" in r.getMessage() and "tier=" in r.getMessage()
@@ -227,7 +227,7 @@ async def test_failed_marker_carries_category_tag(tmp_path, llm_config, caplog):
     loop = Loop(router, log, _Config())
 
     with pytest.raises(BrainError):
-        await loop.run_turn("s1", "t1", "hello")
+        await loop.run_turn("s1", "t1", "hello", "chat")
 
     failed_records = [r for r in caplog.records if "FAILED" in r.getMessage()]
     assert failed_records

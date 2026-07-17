@@ -478,7 +478,7 @@ async def test_serve_continues_after_one_connection_disconnects(tmp_path):
         await asyncio.sleep(0.3)
 
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws2:
-            messages = await send_turn(ws2, "second, should complete normally")
+            messages = await send_turn(ws2, "second, should complete normally", "chat")
     finally:
         server.close()
         await server.wait_closed()

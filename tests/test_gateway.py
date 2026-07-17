@@ -174,7 +174,7 @@ async def test_loop_error_maps_to_error_message(tmp_path):
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
-            messages = await send_turn(ws, "trigger a failure")
+            messages = await send_turn(ws, "trigger a failure", "chat")
     finally:
         server.close()
         await server.wait_closed()
