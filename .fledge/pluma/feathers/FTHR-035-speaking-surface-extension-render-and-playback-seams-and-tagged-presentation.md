@@ -2,7 +2,7 @@
 id: FTHR-035
 title: "Speaking surface extension: render and playback seams and tagged presentation"
 plumage: PLM-009
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-028]
 authored: 2026-07-17T16:04:23Z
