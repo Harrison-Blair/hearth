@@ -11,7 +11,7 @@ dependencies = [
     "sounddevice>=0.4",
     "numpy>=1.24",
     "httpx",
-    "websockets",  # veneer server/client -- `hearth run` imports it unconditionally
+    "websockets",  # gateway server + veneer client -- `hearth run` imports it unconditionally
 ]
 
 [project.optional-dependencies]
