@@ -132,28 +132,28 @@ observed `StopIteration` before and a clean error after.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after
       (guard tests marked "*Fails before:* n/a" are exempt from fail-first; instead they were
       shown failing when the guarded property is deliberately violated, then pass unmodified) —
       and specifically, the absent-wake-section test was observed raising the actual
       `StopIteration` against the unchanged code (a genuine test-first cycle on a live defect, not
       a break-and-restore), recorded in molt evidence.
-- [ ] AC-2: `select` writes each selected model's **path and threshold** into `config/audio.yaml`,
+- [x] AC-2: `select` writes each selected model's **path and threshold** into `config/audio.yaml`,
       threshold sourced from `models/wake/models.json`; a round-trip test asserts the written
       values match the registry, including `vesta`'s 0.77 (satisfies PLM-008 FC-4).
-- [ ] AC-3: `select` targets `config/audio.yaml`, not the engine's config; a test asserts the
+- [x] AC-3: `select` targets `config/audio.yaml`, not the engine's config; a test asserts the
       engine config is untouched (satisfies PLM-008 FC-13's repoint).
-- [ ] AC-4: When the target wake section is absent, `select` emits a **clear, actionable error**
+- [x] AC-4: When the target wake section is absent, `select` emits a **clear, actionable error**
       naming the section and file and exits without a traceback — never an unhandled
       `StopIteration`; a test covers the absent case (satisfies PLM-008 FC-13).
-- [ ] AC-5: Multiple selected models each carry their own threshold in the written config — no
+- [x] AC-5: Multiple selected models each carry their own threshold in the written config — no
       single shared threshold (satisfies PLM-008 FC-3 from the writer side).
-- [ ] AC-6: `manifest.py` remains **standalone** — no import of the `hearth` runtime package after
+- [x] AC-6: `manifest.py` remains **standalone** — no import of the `hearth` runtime package after
       the change; a test guards the property. If writing the nested shape needed a YAML library, it
       was added to training deps only, noted at the gate — the runtime was not imported.
-- [ ] AC-7: This feather **produces** config matching FTHR-028's wake-model schema and defines no
+- [x] AC-7: This feather **produces** config matching FTHR-028's wake-model schema and defines no
       schema; any shape insufficiency was raised against FTHR-028, keeping this diff disjoint from
       FTHR-029 and out of `hearth/audio/`.
-- [ ] AC-8: Only `training/manifest.py` and its new test are added/changed, keeping wave 2 disjoint
+- [x] AC-8: Only `training/manifest.py` and its new test are added/changed, keeping wave 2 disjoint
       from FTHR-029/030/031.
-- [ ] AC-9: `ruff check .` is clean and the full existing test suite passes.
+- [x] AC-9: `ruff check .` is clean and the full existing test suite passes.

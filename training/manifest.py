@@ -8,11 +8,13 @@ Subcommands (run from the repo root):
   list                                            # show the trained series
   regen                                           # rebuild manifest from models/wake/*.onnx on disk
   remove <slug>                                   # drop one manifest entry (no-op if absent)
-  select <slug-or-phrase> [...]                   # load this series: writes config.yaml wake.model_paths
+  select <slug-or-phrase> [...]                   # load these models: writes
+                                                  # config/audio.yaml wake_models
 
-`select` also accepts a bare slug whose .onnx exists on disk but isn't in the
-manifest yet. The env-var equivalent (no file edit) is:
-  HEARTH_WAKE__MODEL_PATHS='["models/wake/a.onnx","models/wake/b.onnx"]'
+`select` writes each chosen model's path *and* its threshold (the operating point
+recorded in models.json) into the audio surface's `wake_models` list, since each
+model triggers on its own threshold. A bare slug whose .onnx exists on disk but
+isn't in the manifest can't supply a threshold, so record it with `upsert` first.
 
 This module is deliberately standalone: stdlib only, no import of the hearth
 runtime package, so training has no effect on the rest of the tree.
@@ -27,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 
 MANIFEST = Path("models/wake/models.json")
-CONFIG = Path("config.yaml")
+CONFIG = Path("config/audio.yaml")
 
 
 def slug(phrase: str) -> str:
@@ -110,78 +112,93 @@ def cmd_remove(a: argparse.Namespace) -> None:
     print(f"manifest: removed {a.slug!r}" if existed else f"manifest: {a.slug!r} not found")
 
 
-def _resolve(ref: str, m: dict) -> str:
-    """A manifest slug, a manifest phrase, or a slug whose .onnx exists on disk."""
-    if ref in m:
-        return m[ref]["model_path"]
-    for k, e in m.items():
-        if e["phrase"] == ref:
-            return e["model_path"]
-    path = f"models/wake/{slug(ref)}.onnx"
-    if Path(path).exists():
-        return path
-    raise SystemExit(f"error: no model for {ref!r} (not in manifest, {path} missing)")
+def _resolve(ref: str, m: dict) -> tuple[str, float]:
+    """Resolve a ref to (model_path, threshold). A manifest slug or a manifest
+    phrase; the threshold is the model's operating point recorded in models.json.
+    A bare slug whose .onnx exists on disk but isn't in the manifest has no
+    threshold to write, so it is a clear error rather than a silent default."""
+    entry = m.get(ref)
+    if entry is None:
+        entry = next((e for e in m.values() if e.get("phrase") == ref), None)
+    if entry is None:
+        path = f"models/wake/{slug(ref)}.onnx"
+        if not Path(path).exists():
+            raise SystemExit(f"error: no model for {ref!r} (not in manifest, {path} missing)")
+        raise SystemExit(
+            f"error: {ref!r} has an .onnx on disk but no {MANIFEST} entry, so no "
+            f"threshold to write. Record it first: "
+            f"python training/manifest.py upsert {slug(ref)} --phrase ... --eval <eval.json>"
+        )
+    if "threshold" not in entry:
+        raise SystemExit(
+            f"error: {ref!r} has no threshold in {MANIFEST} (regen'd entry?). "
+            f"Record its eval with 'upsert' before selecting."
+        )
+    return entry["model_path"], entry["threshold"]
 
 
 def cmd_select(a: argparse.Namespace) -> None:
     m = load()
-    paths = [_resolve(ref, m) for ref in a.refs]
-    _write_model_paths(paths)
-    # Verify the write round-trips (catches _write_model_paths bugs). Read it back
+    models = [_resolve(ref, m) for ref in a.refs]
+    _write_wake_models(models)
+    # Verify the write round-trips (catches _write_wake_models bugs). Read it back
     # ourselves rather than importing the runtime, so training stays standalone.
-    got = _read_model_paths()
-    assert got == paths, f"config.yaml write mismatch: {got} != {paths}"
-    print("config.yaml wake.model_paths set to:")
-    for p in paths:
-        print(f"  - {p}")
+    got = _read_wake_models()
+    assert got == models, f"{CONFIG} write mismatch: {got} != {models}"
+    print(f"{CONFIG} wake_models set to:")
+    for path, threshold in models:
+        print(f"  - {path} (threshold {threshold})")
 
 
-def _write_model_paths(paths: list[str]) -> None:
-    """Replace wake.model_paths in config.yaml, preserving comments/order."""
+def _wake_models_start(lines: list[str]) -> int:
+    """Index of the top-level `wake_models:` key. When absent, emit a clear,
+    actionable error naming the section and file -- never a bare StopIteration."""
+    for i, ln in enumerate(lines):
+        if ln.rstrip() == "wake_models:":
+            return i
+    raise SystemExit(
+        f"error: no 'wake_models:' section in {CONFIG}. Create it by copying "
+        f"config/defaults/audio.yaml to {CONFIG}, then re-run select."
+    )
+
+
+def _write_wake_models(models: list[tuple[str, float]]) -> None:
+    """Replace the wake_models list in config/audio.yaml with {path, threshold}
+    entries, preserving the surrounding sections and any comments/blank lines."""
     lines = CONFIG.read_text().splitlines()
-    start = next(i for i, ln in enumerate(lines) if ln.rstrip() == "wake:")
+    start = _wake_models_start(lines)
     # Block ends at the next top-level (unindented, non-comment) line.
     end = next(
         (i for i in range(start + 1, len(lines))
          if lines[i].strip() and not lines[i][0].isspace() and not lines[i].startswith("#")),
         len(lines),
     )
-    block = lines[start + 1 : end]
-    # Drop any existing model_paths: key and its "- " children (indent > 2).
-    cleaned, skip = [], False
-    for ln in block:
-        if ln.lstrip().startswith("model_paths:"):
-            skip = True
-            continue
-        if skip and (ln.strip().startswith("- ") or not ln.strip()):
-            if not ln.strip():
-                skip = False  # blank line ends the list
-            continue
-        skip = False
-        cleaned.append(ln)
-    new_block = ["  model_paths:"] + [f"    - {p}" for p in paths] + cleaned
+    # The block holds only the list; keep comments/blank lines, drop old entries.
+    kept = [ln for ln in lines[start + 1 : end] if not ln.strip() or ln.lstrip().startswith("#")]
+    entries = []
+    for path, threshold in models:
+        entries.append(f"  - path: {path}")
+        entries.append(f"    threshold: {threshold}")
+    new_block = entries + kept
     CONFIG.write_text("\n".join(lines[: start + 1] + new_block + lines[end:]) + "\n")
 
 
-def _read_model_paths() -> list[str]:
-    """Read wake.model_paths back out of config.yaml (stdlib only, symmetric with
-    _write_model_paths) so select can verify its own write without importing the runtime."""
+def _read_wake_models() -> list[tuple[str, float]]:
+    """Read the wake_models list back out of config/audio.yaml (stdlib only,
+    symmetric with _write_wake_models) so select can verify its own write without
+    importing the runtime."""
     lines = CONFIG.read_text().splitlines()
-    start = next(i for i, ln in enumerate(lines) if ln.rstrip() == "wake:")
-    paths, in_list = [], False
+    start = _wake_models_start(lines)
+    models: list[list] = []
     for ln in lines[start + 1:]:
         if ln.strip() and not ln[0].isspace() and not ln.startswith("#"):
-            break  # next top-level section ends the wake block
-        if ln.lstrip().startswith("model_paths:"):
-            in_list = True
-            continue
-        if in_list:
-            s = ln.strip()
-            if s.startswith("- "):
-                paths.append(s[2:].strip())
-            elif s and not s.startswith("#"):
-                break  # a sibling key ends the list
-    return paths
+            break  # next top-level section ends the wake_models block
+        s = ln.strip()
+        if s.startswith("- path:"):
+            models.append([s.split(":", 1)[1].strip(), None])
+        elif s.startswith("threshold:") and models:
+            models[-1][1] = float(s.split(":", 1)[1].strip())
+    return [(path, threshold) for path, threshold in models]
 
 
 if __name__ == "__main__":
