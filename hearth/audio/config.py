@@ -60,6 +60,20 @@ class RetryConfig(BaseModel):
     base_delay_s: float = 1.0
 
 
+class PresentationConfig(BaseModel):
+    """Per-tag ANSI colours for the `[heard]`/`[spoken]` presentation (FC-9), so
+    heard and spoken lines read distinctly. Matches the surface family's
+    `[<colour>tag<reset>]` styling (cf. `hearth-chat`'s answer line). The
+    speaking-side FTHR-035 addition; the listening side stays as FTHR-028 left it."""
+
+    heard_color: str = "36"  # cyan
+    spoken_color: str = "35"  # magenta
+
+    def colors(self) -> dict[str, str]:
+        """Tag -> ANSI colour code, the shape the surface's `present_line` reads."""
+        return {"heard": self.heard_color, "spoken": self.spoken_color}
+
+
 class AudioSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="HEARTH_",
@@ -73,6 +87,16 @@ class AudioSettings(BaseSettings):
     endpoint: EndpointConfig = EndpointConfig()
     stt: STTConfig = STTConfig()
     retry: RetryConfig = RetryConfig()
+    # --- speaking (FTHR-035) --------------------------------------------------
+    # `voice` has NO shipped default: an unset voice is representable as missing
+    # (None), which FTHR-037 turns into the first-run acquisition error. This
+    # feather defines the no-default stance in the schema; it does not implement
+    # the absent-voice behaviour. Never silently falls back to some voice.
+    voice: str | None = None
+    # Output device (PortAudio name/index); None = system default (FC-5),
+    # mirroring `input_device`. Real device selection is FTHR-038.
+    output_device: str | None = None
+    presentation: PresentationConfig = PresentationConfig()
 
     @classmethod
     def settings_customise_sources(

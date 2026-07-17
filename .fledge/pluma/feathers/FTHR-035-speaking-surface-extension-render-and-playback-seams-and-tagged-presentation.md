@@ -146,31 +146,31 @@ is pure scaffolding: correct seams and rules, zero sound. Molt evidence should s
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The tests listed above were observed failing before implementation and pass after.
-- [ ] AC-2: The audio surface exposes `Renderer` (text → audio) and `Player` (audio → device)
+- [x] AC-1: The tests listed above were observed failing before implementation and pass after.
+- [x] AC-2: The audio surface exposes `Renderer` (text → audio) and `Player` (audio → device)
       **seams** as Protocols alongside FTHR-028's input seams, with doubles supplied, and a turn's
       final answer flows answer → `Renderer` → `Player` through them — proven with no audio hardware
       (satisfies PLM-009 FC-1, FC-11 at the seam level).
-- [ ] AC-3: Only the engine's **final answer** is handed to the `Renderer`; **tool activity is
+- [x] AC-3: Only the engine's **final answer** is handed to the `Renderer`; **tool activity is
       never** rendered to speech, asserted at the speak call site with a recording double (satisfies
       PLM-009 FC-8).
-- [ ] AC-4: Heard and spoken text are presented with **distinct tags and distinct colours**
+- [x] AC-4: Heard and spoken text are presented with **distinct tags and distinct colours**
       (`[heard]`/`[spoken]`), proven as a pure function of (text, tag) with no device (satisfies
       PLM-009 FC-9).
-- [ ] AC-5: The audio **output device is configuration, defaulting to the system default** when
+- [x] AC-5: The audio **output device is configuration, defaulting to the system default** when
       unset, mirroring the input-device config; proven at the seam with a double (satisfies PLM-009
       FC-5).
-- [ ] AC-6: Voice, output-device, and presentation settings live in `config/audio.yaml` and load
+- [x] AC-6: Voice, output-device, and presentation settings live in `config/audio.yaml` and load
       via the shared facility; **`voice` has no shipped default** (an unset voice is representable as
       missing, for FTHR-037 to turn into the first-run error) (satisfies PLM-009 FC-2 at schema
       level, FC-12).
-- [ ] AC-7: This feather **extends FTHR-028's single audio surface and its one config file** — it
+- [x] AC-7: This feather **extends FTHR-028's single audio surface and its one config file** — it
       defines the output seams and speaking schema **once**; it adds no second surface and no second
       config file. Any seam/schema insufficiency a downstream feather hits is raised as a finding
       here, not worked around in that feather (keeps wave 2 disjoint).
-- [ ] AC-8: This feather contains **no piper/TTS**, **no real device playback**, **no voice
+- [x] AC-8: This feather contains **no piper/TTS**, **no real device playback**, **no voice
       download**, and **no barge-in** — those are FTHR-036/037/038; it ships doubles only. No
       speculative abstraction beyond the two seams, the three config keys, and the presentation
       function the tests exercise.
-- [ ] AC-9: The **listening input path is untouched** (no edits to endpoint/STT/wake stages) and the
+- [x] AC-9: The **listening input path is untouched** (no edits to endpoint/STT/wake stages) and the
       engine is not modified; `ruff check .` is clean and the full existing test suite passes.

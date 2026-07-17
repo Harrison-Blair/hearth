@@ -27,6 +27,24 @@ stt:
   model: base
   language: en
 
+# --- speaking (FTHR-035) ---
+# TTS voice for the spoken answer. NO shipped default (FC-2): an unset (null)
+# voice is representable as *missing*, which FTHR-037 turns into the first-run
+# acquisition error -- it never silently falls back to some voice. Real speech
+# synthesis is FTHR-036. Set this to a piper voice name once acquired.
+voice: null
+
+# Output playback device (PortAudio name or index); null = system default
+# (FC-5), mirroring input_device. Real device selection is FTHR-038.
+output_device: null
+
+# [heard]/[spoken] tagged presentation (FC-9): what was *heard* (the transcript)
+# vs what was *spoken* (the answer) are tagged and coloured differently so a
+# spoken conversation can be followed/debugged. ANSI colour codes; distinct.
+presentation:
+  heard_color: "36"   # cyan
+  spoken_color: "35"  # magenta
+
 # Connection retry/backoff for this unattended surface (FC-10): unlike chat's
 # fail-fast, the audio surface waits for the engine to come up.
 retry:

@@ -25,12 +25,37 @@ from contextlib import asynccontextmanager
 
 from hearth.audio.config import AudioSettings
 from hearth.audio.source import LiveAudioSource
-from hearth.audio.stages import FixedTranscriber, ScriptedEndpointer, ScriptedWakeDetector
+from hearth.audio.stages import (
+    FixedTranscriber,
+    MarkerRenderer,
+    RecordingPlayer,
+    ScriptedEndpointer,
+    ScriptedWakeDetector,
+    resolve_output_device,
+)
 from hearth.veneers.base import EngineUnreachable, connect, send_turn
 
 # This surface's self-declared identity, sent with every turn so the engine can
 # attribute the logged turn to the audio surface (PLM-007 FTHR-025). Named once.
 SURFACE = "audio"
+
+# The two presentation tags (FC-9). `HEARD` is the listening side (transcript),
+# `SPOKEN` the speaking side (the answer that was rendered to speech).
+HEARD = "heard"
+SPOKEN = "spoken"
+
+# Default per-tag ANSI colours: heard vs spoken read distinctly (FC-9), in the
+# surface family's `[<colour>tag<reset>]` style (cf. hearth-chat's answer line).
+# Overridable via `PresentationConfig`; these are the shipped defaults.
+DEFAULT_TAG_COLORS = {HEARD: "36", SPOKEN: "35"}  # cyan / magenta
+
+
+def present_line(text: str, tag: str, colors: dict[str, str] = DEFAULT_TAG_COLORS) -> str:
+    """Pure (text, tag) -> styled line, tag in {heard, spoken}. Each tag gets its
+    own colour so heard and spoken text are visually distinct (FC-9). No device
+    needed -- presentation is a pure function of its arguments."""
+    color = colors[tag]
+    return f"[\033[{color}m{tag}\033[0m] {text}"
 
 
 def render(message: dict) -> str | None:
@@ -95,16 +120,33 @@ class AudioSurface:
 
     All stages, the source, the submit seam, and the presenter are injected so
     FTHR-029/030/031 supply real stages and tests supply doubles -- the spine
-    runs unchanged against either.
+    runs unchanged against either. The output seams (`renderer`/`player`) are
+    injected the same way: FTHR-036/038 supply real ones, tests supply doubles;
+    they default to the shipped doubles so the surface is a working tracer.
     """
 
-    def __init__(self, *, source, wake, endpointer, transcriber, submit, present) -> None:
+    def __init__(
+        self,
+        *,
+        source,
+        wake,
+        endpointer,
+        transcriber,
+        submit,
+        present,
+        renderer=None,
+        player=None,
+        colors=None,
+    ) -> None:
         self._source = source
         self._wake = wake
         self._endpointer = endpointer
         self._transcriber = transcriber
         self._submit = submit
         self._present = present
+        self._renderer = renderer if renderer is not None else MarkerRenderer()
+        self._player = player if player is not None else RecordingPlayer()
+        self._colors = colors if colors is not None else DEFAULT_TAG_COLORS
         self._utterances: asyncio.Queue[str] = asyncio.Queue()
 
     async def run(self) -> None:
@@ -148,13 +190,27 @@ class AudioSurface:
         while True:
             transcript = await self._utterances.get()
             try:
-                self._present(f"heard: {transcript}")
+                self._present(present_line(transcript, HEARD, self._colors))
                 for message in await self._submit(transcript):
-                    rendered = render(message)
-                    if rendered is not None:
-                        self._present(rendered)
+                    if message.get("type") == "answer":
+                        # Only the engine's final answer is spoken (FC-8); tool
+                        # activity and errors are presented but never rendered.
+                        self._speak(message.get("text", ""))
+                    else:
+                        shown = render(message)
+                        if shown is not None:
+                            self._present(shown)
             finally:
                 self._utterances.task_done()
+
+    def _speak(self, text: str) -> None:
+        """The speak call site: render the final answer to audio frames and play
+        them, then present it tagged `[spoken]`. This is the ONLY path to the
+        renderer -- tool activity never reaches here (FC-8), the same discipline
+        the gateway's whitelist enforces on the wire."""
+        frames = self._renderer.render(text)
+        self._player.play(frames)
+        self._present(present_line(text, SPOKEN, self._colors))
 
 
 async def _run(settings: AudioSettings) -> None:
@@ -164,17 +220,22 @@ async def _run(settings: AudioSettings) -> None:
         max_attempts=settings.retry.max_attempts,
         base_delay=settings.retry.base_delay_s,
     ) as websocket:
-        # NOTE: this feather ships no real wake/VAD/STT (AC-10). The runnable
-        # surface is wired with the trivial stage doubles as placeholders so the
-        # spine is a working tracer; FTHR-029/030/031 replace these three seams
-        # with real implementations through the same injection points.
+        # NOTE: this feather ships no real wake/VAD/STT or TTS/playback. The
+        # runnable surface is wired with the trivial doubles as placeholders so
+        # the spine is a working tracer; FTHR-029/030/031 replace the input seams
+        # and FTHR-036/038 the output seams (renderer/player) through the same
+        # injection points. The output device resolves to the system default
+        # when unset (FC-5); the absent-voice first-run error is FTHR-037.
         surface = AudioSurface(
             source=LiveAudioSource(device=settings.input_device),
             wake=ScriptedWakeDetector(),
             endpointer=ScriptedEndpointer(),
             transcriber=FixedTranscriber(""),
+            renderer=MarkerRenderer(),
+            player=RecordingPlayer(device=resolve_output_device(settings.output_device)),
             submit=make_submit(websocket),
             present=print,
+            colors=settings.presentation.colors(),
         )
         await surface.run()
 
