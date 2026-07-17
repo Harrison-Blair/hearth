@@ -2,7 +2,7 @@
 id: FTHR-037
 title: "Voice acquisition: required config, fetch-if-absent, first-run error"
 plumage: PLM-009
-status: egg
+status: fledged
 priority: P1
 depends_on: [FTHR-035]
 authored: 2026-07-17T16:09:56Z
