@@ -28,6 +28,28 @@ def _run_cli(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_config_error_does_not_print_secret_values(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "backend.yaml").write_text(
+        "providers:\n"
+        "  local:\n"
+        "    base_url: http://localhost:11434/v1\n"
+        "    api_key: super-secret-value\n"
+        "roles:\n"
+        "  fast:\n"
+        "    provider: local\n"
+        "    model: m\n",
+        encoding="utf-8",
+    )
+
+    result = _run_cli(tmp_path, "serve")
+
+    assert result.returncode != 0
+    assert "super-secret-value" not in result.stderr
+    assert "api_key" in result.stderr
+
+
 def test_serve_without_config_fails_clearly(tmp_path: Path) -> None:
     result = _run_cli(tmp_path, "serve")
 

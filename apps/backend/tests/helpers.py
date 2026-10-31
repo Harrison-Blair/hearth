@@ -106,15 +106,19 @@ async def running_backend(
     device_ids: tuple[str, ...] = ("desk",),
     store: DeviceStore | None = None,
     clock: Callable[[], datetime] = utc_now,
+    api_key_env: str | None = None,
 ) -> AsyncIterator[RunningBackend]:
     """Start a real backend against ``base_url`` on a random free port."""
     devices = store if store is not None else DeviceStore(tmp_path / "config" / "devices.yaml")
     tokens = {device_id: devices.add(device_id) for device_id in device_ids}
     events_dir = tmp_path / "events"
+    provider: dict[str, str] = {"base_url": base_url}
+    if api_key_env is not None:
+        provider["api_key_env"] = api_key_env
     config = BackendConfig.model_validate(
         {
             "server": {"host": "127.0.0.1", "port": 0},
-            "providers": {"stub": {"base_url": base_url}},
+            "providers": {"stub": provider},
             "roles": {"fast": {"provider": "stub", "model": "stub-model"}},
             "events": {"dir": str(events_dir)},
             "llm": {"timeout_s": 5},

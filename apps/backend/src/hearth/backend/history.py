@@ -44,6 +44,10 @@ class History:
         self._clock = clock
         self._turns: list[Turn] = []
 
+    def __len__(self) -> int:
+        """Return the number of retained completed turns."""
+        return len(self._turns)
+
     def context(
         self,
         device_id: str,
@@ -54,15 +58,19 @@ class History:
         """Build the LLM messages for a new turn from a history snapshot."""
         moment = self._clock() if now is None else now
         cutoff = moment - self._window
-        recent = [turn for turn in self._turns if turn.timestamp > cutoff]
-        selected = recent[-self._max_turns :]
+        self._prune(cutoff)
         messages: list[ChatMessage] = []
-        for turn in selected:
+        for turn in self._turns:
             messages.append({"role": "user", "content": f"[{turn.device_id}] {turn.user_text}"})
             messages.append({"role": "assistant", "content": turn.reply_text})
         messages.append({"role": "user", "content": f"[{device_id}] {text}"})
         return messages
 
     def append(self, turn: Turn) -> None:
-        """Append a completed turn to the household thread."""
+        """Append a completed turn and discard turns that cannot be selected."""
         self._turns.append(turn)
+        self._prune(self._clock() - self._window)
+
+    def _prune(self, cutoff: datetime) -> None:
+        recent = [turn for turn in self._turns if turn.timestamp > cutoff]
+        self._turns = recent[-self._max_turns :]

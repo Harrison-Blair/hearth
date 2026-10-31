@@ -12,6 +12,10 @@ from .config import BackendConfig, api_key_for
 from .history import ChatMessage
 
 
+class IncompleteStreamError(Exception):
+    """Raised when a provider ends a stream without a completion signal."""
+
+
 class LLMClient(Protocol):
     """A streaming chat completion client."""
 
@@ -48,13 +52,19 @@ class OpenAILLMClient:
             messages=request_messages,
             stream=True,
         )
+        completed = False
         try:
             async for chunk in stream:
                 if not chunk.choices:
                     continue
-                content = chunk.choices[0].delta.content
+                choice = chunk.choices[0]
+                content = choice.delta.content
                 if content:
                     yield content
+                if choice.finish_reason is not None:
+                    completed = True
+            if not completed:
+                raise IncompleteStreamError("LLM stream ended without a completion signal")
         finally:
             await stream.close()
 

@@ -43,6 +43,26 @@ def test_token_can_come_from_dotenv(tmp_path: Path) -> None:
     assert config.token == "from-dotenv"
 
 
+def test_invalid_backend_url_in_yaml_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "chat.yaml"
+    path.write_text(
+        "backend_url: http://127.0.0.1:8765\ndevice_id: desk\ntoken: token\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ChatConfigError, match="backend_url"):
+        load_config(path)
+
+
+def test_invalid_backend_url_env_override_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEARTH_CHAT__BACKEND_URL", "not-a-url")
+
+    with pytest.raises(ChatConfigError, match="backend_url"):
+        load_config(ROOT / "config" / "chat.example.yaml")
+
+
 def test_missing_chat_config_is_a_clear_error(tmp_path: Path) -> None:
     with pytest.raises(ChatConfigError, match="config file not found"):
         load_config(tmp_path / "missing.yaml")

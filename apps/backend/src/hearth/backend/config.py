@@ -5,9 +5,17 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import ClassVar, Self
+from urllib.parse import urlparse
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -25,7 +33,7 @@ class ConfigError(Exception):
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
 
 class ServerConfig(_Model):
@@ -38,6 +46,23 @@ class ProviderConfig(_Model):
     api_key_env: str | None = Field(
         default=None, description="Environment variable that holds the API key"
     )
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        try:
+            host = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("base_url has an invalid host or port") from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not host
+            or any(character.isspace() for character in value)
+        ):
+            raise ValueError("base_url must be an http(s) URL with a host")
+        return value
 
 
 class RoleConfig(_Model):
@@ -71,6 +96,7 @@ class BackendConfig(BaseSettings):
         env_file=".env",
         dotenv_filtering="only_existing",
         extra="forbid",
+        hide_input_in_errors=True,
     )
 
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -127,6 +153,33 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> BackendConfig:
         raise ConfigError(f"invalid YAML in {path}:\n{exc}") from exc
 
 
+def read_api_key(
+    provider: ProviderConfig,
+    *,
+    env_file: Path = Path(".env"),
+) -> str | None:
+    """Return a provider's key from the environment or .env, if present."""
+    if provider.api_key_env is None:
+        return None
+    key = os.environ.get(provider.api_key_env)
+    if not key and env_file.is_file():
+        key = dotenv_values(env_file).get(provider.api_key_env)
+    return key or None
+
+
+def configured_api_keys(
+    config: BackendConfig,
+    *,
+    env_file: Path = Path(".env"),
+) -> tuple[str, ...]:
+    """Return every resolvable provider key so error details can redact them."""
+    return tuple(
+        key
+        for provider in config.providers.values()
+        if (key := read_api_key(provider, env_file=env_file)) is not None
+    )
+
+
 def api_key_for(
     config: BackendConfig,
     role: str,
@@ -140,10 +193,8 @@ def api_key_for(
     if provider.api_key_env is None:
         return "not-needed"
 
-    key = os.environ.get(provider.api_key_env)
-    if not key and env_file.is_file():
-        key = dotenv_values(env_file).get(provider.api_key_env)
-    if not key:
+    key = read_api_key(provider, env_file=env_file)
+    if key is None:
         raise ConfigError(
             f"provider {role_config.provider!r} requires {provider.api_key_env}; "
             "set it in the environment or .env"
@@ -163,5 +214,7 @@ __all__ = [
     "RoleConfig",
     "ServerConfig",
     "api_key_for",
+    "configured_api_keys",
     "load_config",
+    "read_api_key",
 ]

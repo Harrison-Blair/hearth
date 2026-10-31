@@ -26,11 +26,12 @@ from hearth.protocol import (
 )
 
 from .clock import utc_now
-from .config import BackendConfig
+from .config import BackendConfig, configured_api_keys
 from .devices import DeviceError, DeviceStore
 from .events import EventLog
 from .history import History, Turn
 from .llm import LLMClient
+from .redaction import Redactor
 
 _SAFE_LLM_ERROR = "The assistant is unavailable. Try again."
 
@@ -56,6 +57,7 @@ class Backend:
             clock=clock,
         )
         self._events = EventLog(config.events.dir, clock=clock)
+        self._redactor = Redactor(configured_api_keys(config))
 
     def serve(self) -> Server:
         """Return the websockets server, usable as an async context manager."""
@@ -160,8 +162,8 @@ class Backend:
                 "llm_error",
                 device_id=device_id,
                 turn_id=message.turn_id,
-                error=f"{type(exc).__name__}: {exc}",
-                traceback=traceback.format_exc(),
+                error=self._redactor.redact(f"{type(exc).__name__}: {exc}"),
+                traceback=self._redactor.redact(traceback.format_exc()),
             )
             with contextlib.suppress(ConnectionClosed):
                 await self._send_error(

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import urlparse
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -30,11 +31,29 @@ class ChatConfig(BaseSettings):
         env_file=".env",
         dotenv_filtering="only_existing",
         extra="forbid",
+        hide_input_in_errors=True,
     )
 
     backend_url: str = Field(description="Backend WebSocket URL")
     device_id: str = Field(description="Registered device id")
     token: str = Field(description="Device token")
+
+    @field_validator("backend_url")
+    @classmethod
+    def _validate_backend_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        try:
+            host = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("backend_url has an invalid host or port") from exc
+        if (
+            parsed.scheme not in {"ws", "wss"}
+            or not host
+            or any(character.isspace() for character in value)
+        ):
+            raise ValueError("backend_url must be a ws(s) URL with a host")
+        return value
 
     _yaml_file: ClassVar[Path] = DEFAULT_CONFIG_PATH
 

@@ -9,6 +9,14 @@ from hearth.backend.history import History, Turn
 NOW = datetime(2025, 1, 1, 12, 0, tzinfo=UTC)
 
 
+class _MutableClock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
 def _turn(device_id: str, text: str, minutes_ago: int) -> Turn:
     return Turn(
         device_id=device_id,
@@ -73,3 +81,19 @@ def test_context_uses_injected_clock() -> None:
     messages = history.context("B", "now")
 
     assert messages[0] == {"role": "user", "content": "[A] recent"}
+
+
+def test_history_prunes_turns_that_cannot_be_selected() -> None:
+    clock = _MutableClock(NOW)
+    history = History(window_minutes=10, max_turns=3, clock=clock)
+
+    for index in range(100):
+        history.append(_turn("A", f"turn {index}", 0))
+
+    assert len(history) == 3
+
+    clock.now = NOW + timedelta(minutes=30)
+    messages = history.context("B", "now")
+
+    assert messages == [{"role": "user", "content": "[B] now"}]
+    assert len(history) == 0

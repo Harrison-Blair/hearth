@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
+import threading
 
 from websockets.exceptions import ConnectionClosed, InvalidURI
 
@@ -15,12 +17,41 @@ def _print_delta(text: str) -> None:
     print(text, end="", flush=True)
 
 
-async def _repl(config: ChatConfig) -> None:
-    async with ChatClient(config.backend_url, config.device_id, config.token) as client:
+def _deliver_line(
+    loop: asyncio.AbstractEventLoop,
+    lines: asyncio.Queue[str | None],
+    line: str | None,
+) -> None:
+    with contextlib.suppress(RuntimeError):
+        loop.call_soon_threadsafe(lines.put_nowait, line)
+
+
+def _start_stdin_reader(loop: asyncio.AbstractEventLoop) -> asyncio.Queue[str | None]:
+    """Read stdin on a daemon thread so Ctrl-C never waits for a blocked read."""
+    lines: asyncio.Queue[str | None] = asyncio.Queue()
+
+    def read_lines() -> None:
         while True:
             try:
-                line = await asyncio.to_thread(input, "> ")
-            except EOFError:
+                line = sys.stdin.readline()
+            except OSError, ValueError:
+                line = ""
+            if line == "":
+                _deliver_line(loop, lines, None)
+                return
+            _deliver_line(loop, lines, line.removesuffix("\n"))
+
+    threading.Thread(target=read_lines, name="hearth-chat-stdin", daemon=True).start()
+    return lines
+
+
+async def _repl(config: ChatConfig) -> None:
+    async with ChatClient(config.backend_url, config.device_id, config.token) as client:
+        lines = _start_stdin_reader(asyncio.get_running_loop())
+        while True:
+            print("> ", end="", flush=True)
+            line = await lines.get()
+            if line is None:
                 break
             if not line.strip():
                 continue

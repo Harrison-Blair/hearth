@@ -60,6 +60,32 @@ def test_dotenv_overrides_yaml_and_may_hold_a_key(tmp_path: Path) -> None:
     assert config.server.port == 7777
 
 
+def test_invalid_provider_url_in_yaml_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "backend.yaml"
+    path.write_text(
+        "providers:\n"
+        "  local:\n"
+        "    base_url: http://\n"
+        "roles:\n"
+        "  fast:\n"
+        "    provider: local\n"
+        "    model: m\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="base_url"):
+        load_config(path)
+
+
+def test_invalid_provider_url_env_override_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEARTH_PROVIDERS__LOCAL__BASE_URL", "ftp://example.com/v1")
+
+    with pytest.raises(ConfigError, match="base_url"):
+        load_config(ROOT / "config" / "backend.example.yaml")
+
+
 def test_missing_config_file_is_a_clear_error(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="config file not found"):
         load_config(tmp_path / "missing.yaml")
