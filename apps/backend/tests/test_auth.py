@@ -42,6 +42,28 @@ async def test_wrong_token_closes_4401(tmp_path: Path) -> None:
         )
 
 
+async def test_rejected_auth_is_logged_without_the_token(tmp_path: Path) -> None:
+    token = "super-secret-token"
+    async with (
+        stub_llm(stream_handler(["unused"])) as base_url,
+        running_backend(tmp_path, base_url) as env,
+    ):
+        await _expect_close(
+            env.url,
+            serialize(HelloMessage(device_id="desk", token=token, protocol_version=1)),
+            CLOSE_UNAUTHORIZED,
+        )
+
+        files = list(env.events_dir.glob("*.jsonl"))
+        assert len(files) == 1
+        raw = files[0].read_text(encoding="utf-8")
+        records = [json.loads(line) for line in raw.splitlines()]
+
+    assert [record["event"] for record in records] == ["auth_rejected"]
+    assert records[0]["device_id"] == "desk"
+    assert token not in raw
+
+
 async def test_unknown_device_closes_4401(tmp_path: Path) -> None:
     async with (
         stub_llm(stream_handler(["unused"])) as base_url,

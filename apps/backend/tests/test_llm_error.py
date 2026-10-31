@@ -56,6 +56,8 @@ async def test_llm_error_reports_safe_error_and_serves_next_turn(tmp_path: Path)
         first = await _ask_for_error(websocket, "first", "first")
         assert first.code == "llm_unavailable"
         assert "400" not in first.message
+        assert "BadRequestError" not in first.message
+        assert "Traceback" not in first.message
 
         assert await ask(websocket, "second", "second") == "recovered"
 
@@ -67,4 +69,5 @@ async def test_llm_error_reports_safe_error_and_serves_next_turn(tmp_path: Path)
     assert llm_errors[0]["device_id"] == "desk"
     assert llm_errors[0]["turn_id"] == first.turn_id
     assert llm_errors[0]["error"]
+    assert llm_errors[0]["traceback"]
     assert "BadRequestError" in llm_errors[0]["error"]
