@@ -49,6 +49,17 @@ def test_environment_overrides_nested_yaml(
     assert config.providers["local"].base_url == "http://env.example/v1"
 
 
+def test_dotenv_overrides_yaml_and_may_hold_a_key(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "HEARTH_SERVER__PORT=7777\nOPENROUTER_API_KEY=not-a-config-field\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(ROOT / "config" / "backend.example.yaml")
+
+    assert config.server.port == 7777
+
+
 def test_missing_config_file_is_a_clear_error(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="config file not found"):
         load_config(tmp_path / "missing.yaml")
@@ -60,6 +71,21 @@ def test_invalid_yaml_is_a_clear_error(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="invalid YAML"):
         load_config(path)
+
+
+def test_api_key_field_in_yaml_is_rejected() -> None:
+    with pytest.raises(ValueError, match="api_key"):
+        BackendConfig.model_validate(
+            {
+                "providers": {
+                    "remote": {
+                        "base_url": "https://example.invalid/v1",
+                        "api_key": "not-allowed-in-yaml",
+                    }
+                },
+                "roles": {"fast": {"provider": "remote", "model": "m"}},
+            }
+        )
 
 
 def test_unknown_role_provider_fails_validation() -> None:
@@ -88,7 +114,7 @@ def _keyed_config() -> BackendConfig:
             "providers": {
                 "remote": {
                     "base_url": "https://example.invalid/v1",
-                    "api_key_env": "HEARTH_TEST_API_KEY",
+                    "api_key_env": "TEST_API_KEY",
                 }
             },
             "roles": {"fast": {"provider": "remote", "model": "m"}},
@@ -99,7 +125,7 @@ def _keyed_config() -> BackendConfig:
 def test_api_key_comes_from_the_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("HEARTH_TEST_API_KEY", "from-environment")
+    monkeypatch.setenv("TEST_API_KEY", "from-environment")
     assert api_key_for(_keyed_config(), "fast") == "from-environment"
 
 
@@ -107,9 +133,9 @@ def test_api_key_can_come_from_dotenv(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("HEARTH_TEST_API_KEY", raising=False)
+    monkeypatch.delenv("TEST_API_KEY", raising=False)
     env_file = tmp_path / ".env"
-    env_file.write_text("HEARTH_TEST_API_KEY=from-dotenv\n", encoding="utf-8")
+    env_file.write_text("TEST_API_KEY=from-dotenv\n", encoding="utf-8")
 
     assert api_key_for(_keyed_config(), "fast", env_file=env_file) == "from-dotenv"
 
@@ -118,9 +144,9 @@ def test_missing_api_key_is_a_clear_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("HEARTH_TEST_API_KEY", raising=False)
+    monkeypatch.delenv("TEST_API_KEY", raising=False)
 
-    with pytest.raises(ConfigError, match="HEARTH_TEST_API_KEY"):
+    with pytest.raises(ConfigError, match="TEST_API_KEY"):
         api_key_for(_keyed_config(), "fast", env_file=tmp_path / "absent.env")
 
 

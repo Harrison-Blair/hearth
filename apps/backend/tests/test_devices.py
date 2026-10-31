@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import subprocess
 import sys
@@ -71,7 +72,7 @@ async def test_add_device_stores_hash_and_remove_rejects_token(tmp_path: Path) -
                 serialize(HelloMessage(device_id="desk", token=token, protocol_version=1))
             )
             with pytest.raises(ConnectionClosed) as closed:
-                await websocket.recv()
+                await asyncio.wait_for(websocket.recv(), timeout=5)
         received = closed.value.rcvd
         assert received is not None
         assert received.code == CLOSE_UNAUTHORIZED

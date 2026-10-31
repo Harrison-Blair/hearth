@@ -35,6 +35,14 @@ def test_token_can_come_from_environment(
     assert config.token == "from-environment"
 
 
+def test_token_can_come_from_dotenv(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("HEARTH_CHAT__TOKEN=from-dotenv\n", encoding="utf-8")
+
+    config = load_config(ROOT / "config" / "chat.example.yaml")
+
+    assert config.token == "from-dotenv"
+
+
 def test_missing_chat_config_is_a_clear_error(tmp_path: Path) -> None:
     with pytest.raises(ChatConfigError, match="config file not found"):
         load_config(tmp_path / "missing.yaml")

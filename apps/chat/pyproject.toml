@@ -5,7 +5,7 @@ description = "Console chat client for hearth"
 requires-python = ">=3.14"
 dependencies = [
     "hearth-protocol",
-    "pydantic-settings>=2.10",
+    "pydantic-settings>=2.16",
     "pyyaml>=6.0",
     "websockets>=15.0",
 ]

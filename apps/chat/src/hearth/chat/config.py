@@ -28,6 +28,7 @@ class ChatConfig(BaseSettings):
         env_prefix="HEARTH_CHAT__",
         env_nested_delimiter="__",
         env_file=".env",
+        dotenv_filtering="only_existing",
         extra="forbid",
     )
 

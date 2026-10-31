@@ -275,7 +275,7 @@ requires-dist = [
     { name = "hearth-protocol", editable = "libs/protocol" },
     { name = "openai", specifier = ">=2.0" },
     { name = "pydantic", specifier = ">=2.12" },
-    { name = "pydantic-settings", specifier = ">=2.10" },
+    { name = "pydantic-settings", specifier = ">=2.16" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "websockets", specifier = ">=15.0" },
@@ -295,7 +295,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "hearth-protocol", editable = "libs/protocol" },
-    { name = "pydantic-settings", specifier = ">=2.10" },
+    { name = "pydantic-settings", specifier = ">=2.16" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "websockets", specifier = ">=15.0" },
 ]

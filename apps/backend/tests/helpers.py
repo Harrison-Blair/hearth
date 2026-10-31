@@ -45,17 +45,10 @@ def sse_chunk(content: str | None, finish_reason: str | None = None) -> bytes:
     return f"data: {json.dumps(payload)}\n\n".encode()
 
 
-async def write_sse(
-    response: web.StreamResponse,
-    pieces: list[str],
-    *,
-    delay: float = 0.0,
-) -> None:
+async def write_sse(response: web.StreamResponse, pieces: list[str]) -> None:
     """Write a complete streamed chat completion to an aiohttp response."""
     for piece in pieces:
         await response.write(sse_chunk(piece))
-        if delay:
-            await asyncio.sleep(delay)
     await response.write(sse_chunk(None, finish_reason="stop"))
     await response.write(b"data: [DONE]\n\n")
     await response.write_eof()
@@ -64,8 +57,6 @@ async def write_sse(
 def stream_handler(
     pieces: list[str],
     *,
-    status: int = 200,
-    delay: float = 0.0,
     requests: list[dict[str, Any]] | None = None,
 ) -> StubHandler:
     """Return a handler that streams ``pieces`` as an OpenAI-compatible reply."""
@@ -74,11 +65,9 @@ def stream_handler(
         body: dict[str, Any] = await request.json()
         if requests is not None:
             requests.append(body)
-        if status != 200:
-            return web.Response(status=status, text="stub LLM failure")
         response = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
         await response.prepare(request)
-        await write_sse(response, pieces, delay=delay)
+        await write_sse(response, pieces)
         return response
 
     return handler
@@ -106,9 +95,7 @@ class RunningBackend:
 
     url: str
     tokens: dict[str, str]
-    store: DeviceStore
     events_dir: Path
-    config: BackendConfig
 
 
 @asynccontextmanager
@@ -119,8 +106,6 @@ async def running_backend(
     device_ids: tuple[str, ...] = ("desk",),
     store: DeviceStore | None = None,
     clock: Callable[[], datetime] = utc_now,
-    window_minutes: int = 10,
-    max_turns: int = 20,
 ) -> AsyncIterator[RunningBackend]:
     """Start a real backend against ``base_url`` on a random free port."""
     devices = store if store is not None else DeviceStore(tmp_path / "config" / "devices.yaml")
@@ -131,7 +116,6 @@ async def running_backend(
             "server": {"host": "127.0.0.1", "port": 0},
             "providers": {"stub": {"base_url": base_url}},
             "roles": {"fast": {"provider": "stub", "model": "stub-model"}},
-            "history": {"window_minutes": window_minutes, "max_turns": max_turns},
             "events": {"dir": str(events_dir)},
             "llm": {"timeout_s": 5},
         }
@@ -146,9 +130,7 @@ async def running_backend(
             yield RunningBackend(
                 url=f"ws://127.0.0.1:{port}",
                 tokens=tokens,
-                store=devices,
                 events_dir=events_dir,
-                config=config,
             )
     finally:
         await llm.aclose()
@@ -178,7 +160,7 @@ async def ask(websocket: ClientConnection, turn_id: str, text: str) -> str:
     await websocket.send(serialize(UserTextMessage(turn_id=turn_id, text=text)))
     pieces: list[str] = []
     while True:
-        message = parse_server_message(await websocket.recv())
+        message = parse_server_message(await asyncio.wait_for(websocket.recv(), timeout=10))
         if isinstance(message, ReplyDeltaMessage) and message.turn_id == turn_id:
             pieces.append(message.text)
         elif isinstance(message, ReplyDoneMessage) and message.turn_id == turn_id:

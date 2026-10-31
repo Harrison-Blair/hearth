@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -23,7 +24,7 @@ async def _expect_close(url: str, frame: str, code: int) -> None:
     async with connect(url) as websocket:
         await websocket.send(frame)
         with pytest.raises(ConnectionClosed) as closed:
-            await websocket.recv()
+            await asyncio.wait_for(websocket.recv(), timeout=5)
     received = closed.value.rcvd
     assert received is not None
     assert received.code == code

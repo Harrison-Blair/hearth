@@ -58,4 +58,5 @@ async def test_event_log_has_expected_events_and_is_append_only(tmp_path: Path) 
     asked = [record for record in records if record["event"] == "user_text"]
     replies = [record for record in records if record["event"] == "reply"]
     assert [record["turn_id"] for record in asked] == ["t1", "t2"]
+    assert [record["text"] for record in asked] == ["ping", "ping again"]
     assert [record["text"] for record in replies] == ["pong", "pong"]

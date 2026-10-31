@@ -69,6 +69,7 @@ class BackendConfig(BaseSettings):
         env_prefix="HEARTH_",
         env_nested_delimiter="__",
         env_file=".env",
+        dotenv_filtering="only_existing",
         extra="forbid",
     )
 

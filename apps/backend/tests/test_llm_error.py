@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from hearth.protocol import (
 async def _ask_for_error(websocket: ClientConnection, turn_id: str, text: str) -> ErrorMessage:
     await websocket.send(serialize(UserTextMessage(turn_id=turn_id, text=text)))
     while True:
-        message = parse_server_message(await websocket.recv())
+        message = parse_server_message(await asyncio.wait_for(websocket.recv(), timeout=5))
         if isinstance(message, ErrorMessage):
             return message
         if isinstance(message, ReplyDoneMessage):

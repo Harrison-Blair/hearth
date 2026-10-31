@@ -7,7 +7,7 @@ dependencies = [
     "hearth-protocol",
     "openai>=2.0",
     "pydantic>=2.12",
-    "pydantic-settings>=2.10",
+    "pydantic-settings>=2.16",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
     "websockets>=15.0",

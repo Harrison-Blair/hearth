@@ -114,7 +114,12 @@ class Backend:
                             websocket, None, "bad_message", "Unexpected message."
                         )
                         continue
-                    self._events.write("user_text", device_id=device_id, turn_id=message.turn_id)
+                    self._events.write(
+                        "user_text",
+                        device_id=device_id,
+                        turn_id=message.turn_id,
+                        text=message.text,
+                    )
                     task = asyncio.create_task(self._run_turn(websocket, device_id, message))
                     tasks.add(task)
                     task.add_done_callback(tasks.discard)
