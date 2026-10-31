@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import ClassVar, Self
 from urllib.parse import urlparse
@@ -30,6 +31,14 @@ DEFAULT_DEVICES_PATH = Path("config/devices.yaml")
 
 class ConfigError(Exception):
     """Raised when the configuration cannot be loaded or is not usable."""
+
+
+_CONFIG_NAME_PATTERN = re.compile(r"[a-z0-9_-]+")
+
+
+def _validate_config_map_name(kind: str, name: str) -> None:
+    if _CONFIG_NAME_PATTERN.fullmatch(name) is None:
+        raise ValueError(f'{kind} name "{name}" must match [a-z0-9_-]+')
 
 
 class _Model(BaseModel):
@@ -109,7 +118,11 @@ class BackendConfig(BaseSettings):
     _yaml_file: ClassVar[Path] = DEFAULT_CONFIG_PATH
 
     @model_validator(mode="after")
-    def _check_roles(self) -> Self:
+    def _validate_config(self) -> Self:
+        for provider_name in self.providers:
+            _validate_config_map_name("provider", provider_name)
+        for role_name in self.roles:
+            _validate_config_map_name("role", role_name)
         if "fast" not in self.roles:
             raise ValueError("roles.fast is required")
         for name, role in self.roles.items():

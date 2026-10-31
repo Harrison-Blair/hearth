@@ -35,6 +35,56 @@ def test_backend_example_has_comments_and_loads() -> None:
     assert config.history.max_turns == 20
 
 
+def test_lowercase_provider_name_env_override_reaches_selected_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEARTH_PROVIDERS__LOCAL__BASE_URL", "https://env.example/v1")
+
+    config = load_config(ROOT / "config" / "backend.example.yaml")
+    role = config.roles["fast"]
+
+    assert set(config.providers) == {"local", "openrouter"}
+    assert role.provider == "local"
+    assert config.providers[role.provider].base_url == "https://env.example/v1"
+
+
+def test_mixed_case_provider_name_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "backend.yaml"
+    path.write_text(
+        "providers:\n"
+        "  OpenRouter:\n"
+        "    base_url: https://old.example/v1\n"
+        "roles:\n"
+        "  fast:\n"
+        "    provider: OpenRouter\n"
+        "    model: m\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match='provider name "OpenRouter" must match'):
+        load_config(path)
+
+
+def test_mixed_case_role_name_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "backend.yaml"
+    path.write_text(
+        "providers:\n"
+        "  local:\n"
+        "    base_url: http://localhost:11434/v1\n"
+        "roles:\n"
+        "  fast:\n"
+        "    provider: local\n"
+        "    model: m\n"
+        "  Fast:\n"
+        "    provider: local\n"
+        "    model: m\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match='role name "Fast" must match'):
+        load_config(path)
+
+
 def test_environment_overrides_nested_yaml(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
