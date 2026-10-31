@@ -33,12 +33,13 @@ class ConfigError(Exception):
     """Raised when the configuration cannot be loaded or is not usable."""
 
 
-_CONFIG_NAME_PATTERN = re.compile(r"[a-z0-9_-]+")
+_CONFIG_NAME_RULE = r"[a-z0-9]+([_-][a-z0-9]+)*"
+_CONFIG_NAME_PATTERN = re.compile(_CONFIG_NAME_RULE)
 
 
 def _validate_config_map_name(kind: str, name: str) -> None:
     if _CONFIG_NAME_PATTERN.fullmatch(name) is None:
-        raise ValueError(f'{kind} name "{name}" must match [a-z0-9_-]+')
+        raise ValueError(f'{kind} name "{name}" must match {_CONFIG_NAME_RULE}')
 
 
 class _Model(BaseModel):

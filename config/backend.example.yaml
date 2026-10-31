@@ -3,13 +3,13 @@
 server:  # WebSocket listener
   host: 0.0.0.0  # interface to bind
   port: 8765  # TCP port; 0 asks the OS for a free port
-providers:  # provider names must match [a-z0-9_-]+; env overrides use the same name
+providers:  # provider names must match [a-z0-9]+([_-][a-z0-9]+)*; env overrides use the same name
   local:  # local Ollama server
     base_url: http://localhost:11434/v1  # API root
   openrouter:  # remote provider; not used by the walking skeleton
     base_url: https://openrouter.ai/api/v1  # API root
     api_key_env: OPENROUTER_API_KEY  # env var or .env key that holds the API key
-roles:  # role names must match [a-z0-9_-]+
+roles:  # role names must match [a-z0-9]+([_-][a-z0-9]+)*
   fast:  # role used for every turn in the skeleton
     provider: local  # key from providers
     model: gemma4:e2b  # model name sent to the provider

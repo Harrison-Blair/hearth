@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -83,6 +84,89 @@ def test_mixed_case_role_name_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match='role name "Fast" must match'):
         load_config(path)
+
+
+@pytest.mark.parametrize("name", ["my__local", "_x", "x-"])
+def test_invalid_provider_name_is_rejected(tmp_path: Path, name: str) -> None:
+    path = tmp_path / "backend.yaml"
+    path.write_text(
+        "providers:\n"
+        f'  "{name}":\n'
+        "    base_url: https://example.invalid/v1\n"
+        "roles:\n"
+        "  fast:\n"
+        f'    provider: "{name}"\n'
+        "    model: m\n",
+        encoding="utf-8",
+    )
+    expected = f'provider name "{name}" must match [a-z0-9]+([_-][a-z0-9]+)*'
+
+    with pytest.raises(ConfigError, match=re.escape(expected)):
+        load_config(path)
+
+
+@pytest.mark.parametrize("name", ["my__local", "_x", "x-"])
+def test_invalid_role_name_is_rejected(tmp_path: Path, name: str) -> None:
+    path = tmp_path / "backend.yaml"
+    path.write_text(
+        "providers:\n"
+        "  local:\n"
+        "    base_url: http://localhost:11434/v1\n"
+        "roles:\n"
+        "  fast:\n"
+        "    provider: local\n"
+        "    model: m\n"
+        f'  "{name}":\n'
+        "    provider: local\n"
+        "    model: m\n",
+        encoding="utf-8",
+    )
+    expected = f'role name "{name}" must match [a-z0-9]+([_-][a-z0-9]+)*'
+
+    with pytest.raises(ConfigError, match=re.escape(expected)):
+        load_config(path)
+
+
+@pytest.mark.parametrize("name", ["open-router", "lan_box"])
+def test_valid_provider_name_is_accepted(tmp_path: Path, name: str) -> None:
+    path = tmp_path / "backend.yaml"
+    path.write_text(
+        "providers:\n"
+        f'  "{name}":\n'
+        "    base_url: https://example.invalid/v1\n"
+        "roles:\n"
+        "  fast:\n"
+        f'    provider: "{name}"\n'
+        "    model: m\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert list(config.providers) == [name]
+    assert config.roles["fast"].provider == name
+
+
+@pytest.mark.parametrize("name", ["open-router", "lan_box"])
+def test_valid_role_name_is_accepted(tmp_path: Path, name: str) -> None:
+    path = tmp_path / "backend.yaml"
+    path.write_text(
+        "providers:\n"
+        "  local:\n"
+        "    base_url: http://localhost:11434/v1\n"
+        "roles:\n"
+        "  fast:\n"
+        "    provider: local\n"
+        "    model: m\n"
+        f'  "{name}":\n'
+        "    provider: local\n"
+        "    model: m\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert set(config.roles) == {"fast", name}
 
 
 def test_environment_overrides_nested_yaml(
