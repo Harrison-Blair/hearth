@@ -1,0 +1,15 @@
+# Local configuration and secrets
+config/backend.yaml
+config/chat.yaml
+config/devices.yaml
+.env
+
+# Runtime data
+data/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/

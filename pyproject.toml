@@ -1,0 +1,54 @@
+[project]
+name = "hearth"
+version = "0.1.0"
+description = "An Alexa-like personal assistant"
+requires-python = ">=3.14"
+dependencies = [
+    "hearth-backend",
+    "hearth-chat",
+    "hearth-protocol",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+hearth-backend = { workspace = true }
+hearth-chat = { workspace = true }
+hearth-protocol = { workspace = true }
+
+[tool.uv.workspace]
+members = ["libs/*", "apps/*"]
+
+[dependency-groups]
+dev = [
+    "aiohttp>=3.13",
+    "pyright>=1.1.400",
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.14",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["libs/protocol/src", "apps/backend/src", "apps/chat/src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hearth"]
+
+[tool.pyright]
+include = ["libs", "apps", "tests"]
+typeCheckingMode = "basic"
+pythonVersion = "3.14"
+venvPath = "."
+venv = ".venv"
+strict = ["libs/protocol/**"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["libs/protocol/tests", "apps/backend/tests", "apps/chat/tests", "tests"]

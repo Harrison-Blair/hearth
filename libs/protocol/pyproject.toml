@@ -1,0 +1,13 @@
+[project]
+name = "hearth-protocol"
+version = "0.1.0"
+description = "WebSocket protocol shared by hearth backend and clients"
+requires-python = ">=3.14"
+dependencies = ["pydantic>=2.12"]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "hearth.protocol"

@@ -1,0 +1,5 @@
+# Chat client configuration. Copy to config/chat.yaml; that file is gitignored.
+# HEARTH_CHAT__* environment variables override these values, e.g. HEARTH_CHAT__TOKEN.
+backend_url: ws://127.0.0.1:8765  # backend WebSocket URL
+device_id: desk  # device id registered with hearth-backend add-device
+token: replace-with-device-token  # device token printed by add-device

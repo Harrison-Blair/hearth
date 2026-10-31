@@ -1,0 +1,25 @@
+# Backend configuration. Copy to config/backend.yaml; that file is gitignored.
+# HEARTH_* environment variables override these values, nested with "__".
+server:  # WebSocket listener
+  host: 0.0.0.0  # interface to bind
+  port: 8765  # TCP port; 0 asks the OS for a free port
+providers:  # OpenAI-compatible API endpoints
+  local:  # local Ollama server
+    base_url: http://localhost:11434/v1  # API root
+  openrouter:  # remote provider; not used by the walking skeleton
+    base_url: https://openrouter.ai/api/v1  # API root
+    api_key_env: OPENROUTER_API_KEY  # env var or .env key that holds the API key
+roles:  # named model selections
+  fast:  # role used for every turn in the skeleton
+    provider: local  # key from providers
+    model: gemma4:e2b  # model name sent to the provider
+  slow:  # configured but not called by the skeleton
+    provider: openrouter  # key from providers
+    model: google/gemini-2.5-flash  # model name sent to the provider
+history:  # shared household conversation window
+  window_minutes: 10  # ignore turns older than this
+  max_turns: 20  # include at most this many recent turns
+events:  # append-only JSONL event log
+  dir: data/events  # directory for YYYY-MM-DD.jsonl files
+llm:  # LLM request settings
+  timeout_s: 30  # request timeout in seconds
